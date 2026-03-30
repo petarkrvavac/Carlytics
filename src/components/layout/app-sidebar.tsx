@@ -178,16 +178,10 @@ export function AppSidebar({
 
           <div className="mt-3 space-y-1.5 border-t border-border pt-3">
             <Link
-              href="/postavke?sekcija=profil"
+              href="/profil"
               className="block rounded-lg px-2.5 py-2 text-xs text-slate-700 transition hover:bg-sky-100 hover:text-sky-900 dark:text-muted dark:hover:bg-surface dark:hover:text-cyan-200"
             >
               Profil
-            </Link>
-            <Link
-              href="/postavke"
-              className="block rounded-lg px-2.5 py-2 text-xs text-slate-700 transition hover:bg-sky-100 hover:text-sky-900 dark:text-muted dark:hover:bg-surface dark:hover:text-cyan-200"
-            >
-              Postavke
             </Link>
 
             <div className="pt-1">

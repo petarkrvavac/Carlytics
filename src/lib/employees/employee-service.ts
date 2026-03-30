@@ -73,6 +73,18 @@ export interface EmployeeFormContext {
   isUsingFallbackData: boolean;
 }
 
+export interface EmployeeProfileDetails {
+  id: number;
+  firstName: string;
+  lastName: string;
+  username: string;
+  role: string;
+  email: string | null;
+  city: string | null;
+  county: string | null;
+  country: string | null;
+}
+
 function normalizeLabel(value: string | null | undefined) {
   if (!value) {
     return "";
@@ -120,6 +132,13 @@ function mapLocationByCity(params: {
 
 function compareByLabel(left: string, right: string) {
   return left.localeCompare(right, "hr-HR");
+}
+
+function resolveRoleLabel(rawRoleName: string | null | undefined) {
+  const normalizedRoleName = normalizeLabel(rawRoleName);
+  const fallbackRoleLabel = getRoleLabel(mapRoleNameToAppRole(normalizedRoleName));
+
+  return normalizedRoleName || fallbackRoleLabel;
 }
 
 export async function getEmployeesOverviewData(): Promise<EmployeesOverviewData> {
@@ -175,16 +194,13 @@ export async function getEmployeesOverviewData(): Promise<EmployeesOverviewData>
           ? locationByCityId.get(employee.mjesto_id)
           : null;
 
-        const normalizedRoleName = normalizeLabel(roleData?.naziv);
-        const fallbackRoleLabel = getRoleLabel(mapRoleNameToAppRole(normalizedRoleName));
-
         return {
           id: employee.id,
           firstName: normalizeLabel(employee.ime),
           lastName: normalizeLabel(employee.prezime),
           username: normalizeLabel(employee.korisnicko_ime),
           email: employee.email,
-          role: normalizedRoleName || fallbackRoleLabel,
+          role: resolveRoleLabel(roleData?.naziv),
           city: locationData?.city ?? null,
           county: locationData?.county ?? null,
           country: locationData?.country ?? null,
@@ -231,6 +247,109 @@ export async function getEmployeesOverviewData(): Promise<EmployeesOverviewData>
       isUsingFallbackData: true,
     };
   }
+}
+
+export async function getEmployeeProfileDetails(
+  employeeId: number,
+): Promise<EmployeeProfileDetails | null> {
+  const serviceRoleClient = createOptionalServiceRoleSupabaseClient();
+  const client = serviceRoleClient ?? createOptionalServerSupabaseClient();
+
+  if (!client) {
+    return null;
+  }
+
+  const { data: employee, error: employeeError } = await client
+    .from("zaposlenici")
+    .select("id, ime, prezime, email, korisnicko_ime, uloga_id, mjesto_id")
+    .eq("id", employeeId)
+    .maybeSingle();
+
+  if (employeeError) {
+    console.error("[carlytics] Neuspjelo čitanje profila zaposlenika:", employeeError.message);
+    return null;
+  }
+
+  if (!employee) {
+    return null;
+  }
+
+  let roleName: string | null = null;
+
+  if (employee.uloga_id) {
+    const { data: roleData, error: roleError } = await client
+      .from("uloge")
+      .select("naziv")
+      .eq("id", employee.uloga_id)
+      .maybeSingle();
+
+    if (roleError) {
+      console.error("[carlytics] Neuspjelo čitanje uloge za profil:", roleError.message);
+    } else {
+      roleName = roleData?.naziv ?? null;
+    }
+  }
+
+  let cityName: string | null = null;
+  let countyName: string | null = null;
+  let countryName: string | null = null;
+
+  if (employee.mjesto_id) {
+    const { data: cityData, error: cityError } = await client
+      .from("mjesta")
+      .select("naziv, zupanija_id")
+      .eq("id", employee.mjesto_id)
+      .maybeSingle();
+
+    if (cityError) {
+      console.error("[carlytics] Neuspjelo čitanje mjesta za profil:", cityError.message);
+    } else {
+      cityName = normalizeLabel(cityData?.naziv) || null;
+
+      if (cityData?.zupanija_id) {
+        const { data: countyData, error: countyError } = await client
+          .from("zupanije")
+          .select("naziv, drzava_id")
+          .eq("id", cityData.zupanija_id)
+          .maybeSingle();
+
+        if (countyError) {
+          console.error("[carlytics] Neuspjelo čitanje županije za profil:", countyError.message);
+        } else {
+          countyName = normalizeLabel(countyData?.naziv) || null;
+
+          if (countyData?.drzava_id) {
+            const { data: countryData, error: countryError } = await client
+              .from("drzave")
+              .select("naziv")
+              .eq("id", countyData.drzava_id)
+              .maybeSingle();
+
+            if (countryError) {
+              console.error(
+                "[carlytics] Neuspjelo čitanje države za profil:",
+                countryError.message,
+              );
+            } else {
+              countryName = normalizeLabel(countryData?.naziv) || null;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    id: employee.id,
+    firstName: normalizeLabel(employee.ime),
+    lastName: normalizeLabel(employee.prezime),
+    username: normalizeLabel(employee.korisnicko_ime),
+    role: resolveRoleLabel(roleName),
+    email: employee.email,
+    city: cityName,
+    county: countyName,
+    country: countryName,
+  };
 }
 
 export async function getEmployeeFormContext(): Promise<EmployeeFormContext> {

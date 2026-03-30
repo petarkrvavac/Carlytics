@@ -10,7 +10,7 @@ const desktopProtectedPrefixes = [
   "/servisni-centar",
   "/prijava-kvara",
   "/gorivo",
-  "/postavke",
+  "/profil",
 ];
 
 function isDesktopProtectedPath(pathname: string) {
@@ -67,7 +67,7 @@ export const config = {
     "/servisni-centar/:path*",
     "/prijava-kvara/:path*",
     "/gorivo/:path*",
-    "/postavke/:path*",
+    "/profil/:path*",
     "/m",
     "/m/:path*",
   ],

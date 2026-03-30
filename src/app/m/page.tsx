@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Fuel, TriangleAlert } from "lucide-react";
+import { Fuel, TriangleAlert, UserRound } from "lucide-react";
 
 import { WorkerAssignmentControls } from "@/components/mobile/worker-assignment-controls";
 import { Card } from "@/components/ui/card";
@@ -58,6 +58,21 @@ export default async function MobileHomePage() {
             <div>
               <p className="text-sm font-semibold text-cyan-800 dark:text-cyan-200">Unos goriva</p>
               <p className="text-xs text-cyan-700/90 dark:text-cyan-100/80">KM, litraža, cijena po litri</p>
+            </div>
+          </div>
+        </Link>
+
+        <Link
+          href="/m/profil"
+          className="rounded-2xl border border-emerald-300 bg-emerald-50 p-4 transition hover:border-emerald-400/70 hover:bg-emerald-100 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20"
+        >
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl border border-emerald-300 bg-emerald-100 p-2 dark:border-emerald-500/35 dark:bg-emerald-500/15">
+              <UserRound className="text-emerald-700 dark:text-emerald-300" size={20} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">Profil</p>
+              <p className="text-xs text-emerald-700/90 dark:text-emerald-100/80">Podaci o korisničkom računu</p>
             </div>
           </div>
         </Link>

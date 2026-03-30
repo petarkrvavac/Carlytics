@@ -1,15 +1,20 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 import { INITIAL_ACTION_STATE } from "@/lib/actions/action-state";
 import { submitDesktopFaultReportAction } from "@/lib/actions/fault-actions";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import type { FaultCategoryOption } from "@/lib/fleet/worker-context-service";
+import { cn } from "@/lib/utils/cn";
 
 interface DesktopFaultReportFormProps {
   vehicles: VehicleListItem[];
   categories: FaultCategoryOption[];
+  mode?: "page" | "modal";
+  onCancel?: () => void;
+  onSuccess?: () => void;
 }
 
 const PRIORITY_OPTIONS = [
@@ -19,16 +24,39 @@ const PRIORITY_OPTIONS = [
   { value: "kriticno", label: "Kritično" },
 ] as const;
 
-export function DesktopFaultReportForm({ vehicles, categories }: DesktopFaultReportFormProps) {
+export function DesktopFaultReportForm({
+  vehicles,
+  categories,
+  mode = "page",
+  onCancel,
+  onSuccess,
+}: DesktopFaultReportFormProps) {
+  const router = useRouter();
   const [state, formAction, isPending] = useActionState(
     submitDesktopFaultReportAction,
     INITIAL_ACTION_STATE,
   );
+  const isModalMode = mode === "modal";
 
   const isDisabled = vehicles.length === 0;
 
+  useEffect(() => {
+    if (state.status !== "success") {
+      return;
+    }
+
+    router.refresh();
+    onSuccess?.();
+  }, [onSuccess, router, state.status]);
+
   return (
-    <form action={formAction} className="space-y-3 rounded-2xl border border-border bg-surface/90 p-4">
+    <form
+      action={formAction}
+      className={cn(
+        "space-y-3 rounded-2xl border border-border bg-surface/90 p-4",
+        isModalMode && "min-h-0 overflow-y-auto",
+      )}
+    >
       <div className="grid gap-3 lg:grid-cols-2">
         <label className="text-xs uppercase tracking-[0.2em] text-muted lg:col-span-2">
           Vozilo
@@ -124,7 +152,17 @@ export function DesktopFaultReportForm({ vehicles, categories }: DesktopFaultRep
         </div>
       ) : null}
 
-      <div className="flex justify-end">
+      <div className={cn("flex justify-end", onCancel && "gap-2") }>
+        {onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex h-10 items-center rounded-xl border border-border bg-surface px-4 text-sm text-foreground transition hover:border-cyan-500/45 hover:text-cyan-200"
+          >
+            Odustani
+          </button>
+        ) : null}
+
         <button
           type="submit"
           disabled={isPending || isDisabled}
