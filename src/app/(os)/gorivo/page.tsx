@@ -35,9 +35,9 @@ export default async function GorivoPage() {
             <FallbackChip isUsingFallbackData={operationsData.isUsingFallbackData} />
             <Link
               href="/m/gorivo"
-              className="inline-flex h-10 items-center rounded-xl border border-cyan-500/35 bg-cyan-500/15 px-4 text-sm font-medium text-cyan-200 transition hover:border-cyan-400/70 hover:bg-cyan-500/20"
+              className="inline-flex h-10 items-center rounded-xl border border-cyan-300 bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
             >
-              Mobilni unos goriva
+              Unos goriva
             </Link>
           </>
         }

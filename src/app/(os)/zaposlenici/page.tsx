@@ -1,19 +1,10 @@
 import { EmployeesSectionContent } from "@/components/employees/employees-section-content";
-import {
-  getEmployeeFormContext,
-  getEmployeesOverviewData,
-} from "@/lib/employees/employee-service";
+import { getEmployeesOverviewData } from "@/lib/employees/employee-service";
 
 export default async function ZaposleniciPage() {
-  const [overviewData, formContext] = await Promise.all([
-    getEmployeesOverviewData(),
-    getEmployeeFormContext(),
-  ]);
+  const overviewData = await getEmployeesOverviewData();
 
   return (
-    <EmployeesSectionContent
-      overviewData={overviewData}
-      formContext={formContext}
-    />
+    <EmployeesSectionContent overviewData={overviewData} />
   );
 }

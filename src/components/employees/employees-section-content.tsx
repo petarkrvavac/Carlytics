@@ -1,7 +1,8 @@
 "use client";
 
-import { SlidersHorizontal, Plus, X } from "lucide-react";
+import { Loader2, Plus, RefreshCcw, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { z } from "zod";
 
 import { updateEmployeeActivationAction } from "@/lib/actions/employee-actions";
 import type {
@@ -18,11 +19,41 @@ import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils/cn";
 
 type EmployeeStatusFilter = "aktivni" | "deaktivirani" | "svi";
+type FormContextLoadStatus = "idle" | "loading" | "ready" | "error";
 
 interface EmployeesSectionContentProps {
   overviewData: EmployeesOverviewData;
-  formContext: EmployeeFormContext;
 }
+
+const employeeFormContextSchema = z.object({
+  roleOptions: z.array(
+    z.object({
+      id: z.number(),
+      label: z.string(),
+    }),
+  ),
+  countryOptions: z.array(
+    z.object({
+      id: z.number(),
+      label: z.string(),
+    }),
+  ),
+  countyOptions: z.array(
+    z.object({
+      id: z.number(),
+      countryId: z.number().nullable(),
+      label: z.string(),
+    }),
+  ),
+  cityOptions: z.array(
+    z.object({
+      id: z.number(),
+      countyId: z.number().nullable(),
+      label: z.string(),
+    }),
+  ),
+  isUsingFallbackData: z.boolean(),
+});
 
 const FILTERS: Array<{ key: EmployeeStatusFilter; label: string }> = [
   { key: "aktivni", label: "Aktivni" },
@@ -45,18 +76,53 @@ function getVisibleEmployees(
   return employees;
 }
 
+function hasErrorMessage(value: unknown): value is { message: string } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as { message?: unknown };
+  return typeof candidate.message === "string";
+}
+
+function AddEmployeeFormSkeleton() {
+  return (
+    <div className="space-y-4 rounded-2xl border border-border bg-surface/95 p-5">
+      <div className="grid gap-3 md:grid-cols-2">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div
+            key={`employee-modal-field-${index}`}
+            className={`space-y-2 ${index === 2 || index === 5 ? "md:col-span-2" : ""}`}
+          >
+            <div className="skeleton-shimmer h-3 w-24 animate-pulse rounded-md bg-surface-elevated" />
+            <div className="skeleton-shimmer h-10 w-full animate-pulse rounded-xl bg-surface-elevated" />
+          </div>
+        ))}
+      </div>
+
+      <div className="border-t border-border pt-3">
+        <div className="skeleton-shimmer ml-auto h-10 w-40 animate-pulse rounded-xl bg-surface-elevated" />
+      </div>
+    </div>
+  );
+}
+
 export function EmployeesSectionContent({
   overviewData,
-  formContext,
 }: EmployeesSectionContentProps) {
   const [activeFilter, setActiveFilter] =
     useState<EmployeeStatusFilter>("aktivni");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formContext, setFormContext] = useState<EmployeeFormContext | null>(null);
+  const [formContextStatus, setFormContextStatus] = useState<FormContextLoadStatus>("idle");
+  const [formContextError, setFormContextError] = useState("");
 
   const visibleEmployees = useMemo(
     () => getVisibleEmployees(overviewData.employees, activeFilter),
     [activeFilter, overviewData.employees],
   );
+
+  const isFormContextLoading = formContextStatus === "loading";
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -71,6 +137,58 @@ export function EmployeesSectionContent({
     };
   }, [isModalOpen]);
 
+  async function loadFormContext() {
+    setFormContextStatus("loading");
+    setFormContextError("");
+
+    try {
+      const response = await fetch("/api/zaposlenici/form-context", {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      });
+
+      const payload: unknown = await response.json();
+
+      if (!response.ok) {
+        if (hasErrorMessage(payload)) {
+          throw new Error(payload.message);
+        }
+
+        throw new Error("Neuspjelo dohvaćanje lookup podataka za formu zaposlenika.");
+      }
+
+      const parsedPayload = employeeFormContextSchema.safeParse(payload);
+
+      if (!parsedPayload.success) {
+        throw new Error("Primljen je neispravan format podataka za formu zaposlenika.");
+      }
+
+      setFormContext(parsedPayload.data);
+      setFormContextStatus("ready");
+    } catch (error) {
+      setFormContext(null);
+      setFormContextStatus("error");
+      setFormContextError(
+        error instanceof Error
+          ? error.message
+          : "Trenutno nije moguće učitati lookup podatke.",
+      );
+    }
+  }
+
+  function openAddEmployeeModal() {
+    setIsModalOpen(true);
+
+    if (formContext || isFormContextLoading) {
+      return;
+    }
+
+    void loadFormContext();
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -83,10 +201,15 @@ export function EmployeesSectionContent({
             <Badge variant="danger">Deaktivirani: {overviewData.metrics.deactivated}</Badge>
             <button
               type="button"
-              onClick={() => setIsModalOpen(true)}
+              onClick={openAddEmployeeModal}
+              disabled={isFormContextLoading}
               className="inline-flex h-10 items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
             >
-              <Plus size={15} />
+              {isFormContextLoading ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Plus size={15} />
+              )}
               Dodaj zaposlenika
             </button>
           </>
@@ -123,7 +246,7 @@ export function EmployeesSectionContent({
           title="Nema zaposlenika za odabrani filter"
           description="Promijeni filter ili dodaj novog zaposlenika kroz invitation tok."
           actionLabel="Dodaj zaposlenika"
-          onActionClick={() => setIsModalOpen(true)}
+          onActionClick={openAddEmployeeModal}
         />
       ) : (
         <Card className="p-0">
@@ -227,10 +350,28 @@ export function EmployeesSectionContent({
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
-              <AddEmployeeForm
-                formContext={formContext}
-                onCancel={() => setIsModalOpen(false)}
-              />
+              {formContextStatus === "loading" ? (
+                <AddEmployeeFormSkeleton />
+              ) : formContextStatus === "error" ? (
+                <div className="space-y-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
+                  <p>{formContextError || "Dohvaćanje podataka za formu nije uspjelo."}</p>
+                  <button
+                    type="button"
+                    onClick={() => void loadFormContext()}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-rose-400/45 bg-rose-500/15 px-3 text-xs font-semibold uppercase tracking-[0.14em] text-rose-100 transition hover:bg-rose-500/25"
+                  >
+                    <RefreshCcw size={13} />
+                    Pokušaj ponovno
+                  </button>
+                </div>
+              ) : formContext ? (
+                <AddEmployeeForm
+                  formContext={formContext}
+                  onCancel={() => setIsModalOpen(false)}
+                />
+              ) : (
+                <AddEmployeeFormSkeleton />
+              )}
             </div>
           </div>
         </div>

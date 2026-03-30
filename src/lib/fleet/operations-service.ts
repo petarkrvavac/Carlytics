@@ -102,6 +102,22 @@ export interface OperationsOverviewData {
   isUsingFallbackData: boolean;
 }
 
+export interface ServiceCenterHeaderData {
+  openServices: number;
+  openFaults: number;
+  isUsingFallbackData: boolean;
+}
+
+export interface ServiceCenterTimelineData {
+  serviceTimeline: ServiceTimelineItem[];
+  isUsingFallbackData: boolean;
+}
+
+export interface ServiceCenterPriorityData {
+  openFaults: FaultQueueItem[];
+  isUsingFallbackData: boolean;
+}
+
 function parseDate(value: string | null | undefined) {
   if (!value) {
     return null;
@@ -132,6 +148,28 @@ function getFallbackData(): OperationsOverviewData {
       averageFuelPrice30d: 0,
       openServices: 0,
     },
+    isUsingFallbackData: true,
+  };
+}
+
+function getServiceCenterHeaderFallbackData(): ServiceCenterHeaderData {
+  return {
+    openServices: 0,
+    openFaults: 0,
+    isUsingFallbackData: true,
+  };
+}
+
+function getServiceCenterTimelineFallbackData(): ServiceCenterTimelineData {
+  return {
+    serviceTimeline: [],
+    isUsingFallbackData: true,
+  };
+}
+
+function getServiceCenterPriorityFallbackData(): ServiceCenterPriorityData {
+  return {
+    openFaults: [],
     isUsingFallbackData: true,
   };
 }
@@ -288,6 +326,222 @@ function compareDatesDesc(leftIso: string | null | undefined, rightIso: string |
   const leftTime = parseDate(leftIso)?.getTime() ?? 0;
   const rightTime = parseDate(rightIso)?.getTime() ?? 0;
   return rightTime - leftTime;
+}
+
+export async function getServiceCenterHeaderData(): Promise<ServiceCenterHeaderData> {
+  const serviceRoleClient = createOptionalServiceRoleSupabaseClient();
+  const client = serviceRoleClient ?? createOptionalServerSupabaseClient();
+
+  if (!client) {
+    return getServiceCenterHeaderFallbackData();
+  }
+
+  try {
+    const [servicesResult, faultsResult] = await Promise.all([
+      client.from("servisne_intervencije").select("id, datum_zavrsetka"),
+      client.from("prijave_kvarova").select("status_prijave"),
+    ] as const);
+
+    const queryError = [servicesResult.error, faultsResult.error].find((error) => Boolean(error));
+
+    if (queryError) {
+      throw queryError;
+    }
+
+    const serviceRows = servicesResult.data ?? [];
+    const faultRows = faultsResult.data ?? [];
+
+    return {
+      openServices: serviceRows.filter((service) => !service.datum_zavrsetka).length,
+      openFaults: faultRows.filter((fault) => isFaultOpen(fault.status_prijave)).length,
+      isUsingFallbackData: false,
+    };
+  } catch (error) {
+    console.error("[carlytics] Service center header fallback zbog greške:", error);
+
+    if (!serviceRoleClient) {
+      console.error(
+        "[carlytics] SUPABASE_SERVICE_ROLE_KEY nije postavljen; anon čitanje može biti ograničeno RLS pravilima.",
+      );
+    }
+
+    return getServiceCenterHeaderFallbackData();
+  }
+}
+
+export async function getServiceCenterTimelineData(): Promise<ServiceCenterTimelineData> {
+  const serviceRoleClient = createOptionalServiceRoleSupabaseClient();
+  const client = serviceRoleClient ?? createOptionalServerSupabaseClient();
+
+  if (!client) {
+    return getServiceCenterTimelineFallbackData();
+  }
+
+  try {
+    const [
+      vehiclesResult,
+      modelsResult,
+      manufacturersResult,
+      registrationsResult,
+      servicesResult,
+    ] = await Promise.all([
+      client.from("vozila").select("id, model_id, trenutna_km"),
+      client.from("modeli").select("id, naziv, proizvodjac_id"),
+      client.from("proizvodjaci").select("id, naziv"),
+      client
+        .from("registracije")
+        .select("vozilo_id, registracijska_oznaka, datum_isteka"),
+      client
+        .from("servisne_intervencije")
+        .select("id, datum_pocetka, datum_zavrsetka, vozilo_id, km_u_tom_trenutku, opis, cijena"),
+    ] as const);
+
+    const queryError = [
+      vehiclesResult.error,
+      modelsResult.error,
+      manufacturersResult.error,
+      registrationsResult.error,
+      servicesResult.error,
+    ].find((error) => Boolean(error));
+
+    if (queryError) {
+      throw queryError;
+    }
+
+    const vehicleLookup = buildVehicleLookup({
+      vehicles: vehiclesResult.data ?? [],
+      models: modelsResult.data ?? [],
+      manufacturers: manufacturersResult.data ?? [],
+      registrations: registrationsResult.data ?? [],
+    });
+
+    const serviceTimeline = (servicesResult.data ?? [])
+      .map<ServiceTimelineItem>((service) => {
+        const vehicle = service.vozilo_id ? vehicleLookup.get(service.vozilo_id) : null;
+
+        return {
+          id: service.id,
+          startedAtIso: service.datum_pocetka,
+          endedAtIso: service.datum_zavrsetka,
+          vehicleId: service.vozilo_id ?? null,
+          vehicleLabel: vehicle?.label ?? "Nepoznato vozilo",
+          plate: vehicle?.plate ?? "N/A",
+          kmAtMoment: service.km_u_tom_trenutku,
+          description: service.opis?.trim() || "Bez opisa zahvata",
+          cost: service.cijena ?? 0,
+          isOpen: !service.datum_zavrsetka,
+        };
+      })
+      .sort((left, right) => compareDatesDesc(left.startedAtIso, right.startedAtIso));
+
+    return {
+      serviceTimeline,
+      isUsingFallbackData: false,
+    };
+  } catch (error) {
+    console.error("[carlytics] Service center timeline fallback zbog greške:", error);
+
+    if (!serviceRoleClient) {
+      console.error(
+        "[carlytics] SUPABASE_SERVICE_ROLE_KEY nije postavljen; anon čitanje može biti ograničeno RLS pravilima.",
+      );
+    }
+
+    return getServiceCenterTimelineFallbackData();
+  }
+}
+
+export async function getServiceCenterPriorityData(): Promise<ServiceCenterPriorityData> {
+  const serviceRoleClient = createOptionalServiceRoleSupabaseClient();
+  const client = serviceRoleClient ?? createOptionalServerSupabaseClient();
+
+  if (!client) {
+    return getServiceCenterPriorityFallbackData();
+  }
+
+  try {
+    const [
+      vehiclesResult,
+      modelsResult,
+      manufacturersResult,
+      registrationsResult,
+      faultsResult,
+    ] = await Promise.all([
+      client.from("vozila").select("id, model_id, trenutna_km"),
+      client.from("modeli").select("id, naziv, proizvodjac_id"),
+      client.from("proizvodjaci").select("id, naziv"),
+      client
+        .from("registracije")
+        .select("vozilo_id, registracijska_oznaka, datum_isteka"),
+      client
+        .from("prijave_kvarova")
+        .select("id, datum_prijave, vozilo_id, opis_problema, hitnost, status_prijave"),
+    ] as const);
+
+    const queryError = [
+      vehiclesResult.error,
+      modelsResult.error,
+      manufacturersResult.error,
+      registrationsResult.error,
+      faultsResult.error,
+    ].find((error) => Boolean(error));
+
+    if (queryError) {
+      throw queryError;
+    }
+
+    const vehicleLookup = buildVehicleLookup({
+      vehicles: vehiclesResult.data ?? [],
+      models: modelsResult.data ?? [],
+      manufacturers: manufacturersResult.data ?? [],
+      registrations: registrationsResult.data ?? [],
+    });
+
+    const openFaults = (faultsResult.data ?? [])
+      .map<FaultQueueItem>((fault) => {
+        const vehicle = fault.vozilo_id ? vehicleLookup.get(fault.vozilo_id) : null;
+        const open = isFaultOpen(fault.status_prijave);
+
+        return {
+          id: fault.id,
+          reportedAtIso: fault.datum_prijave ?? new Date(0).toISOString(),
+          vehicleId: fault.vozilo_id ?? null,
+          vehicleLabel: vehicle?.label ?? "Nepoznato vozilo",
+          plate: vehicle?.plate ?? "N/A",
+          reporterName: "N/A",
+          description: fault.opis_problema,
+          priority: normalizeFaultPriority(fault.hitnost),
+          statusRaw: fault.status_prijave,
+          statusLabel: normalizeFaultStatusLabel(fault.status_prijave, open),
+          isOpen: open,
+        };
+      })
+      .filter((fault) => fault.isOpen)
+      .sort((left, right) => {
+        const priorityDiff = PRIORITY_RANK[left.priority] - PRIORITY_RANK[right.priority];
+
+        if (priorityDiff !== 0) {
+          return priorityDiff;
+        }
+
+        return compareDatesDesc(left.reportedAtIso, right.reportedAtIso);
+      });
+
+    return {
+      openFaults,
+      isUsingFallbackData: false,
+    };
+  } catch (error) {
+    console.error("[carlytics] Service center priority fallback zbog greške:", error);
+
+    if (!serviceRoleClient) {
+      console.error(
+        "[carlytics] SUPABASE_SERVICE_ROLE_KEY nije postavljen; anon čitanje može biti ograničeno RLS pravilima.",
+      );
+    }
+
+    return getServiceCenterPriorityFallbackData();
+  }
 }
 
 export async function getOperationsOverviewData(): Promise<OperationsOverviewData> {
