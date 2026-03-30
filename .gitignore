@@ -12,19 +12,42 @@
 
 # testing
 /coverage
+.nyc_output/
 
 # next.js
 /.next/
 /out/
+.turbo/
 
 # production
 /build
+/dist
 
 # misc
 .DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 *.pem
 
+# editors and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# caches
+.cache/
+.eslintcache
+.stylelintcache
+.sass-cache/
+.parcel-cache/
+.swc/
+
 # debug
+*.log
+logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -32,12 +55,24 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!.env.template
 
 # vercel
 .vercel
+
+# package manager local state
+.npm/
+.pnpm-store/
+.yarn-integrity
+
+# local history
+.history/
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 
 .github
+
+zavrsni.txt
