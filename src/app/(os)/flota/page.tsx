@@ -10,7 +10,7 @@ interface FlotaPageProps {
 }
 
 function resolveInitialFilter(value: string | undefined): FleetStatusFilter {
-  if (value === "slobodno" || value === "zauzeto" || value === "servis") {
+  if (value === "slobodno" || value === "zauzeto" || value === "servis" || value === "neaktivna") {
     return value;
   }
 

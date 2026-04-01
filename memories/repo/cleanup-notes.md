@@ -1,0 +1,4 @@
+- Supabase type regeneration command: node scripts/gen-supabase-types.mjs (no npm script alias).
+- In this Windows environment, rg command is unavailable in terminal; use editor search tools or PowerShell alternatives.
+- Legacy table prijave_kvarova should not appear in src/**; target table is servisne_intervencije.
+- Shared soft-delete/status filtering for interventions is centralized in src/lib/fleet/intervention-utils.ts.

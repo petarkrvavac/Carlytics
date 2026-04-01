@@ -90,7 +90,13 @@ export function WorkerAssignmentControls({
 
     lastRefreshKeyRef.current = refreshKey;
     router.refresh();
-  }, [assignState.message, assignState.status, releaseState.message, releaseState.status, router]);
+  }, [
+    assignState.message,
+    assignState.status,
+    releaseState.message,
+    releaseState.status,
+    router,
+  ]);
 
   if (activeContext) {
     return (
@@ -102,7 +108,35 @@ export function WorkerAssignmentControls({
           <span className="data-font"> - {activeContext.currentKm.toLocaleString("hr-HR")} km</span>
         </p>
 
-        <form action={releaseAction}>
+        <form
+          key={activeContext.assignmentId}
+          action={releaseAction}
+          className="space-y-2 rounded-xl border border-border bg-surface/90 p-3"
+        >
+          <label className="block text-xs uppercase tracking-[0.2em] text-muted">
+            Završna kilometraža
+            <input
+              type="number"
+              name="kmZavrsna"
+              disabled={isReleasing}
+              required
+              min={activeContext.currentKm}
+              step={1}
+              inputMode="numeric"
+              defaultValue={activeContext.currentKm}
+              className="mt-2 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted disabled:opacity-70"
+              placeholder={`Upiši minimalno ${activeContext.currentKm.toLocaleString("hr-HR")} km`}
+            />
+          </label>
+
+          <p className="text-xs text-muted">
+            Unos kilometraže je obavezan prije razduživanja.
+          </p>
+
+          {releaseState.fieldErrors?.kmZavrsna?.[0] ? (
+            <p className="text-xs text-rose-700 dark:text-rose-300">{releaseState.fieldErrors.kmZavrsna[0]}</p>
+          ) : null}
+
           <button
             type="submit"
             disabled={isReleasing}

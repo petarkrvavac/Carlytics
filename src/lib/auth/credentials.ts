@@ -62,7 +62,7 @@ async function resolveEmployeeRole(ulogaId: number | null) {
     createOptionalServiceRoleSupabaseClient() ?? createOptionalServerSupabaseClient();
 
   if (!client || !ulogaId) {
-    return "radnik" as const;
+    return "zaposlenik" as const;
   }
 
   const { data, error } = await client
@@ -73,7 +73,7 @@ async function resolveEmployeeRole(ulogaId: number | null) {
 
   if (error) {
     console.error("[carlytics] Neuspjelo čitanje uloge:", error.message);
-    return "radnik" as const;
+    return "zaposlenik" as const;
   }
 
   return mapRoleNameToAppRole(data?.naziv);

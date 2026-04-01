@@ -20,10 +20,16 @@ export interface VehicleManufacturerOption {
   label: string;
 }
 
+export interface VehicleFuelTypeOption {
+  id: number;
+  label: string;
+}
+
 export interface VehicleFormContext {
   modelOptions: VehicleModelOption[];
   statusOptions: VehicleStatusOption[];
   manufacturerOptions: VehicleManufacturerOption[];
+  fuelTypeOptions: VehicleFuelTypeOption[];
   isUsingFallbackData: boolean;
 }
 
@@ -36,20 +42,23 @@ export async function getVehicleFormContext(): Promise<VehicleFormContext> {
       modelOptions: [],
       statusOptions: [],
       manufacturerOptions: [],
+      fuelTypeOptions: [],
       isUsingFallbackData: true,
     };
   }
 
-  const [modelsResult, manufacturersResult, statusesResult] = await Promise.all([
+  const [modelsResult, manufacturersResult, statusesResult, fuelTypesResult] = await Promise.all([
     client.from("modeli").select("id, naziv, kapacitet_rezervoara, proizvodjac_id"),
     client.from("proizvodjaci").select("id, naziv"),
     client.from("statusi_vozila").select("id, naziv"),
+    client.from("tipovi_goriva").select("id, naziv"),
   ] as const);
 
   const queryError = [
     modelsResult.error,
     manufacturersResult.error,
     statusesResult.error,
+    fuelTypesResult.error,
   ].find((error) => Boolean(error));
 
   if (queryError) {
@@ -64,6 +73,7 @@ export async function getVehicleFormContext(): Promise<VehicleFormContext> {
       modelOptions: [],
       statusOptions: [],
       manufacturerOptions: [],
+      fuelTypeOptions: [],
       isUsingFallbackData: true,
     };
   }
@@ -108,10 +118,18 @@ export async function getVehicleFormContext(): Promise<VehicleFormContext> {
     }))
     .sort((left, right) => left.label.localeCompare(right.label, "hr"));
 
+  const fuelTypeOptions = (fuelTypesResult.data ?? [])
+    .map<VehicleFuelTypeOption>((fuelType) => ({
+      id: fuelType.id,
+      label: fuelType.naziv,
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, "hr"));
+
   return {
     modelOptions,
     statusOptions,
     manufacturerOptions,
+    fuelTypeOptions,
     isUsingFallbackData: false,
   };
 }

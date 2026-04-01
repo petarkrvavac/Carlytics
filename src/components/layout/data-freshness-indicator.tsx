@@ -9,7 +9,7 @@ import type { Database } from "@/types/database";
 
 const ALLOWED_SOURCE_TABLES = new Set([
   "evidencija_goriva",
-  "prijave_kvarova",
+  "servisne_intervencije",
   "zaduzenja",
 ]);
 
@@ -109,7 +109,7 @@ export function DataFreshnessIndicator({
           event: "INSERT",
           schema: "public",
           table: "app_events",
-          filter: "izvorna_tablica=in.(evidencija_goriva,prijave_kvarova,zaduzenja)",
+          filter: "izvorna_tablica=in.(evidencija_goriva,servisne_intervencije,zaduzenja)",
         },
         (payload) => {
           const eventData = payload.new as Database["public"]["Tables"]["app_events"]["Row"] | null;

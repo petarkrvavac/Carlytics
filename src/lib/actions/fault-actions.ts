@@ -6,9 +6,14 @@ import { z } from "zod";
 
 import type { ActionState } from "@/lib/actions/action-state";
 import { requireSessionUser } from "@/lib/auth/session";
+import { evaluateVehicleServiceDue } from "@/lib/fleet/service-due";
+import { applyInterventionVisibilityFilter } from "@/lib/fleet/intervention-utils";
 import { createOptionalServerSupabaseClient } from "@/lib/supabase/server";
 import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { getActiveWorkerVehicleContext } from "@/lib/fleet/worker-context-service";
+import type { Tables, TablesUpdate } from "@/types/database";
+
+type VehicleStatusRow = Tables<"statusi_vozila">;
 
 const faultFormSchema = z.object({
   opisProblema: z
@@ -28,29 +33,116 @@ const faultStatusUpdateSchema = z.object({
   statusPrijave: z.enum(["novo", "u_obradi", "zatvoreno"]),
 });
 
+const faultCloseCostSchema = z.preprocess(
+  (value) => {
+    if (typeof value === "string") {
+      return value.trim();
+    }
+
+    return "";
+  },
+  z
+    .string()
+    .min(1, "Cijena je obavezna pri zatvaranju prijave.")
+    .transform((value) => Number(value.replace(",", ".")))
+    .refine((value) => Number.isFinite(value), "Cijena mora biti broj.")
+    .refine((value) => value >= 0, "Cijena ne može biti negativna."),
+);
+
 function getDbClient() {
   return createOptionalServiceRoleSupabaseClient() ?? createOptionalServerSupabaseClient();
 }
 
-async function resolveFaultCategoryPrefix(
-  client: NonNullable<ReturnType<typeof getDbClient>>,
-  kategorijaId: number | null | undefined,
-) {
-  if (!kategorijaId) {
+function normalizeStatusName(statusName: string | null | undefined) {
+  if (!statusName) {
     return "";
   }
 
-  const { data: kategorijaData } = await client
-    .from("kategorije_kvarova")
-    .select("naziv")
-    .eq("id", kategorijaId)
+  return statusName.trim().toLowerCase();
+}
+
+async function resolveVehicleStatusId(
+  client: NonNullable<ReturnType<typeof getDbClient>>,
+  statusType: "slobodno" | "servis",
+) {
+  const { data, error } = await client.from("statusi_vozila").select("id, naziv");
+
+  if (error) {
+    console.error("[carlytics] Neuspješan dohvat statusa vozila:", error.message);
+    return null;
+  }
+
+  const statusRows = data ?? [];
+
+  const match = statusRows.find((status: VehicleStatusRow) => {
+    const normalized = normalizeStatusName(status.naziv);
+
+    if (statusType === "slobodno") {
+      return normalized.includes("slob");
+    }
+
+    return normalized.includes("serv");
+  });
+
+  return match?.id ?? null;
+}
+
+function resolveServiceTypeFromDescription(description: string) {
+  const normalized = description.toLowerCase();
+  const hasSmall = normalized.includes("mali");
+  const hasLarge = normalized.includes("veliki");
+
+  if (hasSmall && hasLarge) {
+    return "oba" as const;
+  }
+
+  if (hasSmall) {
+    return "mali" as const;
+  }
+
+  if (hasLarge) {
+    return "veliki" as const;
+  }
+
+  return "none" as const;
+}
+
+function normalizeFaultDescription(description: string) {
+  const normalized = description.trim();
+
+  return normalized.length > 0 ? normalized : "Bez opisa";
+}
+
+function toIsoDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function revalidateFaultPaths() {
+  revalidatePath("/dashboard");
+  revalidatePath("/flota");
+  revalidatePath("/prijava-kvara");
+  revalidatePath("/servisni-centar");
+}
+
+async function resolveVehicleCurrentKm(
+  client: NonNullable<ReturnType<typeof getDbClient>>,
+  vehicleId: number,
+) {
+  const { data, error } = await client
+    .from("vozila")
+    .select("trenutna_km")
+    .eq("id", vehicleId)
     .maybeSingle();
 
-  if (!kategorijaData?.naziv) {
-    return "";
+  if (error || !data) {
+    console.error(
+      "[carlytics] Neuspješan dohvat kilometraže vozila za prijavu kvara:",
+      error?.message,
+    );
+    return null;
   }
 
-  return `[${kategorijaData.naziv}] `;
+  return data.trenutna_km ?? 0;
 }
 
 export async function submitFaultReportAction(
@@ -72,7 +164,7 @@ export async function submitFaultReportAction(
   }
 
   const sessionUser = await requireSessionUser({
-    allowedRoles: ["radnik", "admin"],
+    allowedRoles: ["zaposlenik", "admin"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/dashboard",
   });
@@ -95,21 +187,19 @@ export async function submitFaultReportAction(
     };
   }
 
-  const kategorijaPrefix = await resolveFaultCategoryPrefix(
-    client,
-    parsed.data.kategorijaId,
-  );
+  const opisProblema = parsed.data.opisProblema.trim();
 
-  const opisProblema = `${kategorijaPrefix}${parsed.data.opisProblema}`.trim();
-
-  const { error } = await client.from("prijave_kvarova").insert({
-    opis_problema: opisProblema,
+  const { error } = await client.from("servisne_intervencije").insert({
+    opis: opisProblema,
     status_prijave: "novo",
     hitnost: parsed.data.hitnost,
     vozilo_id: activeContext.vehicleId,
     zaposlenik_id: sessionUser.employeeId,
-    servis_id: null,
-    datum_prijave: new Date().toISOString(),
+    kategorija_id: parsed.data.kategorijaId ?? null,
+    datum_pocetka: new Date().toISOString(),
+    datum_zavrsetka: null,
+    km_u_tom_trenutku: activeContext.currentKm,
+    cijena: null,
   });
 
   if (error) {
@@ -120,10 +210,7 @@ export async function submitFaultReportAction(
     };
   }
 
-  revalidatePath("/dashboard");
-  revalidatePath("/flota");
-  revalidatePath("/prijava-kvara");
-  revalidatePath("/servisni-centar");
+  revalidateFaultPaths();
   revalidatePath("/m");
   revalidatePath("/m/prijava-kvara");
 
@@ -150,7 +237,7 @@ export async function submitDesktopFaultReportAction(
   }
 
   const sessionUser = await requireSessionUser({
-    allowedRoles: ["admin", "serviser"],
+    allowedRoles: ["admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/m",
   });
@@ -164,21 +251,28 @@ export async function submitDesktopFaultReportAction(
     };
   }
 
-  const kategorijaPrefix = await resolveFaultCategoryPrefix(
-    client,
-    parsed.data.kategorijaId,
-  );
+  const opisProblema = parsed.data.opisProblema.trim();
 
-  const opisProblema = `${kategorijaPrefix}${parsed.data.opisProblema}`.trim();
+  const vehicleCurrentKm = await resolveVehicleCurrentKm(client, parsed.data.voziloId);
 
-  const { error } = await client.from("prijave_kvarova").insert({
-    opis_problema: opisProblema,
+  if (vehicleCurrentKm === null) {
+    return {
+      status: "error",
+      message: "Neuspješan dohvat kilometraže vozila. Pokušaj ponovno.",
+    };
+  }
+
+  const { error } = await client.from("servisne_intervencije").insert({
+    opis: opisProblema,
     status_prijave: "novo",
     hitnost: parsed.data.hitnost,
     vozilo_id: parsed.data.voziloId,
     zaposlenik_id: sessionUser.employeeId,
-    servis_id: null,
-    datum_prijave: new Date().toISOString(),
+    kategorija_id: parsed.data.kategorijaId ?? null,
+    datum_pocetka: new Date().toISOString(),
+    datum_zavrsetka: null,
+    km_u_tom_trenutku: vehicleCurrentKm,
+    cijena: null,
   });
 
   if (error) {
@@ -192,10 +286,7 @@ export async function submitDesktopFaultReportAction(
     };
   }
 
-  revalidatePath("/dashboard");
-  revalidatePath("/flota");
-  revalidatePath("/prijava-kvara");
-  revalidatePath("/servisni-centar");
+  revalidateFaultPaths();
 
   return {
     status: "success",
@@ -210,11 +301,12 @@ export async function updateFaultStatusAction(formData: FormData) {
   });
 
   if (!parsed.success) {
+    console.warn("[carlytics] Neispravan payload za ažuriranje statusa prijave:", parsed.error.flatten().fieldErrors);
     return;
   }
 
   await requireSessionUser({
-    allowedRoles: ["admin", "serviser"],
+    allowedRoles: ["admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/m",
   });
@@ -222,21 +314,188 @@ export async function updateFaultStatusAction(formData: FormData) {
   const client = getDbClient();
 
   if (!client) {
+    console.error("[carlytics] Supabase nije konfiguriran za updateFaultStatusAction.");
     return;
   }
 
-  const { error } = await client
-    .from("prijave_kvarova")
-    .update({ status_prijave: parsed.data.statusPrijave })
-    .eq("id", parsed.data.faultId);
+  if (parsed.data.statusPrijave !== "zatvoreno") {
+    const { error } = await applyInterventionVisibilityFilter(
+      client
+        .from("servisne_intervencije")
+        .update({ status_prijave: parsed.data.statusPrijave }),
+    ).eq("id", parsed.data.faultId);
+
+    if (error) {
+      console.error("[carlytics] Neuspjelo ažuriranje statusa prijave:", error.message);
+      return;
+    }
+
+    revalidateFaultPaths();
+    return;
+  }
+
+  const parsedCloseCost = faultCloseCostSchema.safeParse(formData.get("cijena"));
+
+  if (!parsedCloseCost.success) {
+    console.error(
+      "[carlytics] Zatvaranje prijave odbijeno: nedostaje valjana cijena.",
+      parsedCloseCost.error.flatten().fieldErrors,
+    );
+    return;
+  }
+
+  const serviceCost = Number(parsedCloseCost.data.toFixed(2));
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const nowDate = toIsoDateOnly(now);
+
+  const { data: faultRow, error: faultFetchError } = await applyInterventionVisibilityFilter(
+    client
+      .from("servisne_intervencije")
+      .select("id, vozilo_id, opis"),
+  )
+    .eq("id", parsed.data.faultId)
+    .maybeSingle();
+
+  if (faultFetchError || !faultRow) {
+    console.error("[carlytics] Neuspješan dohvat prijave za zatvaranje:", faultFetchError?.message);
+    return;
+  }
+
+  if (faultRow.vozilo_id) {
+    const { data: vehicleRow, error: vehicleFetchError } = await client
+      .from("vozila")
+      .select(
+        "id, model_id, status_id, datum_kupovine, trenutna_km, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km",
+      )
+      .eq("id", faultRow.vozilo_id)
+      .maybeSingle();
+
+    if (vehicleFetchError || !vehicleRow) {
+      console.error(
+        "[carlytics] Neuspješan dohvat vozila za zatvaranje kvara:",
+        vehicleFetchError?.message,
+      );
+      return;
+    }
+
+    const kmAtMoment = vehicleRow.trenutna_km ?? 0;
+    const normalizedFaultDescription = normalizeFaultDescription(faultRow.opis ?? "");
+    const serviceType = resolveServiceTypeFromDescription(normalizedFaultDescription);
+
+    let smallServiceIntervalKm: number | null = null;
+    let largeServiceIntervalKm: number | null = null;
+
+    if (vehicleRow.model_id) {
+      const { data: modelRow, error: modelError } = await client
+        .from("modeli")
+        .select("mali_servis_interval_km, veliki_servis_interval_km")
+        .eq("id", vehicleRow.model_id)
+        .maybeSingle();
+
+      if (modelError) {
+        console.error("[carlytics] Neuspješan dohvat modela za zatvaranje servisa:", modelError.message);
+      } else if (modelRow) {
+        smallServiceIntervalKm = modelRow.mali_servis_interval_km;
+        largeServiceIntervalKm = modelRow.veliki_servis_interval_km;
+      }
+    }
+
+    const updatedSmallServiceDate =
+      serviceType === "mali" || serviceType === "oba"
+        ? nowDate
+        : vehicleRow.zadnji_mali_servis_datum ?? vehicleRow.datum_kupovine;
+    const updatedSmallServiceKm =
+      serviceType === "mali" || serviceType === "oba"
+        ? kmAtMoment
+        : vehicleRow.zadnji_mali_servis_km;
+    const updatedLargeServiceDate =
+      serviceType === "veliki" || serviceType === "oba"
+        ? nowDate
+        : vehicleRow.zadnji_veliki_servis_datum ?? vehicleRow.datum_kupovine;
+    const updatedLargeServiceKm =
+      serviceType === "veliki" || serviceType === "oba"
+        ? kmAtMoment
+        : vehicleRow.zadnji_veliki_servis_km;
+
+    const serviceDue = evaluateVehicleServiceDue({
+      currentKm: kmAtMoment,
+      lastSmallServiceKm: updatedSmallServiceKm,
+      lastLargeServiceKm: updatedLargeServiceKm,
+      smallServiceIntervalKm,
+      largeServiceIntervalKm,
+      lastSmallServiceDate: updatedSmallServiceDate,
+      lastLargeServiceDate: updatedLargeServiceDate,
+    });
+
+    const vehicleUpdatePayload: TablesUpdate<"vozila"> = {};
+
+    if (serviceType === "mali" || serviceType === "oba") {
+      vehicleUpdatePayload.zadnji_mali_servis_datum = nowDate;
+      vehicleUpdatePayload.zadnji_mali_servis_km = kmAtMoment;
+    }
+
+    if (serviceType === "veliki" || serviceType === "oba") {
+      vehicleUpdatePayload.zadnji_veliki_servis_datum = nowDate;
+      vehicleUpdatePayload.zadnji_veliki_servis_km = kmAtMoment;
+    }
+
+    let shouldUpdateStatus = false;
+    let targetStatus: "slobodno" | "servis" = "servis";
+
+    if (serviceDue.isServiceDue) {
+      shouldUpdateStatus = true;
+      targetStatus = "servis";
+    } else {
+      const { data: currentStatusRow } = vehicleRow.status_id
+        ? await client
+            .from("statusi_vozila")
+            .select("naziv")
+            .eq("id", vehicleRow.status_id)
+            .maybeSingle()
+        : { data: null };
+
+      if (normalizeStatusName(currentStatusRow?.naziv).includes("serv")) {
+        shouldUpdateStatus = true;
+        targetStatus = "slobodno";
+      }
+    }
+
+    if (shouldUpdateStatus) {
+      const targetStatusId = await resolveVehicleStatusId(client, targetStatus);
+
+      if (targetStatusId) {
+        vehicleUpdatePayload.status_id = targetStatusId;
+      }
+    }
+
+    if (Object.keys(vehicleUpdatePayload).length > 0) {
+      const { error: vehicleUpdateError } = await client
+        .from("vozila")
+        .update(vehicleUpdatePayload)
+        .eq("id", vehicleRow.id);
+
+      if (vehicleUpdateError) {
+        console.error("[carlytics] Neuspješno ažuriranje vozila nakon zatvaranja kvara:", vehicleUpdateError.message);
+        return;
+      }
+    }
+  }
+
+  const { error } = await applyInterventionVisibilityFilter(
+    client
+      .from("servisne_intervencije")
+      .update({
+        status_prijave: parsed.data.statusPrijave,
+        datum_zavrsetka: nowIso,
+        cijena: serviceCost,
+      }),
+  ).eq("id", parsed.data.faultId);
 
   if (error) {
     console.error("[carlytics] Neuspjelo ažuriranje statusa prijave:", error.message);
     return;
   }
 
-  revalidatePath("/dashboard");
-  revalidatePath("/flota");
-  revalidatePath("/prijava-kvara");
-  revalidatePath("/servisni-centar");
+  revalidateFaultPaths();
 }

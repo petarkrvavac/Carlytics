@@ -11,7 +11,7 @@ import {
 
 export default async function MobileHomePage() {
   const sessionUser = await requireSessionUser({
-    allowedRoles: ["radnik", "admin"],
+    allowedRoles: ["zaposlenik", "admin"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/dashboard",
   });
@@ -26,6 +26,7 @@ export default async function MobileHomePage() {
       <Card>
         <h1 className="text-xl font-semibold text-foreground">Operativa na terenu</h1>
         <WorkerAssignmentControls
+          key={activeContext?.assignmentId ?? "no-assignment"}
           activeContext={activeContext}
           availableVehicles={availableVehicles}
         />

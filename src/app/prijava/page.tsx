@@ -8,7 +8,7 @@ export default async function LoginPage() {
   const sessionUser = await getOptionalSessionUser();
 
   if (sessionUser) {
-    redirect(sessionUser.role === "radnik" ? "/m" : "/dashboard");
+    redirect(sessionUser.role === "zaposlenik" ? "/m" : "/dashboard");
   }
 
   return (
@@ -30,7 +30,7 @@ export default async function LoginPage() {
             <p className="mt-4 text-xs uppercase tracking-[0.26em] text-cyan-300">Carlytics Fleet OS</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-100">Prijava u sustav</h1>
             <p className="text-sm text-muted">
-              Role-aware pristup za administraciju, voditelja i terenski unos.
+              Role-aware pristup za administraciju, voditelja flote i terenski unos zaposlenika.
             </p>
           </div>
 

@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
 import { DesktopFaultReportForm } from "@/components/faults/desktop-fault-report-form";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { PageHeader } from "@/components/ui/page-header";
 import { updateFaultStatusAction } from "@/lib/actions/fault-actions";
 import type { VehicleListItem } from "@/lib/fleet/types";
@@ -74,7 +75,13 @@ function getPriorityLabel(priority: FaultQueueItem["priority"]) {
 function getStatusVariant(statusLabel: string) {
   const normalized = statusLabel.toLowerCase();
 
-  if (normalized.includes("zat")) {
+  if (
+    normalized.includes("zat") ||
+    normalized.includes("rije") ||
+    normalized.includes("rijes") ||
+    normalized.includes("closed") ||
+    normalized.includes("res")
+  ) {
     return "success" as const;
   }
 
@@ -88,7 +95,13 @@ function getStatusVariant(statusLabel: string) {
 function getStatusValue(statusRaw: string | null) {
   const normalized = statusRaw?.toLowerCase() ?? "";
 
-  if (normalized.includes("zat") || normalized.includes("closed") || normalized.includes("res")) {
+  if (
+    normalized.includes("zat") ||
+    normalized.includes("rije") ||
+    normalized.includes("rijes") ||
+    normalized.includes("closed") ||
+    normalized.includes("res")
+  ) {
     return "zatvoreno" as const;
   }
 
@@ -102,8 +115,9 @@ function getStatusValue(statusRaw: string | null) {
 const STATUS_ACTIONS = [
   { value: "novo", label: "Postavi: novo" },
   { value: "u_obradi", label: "Postavi: u obradi" },
-  { value: "zatvoreno", label: "Zatvori" },
 ] as const;
+
+const ITEMS_PER_PAGE = 10;
 
 export function FaultsSectionContent({
   operationsData,
@@ -111,14 +125,22 @@ export function FaultsSectionContent({
   categories,
 }: FaultsSectionContentProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [closingFaultId, setClosingFaultId] = useState<number | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const openFaults = useMemo(
     () => operationsData.faultQueue.filter((fault) => fault.isOpen),
     [operationsData.faultQueue],
   );
-  const recentlyClosed = useMemo(
-    () => operationsData.faultQueue.filter((fault) => !fault.isOpen).slice(0, 6),
-    [operationsData.faultQueue],
+  const totalPages = Math.max(1, Math.ceil(openFaults.length / ITEMS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pagedOpenFaults = useMemo(
+    () =>
+      openFaults.slice(
+        (safeCurrentPage - 1) * ITEMS_PER_PAGE,
+        safeCurrentPage * ITEMS_PER_PAGE,
+      ),
+    [openFaults, safeCurrentPage],
   );
 
   useEffect(() => {
@@ -152,19 +174,12 @@ export function FaultsSectionContent({
             <button
               type="button"
               onClick={openModal}
-              className="inline-flex h-9 items-center rounded-lg border border-cyan-300 bg-cyan-50 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-700 transition hover:border-cyan-400 hover:bg-cyan-100 dark:border-cyan-500/35 dark:bg-cyan-500/12 dark:text-cyan-200 dark:hover:border-cyan-400/70 dark:hover:bg-cyan-500/22"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
             >
+              <Plus size={15} />
               Nova prijava
             </button>
             <FallbackChip isUsingFallbackData={operationsData.isUsingFallbackData} />
-            <Badge variant={openFaults.length > 0 ? "warning" : "success"}>
-              Otvoreno: {openFaults.length}
-            </Badge>
-            <Badge
-              variant={operationsData.metrics.criticalFaults > 0 ? "danger" : "neutral"}
-            >
-              Kritične: {operationsData.metrics.criticalFaults}
-            </Badge>
           </>
         }
       />
@@ -175,102 +190,122 @@ export function FaultsSectionContent({
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
               Red prijava
             </h2>
-            <Badge variant={openFaults.length > 0 ? "warning" : "success"}>
-              Otvoreno: {openFaults.length}
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={openFaults.length > 0 ? "warning" : "success"}>
+                Otvoreno: {openFaults.length}
+              </Badge>
+              <Badge
+                variant={operationsData.metrics.criticalFaults > 0 ? "danger" : "neutral"}
+              >
+                Kritične: {operationsData.metrics.criticalFaults}
+              </Badge>
+            </div>
           </div>
 
-          {operationsData.faultQueue.length === 0 ? (
+          {openFaults.length === 0 ? (
             <p className="text-sm text-muted">Nema prijava kvarova za prikaz.</p>
           ) : (
-            <ul className="max-h-[58vh] space-y-3 overflow-y-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              {operationsData.faultQueue.slice(0, 14).map((fault) => {
-                const currentStatus = getStatusValue(fault.statusRaw);
+            <>
+              <ul className="space-y-3">
+                {pagedOpenFaults.map((fault) => {
+                  const currentStatus = getStatusValue(fault.statusRaw);
 
-                return (
-                  <li key={fault.id} className="rounded-xl border border-border bg-surface px-4 py-3">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-100">
-                          {fault.vehicleLabel}
-                          <span className="text-slate-400"> ({fault.plate})</span>
-                        </p>
-                        <p className="mt-1 text-sm text-slate-200">{fault.description}</p>
-                        <p className="mt-1 text-xs text-muted">
-                          Prijavio: {fault.reporterName} • {formatDateTime(fault.reportedAtIso)}
-                        </p>
+                  return (
+                    <li key={fault.id} className="rounded-xl border border-border bg-surface px-4 py-3">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-100">
+                            {fault.vehicleLabel}
+                            <span className="text-slate-400"> ({fault.plate})</span>
+                          </p>
+                          <p className="mt-1 text-sm text-slate-200">{fault.description}</p>
+                          <p className="mt-1 text-xs text-muted">
+                            Prijavio: {fault.reporterName} • {formatDateTime(fault.reportedAtIso)}
+                          </p>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Badge variant={getPriorityVariant(fault.priority)}>
+                            {getPriorityLabel(fault.priority)}
+                          </Badge>
+                          <Badge variant={getStatusVariant(fault.statusLabel)}>{fault.statusLabel}</Badge>
+                        </div>
                       </div>
 
-                      <div className="flex gap-2">
-                        <Badge variant={getPriorityVariant(fault.priority)}>
-                          {getPriorityLabel(fault.priority)}
-                        </Badge>
-                        <Badge variant={getStatusVariant(fault.statusLabel)}>{fault.statusLabel}</Badge>
-                      </div>
-                    </div>
+                      {fault.isOpen ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {STATUS_ACTIONS.map((statusAction) => (
+                            <form key={statusAction.value} action={updateFaultStatusAction}>
+                              <input type="hidden" name="faultId" value={fault.id} />
+                              <input type="hidden" name="statusPrijave" value={statusAction.value} />
+                              <button
+                                type="submit"
+                                disabled={currentStatus === statusAction.value}
+                                className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {statusAction.label}
+                              </button>
+                            </form>
+                          ))}
 
-                    {fault.isOpen ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {STATUS_ACTIONS.map((statusAction) => (
-                          <form key={statusAction.value} action={updateFaultStatusAction}>
-                            <input type="hidden" name="faultId" value={fault.id} />
-                            <input type="hidden" name="statusPrijave" value={statusAction.value} />
-                            <button
-                              type="submit"
-                              disabled={currentStatus === statusAction.value}
-                              className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                          {closingFaultId === fault.id ? (
+                            <form
+                              action={updateFaultStatusAction}
+                              className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface px-2 py-1.5"
                             >
-                              {statusAction.label}
+                              <input type="hidden" name="faultId" value={fault.id} />
+                              <input type="hidden" name="statusPrijave" value="zatvoreno" />
+
+                              <label className="flex items-center gap-2 text-xs text-muted">
+                                Cijena
+                                <input
+                                  type="number"
+                                  name="cijena"
+                                  min="0"
+                                  step="0.01"
+                                  required
+                                  placeholder="0.00"
+                                  className="h-8 w-28 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                                />
+                              </label>
+
+                              <button
+                                type="submit"
+                                className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200"
+                              >
+                                Potvrdi rješavanje
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setClosingFaultId(null)}
+                                className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+                              >
+                                Odustani
+                              </button>
+                            </form>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setClosingFaultId(fault.id)}
+                              className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200"
+                            >
+                              Riješeno
                             </button>
-                          </form>
-                        ))}
-                      </div>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
-      </section>
+                          )}
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
 
-      <section className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
-        <Card>
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
-            Operativni snapshot
-          </h3>
-          <dl className="mt-4 space-y-3 text-sm">
-            <div className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2">
-              <dt className="text-muted">Otvorene prijave</dt>
-              <dd className="font-semibold text-amber-300">{operationsData.metrics.openFaults}</dd>
-            </div>
-            <div className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2">
-              <dt className="text-muted">Kritične</dt>
-              <dd className="font-semibold text-rose-300">{operationsData.metrics.criticalFaults}</dd>
-            </div>
-            <div className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2">
-              <dt className="text-muted">Aktivna zaduženja</dt>
-              <dd className="font-semibold text-sky-300">{operationsData.metrics.activeAssignments}</dd>
-            </div>
-          </dl>
-        </Card>
-
-        <Card>
-          <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
-            Nedavno zatvoreno
-          </h3>
-
-          {recentlyClosed.length === 0 ? (
-            <p className="mt-3 text-sm text-muted">Nema zatvorenih prijava u zadnjem periodu.</p>
-          ) : (
-            <ul className="mt-4 grid gap-2.5 sm:grid-cols-2">
-              {recentlyClosed.map((fault) => (
-                <li key={fault.id} className="rounded-lg border border-border bg-surface px-3 py-2">
-                  <p className="text-sm font-medium text-slate-100">{fault.vehicleLabel}</p>
-                  <p className="mt-1 text-xs text-muted">{formatDateTime(fault.reportedAtIso)}</p>
-                </li>
-              ))}
-            </ul>
+              <PaginationControls
+                currentPage={safeCurrentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+              />
+            </>
           )}
         </Card>
       </section>
@@ -284,7 +319,7 @@ export function FaultsSectionContent({
             className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm"
           />
 
-          <div className="relative mx-auto flex h-[min(95vh,920px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-[0_0_0_1px_rgba(15,23,42,0.6),0_28px_80px_rgba(2,6,23,0.7)]">
+          <div className="relative mx-auto flex h-[min(88vh,820px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-[0_0_0_1px_rgba(15,23,42,0.6),0_28px_80px_rgba(2,6,23,0.7)]">
             <div className="flex items-start justify-between gap-3 border-b border-border p-4 sm:p-5">
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">Nova prijava</p>

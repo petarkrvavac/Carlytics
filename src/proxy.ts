@@ -44,14 +44,14 @@ export async function proxy(request: NextRequest) {
   }
 
   if (pathname === "/m" || pathname.startsWith("/m/")) {
-    if (role !== "radnik" && role !== "admin") {
+    if (role !== "zaposlenik" && role !== "admin") {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
 
     return NextResponse.next();
   }
 
-  if (role === "admin" || role === "serviser") {
+  if (role === "admin" || role === "voditelj_flote") {
     return NextResponse.next();
   }
 

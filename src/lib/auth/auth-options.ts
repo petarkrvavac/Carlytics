@@ -66,7 +66,7 @@ export const authOptions: NextAuthOptions = {
         session.user.id = token.sub ?? "";
         session.user.employeeId = Number(token.employeeId ?? 0);
         session.user.username = String(token.username ?? "");
-        session.user.role = token.role ?? "radnik";
+        session.user.role = token.role ?? "zaposlenik";
       }
 
       return session;

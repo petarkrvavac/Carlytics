@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function OsLayout({ children }: OsLayoutProps) {
   const currentUser = await requireSessionUser({
-    allowedRoles: ["admin", "serviser"],
+    allowedRoles: ["admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/m",
   });

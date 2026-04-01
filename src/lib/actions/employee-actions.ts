@@ -38,6 +38,13 @@ const createEmployeeInviteSchema = z.object({
 const updateEmployeeActivationSchema = z.object({
   employeeId: z.coerce.number().int().positive(),
   isAktivan: z.enum(["true", "false"]),
+  razlogDeaktivacije: z.preprocess((value) => {
+    if (value === null || value === undefined) {
+      return "";
+    }
+
+    return String(value).trim();
+  }, z.string()),
 });
 
 const setPasswordFromTokenSchema = z
@@ -142,7 +149,7 @@ export async function createEmployeeInviteAction(
   }
 
   await requireSessionUser({
-    allowedRoles: ["admin", "serviser"],
+    allowedRoles: ["admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/m",
   });
@@ -252,14 +259,16 @@ export async function updateEmployeeActivationAction(formData: FormData) {
   const parsed = updateEmployeeActivationSchema.safeParse({
     employeeId: formData.get("employeeId"),
     isAktivan: formData.get("isAktivan"),
+    razlogDeaktivacije: formData.get("razlogDeaktivacije"),
   });
 
   if (!parsed.success) {
+    console.warn("[carlytics] Neispravan payload za updateEmployeeActivationAction:", parsed.error.flatten().fieldErrors);
     return;
   }
 
   await requireSessionUser({
-    allowedRoles: ["admin", "serviser"],
+    allowedRoles: ["admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/m",
   });
@@ -267,15 +276,23 @@ export async function updateEmployeeActivationAction(formData: FormData) {
   const client = getDbClient();
 
   if (!client) {
+    console.error("[carlytics] Supabase nije konfiguriran za updateEmployeeActivationAction.");
     return;
   }
 
   const nextIsActive = parsed.data.isAktivan === "true";
+  const deactivationReason = parsed.data.razlogDeaktivacije;
+
+  if (!nextIsActive && deactivationReason.length < 3) {
+    console.warn("[carlytics] Deaktivacija zaposlenika odbijena: razlog je prekratak.");
+    return;
+  }
 
   const updatePayload: {
     is_aktivan: boolean;
     pozivnica_token?: string | null;
     pozivnica_vrijedi_do?: string | null;
+    razlog_deaktivacije?: string | null;
   } = {
     is_aktivan: nextIsActive,
   };
@@ -283,6 +300,9 @@ export async function updateEmployeeActivationAction(formData: FormData) {
   if (!nextIsActive) {
     updatePayload.pozivnica_token = null;
     updatePayload.pozivnica_vrijedi_do = null;
+    updatePayload.razlog_deaktivacije = deactivationReason;
+  } else {
+    updatePayload.razlog_deaktivacije = null;
   }
 
   const { error } = await client

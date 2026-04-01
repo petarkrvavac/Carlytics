@@ -5,12 +5,14 @@ import {
   Fuel,
   Gauge,
   TriangleAlert,
-  UserRound,
   Wrench,
 } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
+import { VehicleCostBreakdownChart } from "@/components/fleet/vehicle-cost-breakdown-chart";
+import { VehicleActivationControls } from "@/components/fleet/vehicle-activation-controls";
+import { RegistrationExtensionForm } from "@/components/fleet/registration-extension-form";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -21,6 +23,8 @@ import { getVehicleDigitalTwinData } from "@/lib/fleet/vehicle-digital-twin-serv
 interface VehicleDetailPageProps {
   params: Promise<{ id: string }>;
 }
+
+const MAX_DETAIL_ITEMS = 3;
 
 function parseVehicleId(rawId: string) {
   const parsed = Number(rawId);
@@ -69,16 +73,23 @@ function formatAmount(value: number) {
   });
 }
 
-function formatServiceDue(serviceDueKm: number) {
-  if (serviceDueKm > 0) {
-    return `${serviceDueKm.toLocaleString("hr-HR")} km`;
+function formatCurrency(value: number | null) {
+  if (value === null) {
+    return "N/A";
   }
 
-  if (serviceDueKm === 0) {
-    return "servis je sada potreban";
+  return `${formatAmount(value)} EUR`;
+}
+
+function formatServiceSnapshot(dateIso: string | null, km: number | null) {
+  if (!dateIso && km === null) {
+    return "Nema podataka";
   }
 
-  return `+${Math.abs(serviceDueKm).toLocaleString("hr-HR")} km`;
+  const datePart = dateIso ? formatDate(dateIso) : "N/A";
+  const kmPart = km !== null ? `${km.toLocaleString("hr-HR")} km` : "N/A";
+
+  return `${datePart} • ${kmPart}`;
 }
 
 function getVehicleStatusVariant(status: VehicleListItem["status"]) {
@@ -128,7 +139,13 @@ function getFaultPriorityLabel(priority: FaultQueueItem["priority"]) {
 function getFaultStatusVariant(statusLabel: string) {
   const normalized = statusLabel.toLowerCase();
 
-  if (normalized.includes("zat")) {
+  if (
+    normalized.includes("zat") ||
+    normalized.includes("rije") ||
+    normalized.includes("rijes") ||
+    normalized.includes("closed") ||
+    normalized.includes("res")
+  ) {
     return "success" as const;
   }
 
@@ -183,11 +200,39 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
 
   const vehicle = digitalTwinData.vehicle;
   const openFaultCount = digitalTwinData.faultHistory.filter((fault) => fault.isOpen).length;
-  const openServiceCount = digitalTwinData.serviceHistory.filter((service) => service.isOpen).length;
-  const isServiceUrgent = vehicle.serviceDueKm <= 500;
+  const unifiedServiceHistory = [
+    ...digitalTwinData.serviceHistory.map((service) => ({
+      type: "service" as const,
+      sortAtIso: service.endedAtIso ?? service.startedAtIso,
+      payload: service,
+      isOpen: service.isOpen,
+    })),
+    ...digitalTwinData.faultHistory
+      .filter((fault) => fault.isOpen)
+      .map((fault) => ({
+        type: "fault" as const,
+        sortAtIso: fault.reportedAtIso,
+        payload: fault,
+        isOpen: fault.isOpen,
+      })),
+  ].sort((left, right) => {
+    const leftTime = new Date(left.sortAtIso).getTime();
+    const rightTime = new Date(right.sortAtIso).getTime();
+
+    const safeLeftTime = Number.isNaN(leftTime) ? 0 : leftTime;
+    const safeRightTime = Number.isNaN(rightTime) ? 0 : rightTime;
+    return safeRightTime - safeLeftTime;
+  });
+  const openUnifiedServiceCount = unifiedServiceHistory.filter((item) => item.isOpen).length;
+  const isServiceUrgent = vehicle.serviceDueKm <= 2000;
   const serviceProgress = Math.max(
     0,
-    Math.min(100, ((vehicle.serviceDueKm > 0 ? vehicle.serviceDueKm : 0) / 15000) * 100),
+    Math.min(
+      100,
+      ((vehicle.serviceDueKm > 0 ? vehicle.serviceDueKm : 0) /
+        Math.max(1, vehicle.serviceProgressIntervalKm)) *
+        100,
+    ),
   );
 
   const registrationState = getRegistrationBadge(vehicle.registrationExpiryDays);
@@ -196,7 +241,7 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
     <div className="space-y-5">
       <PageHeader
         title={`${vehicle.make} ${vehicle.model}`}
-        description="Digital twin vozila s operativnim snapshotom i poviješću kvarova, goriva te servisnih intervencija."
+        description="Digital twin vozila s operativnim snapshotom, servisnom poviješću, gorivom i troškovima."
         actions={
           <>
             <FallbackChip isUsingFallbackData={digitalTwinData.isUsingFallbackData} />
@@ -223,10 +268,17 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
                 {vehicle.plate}
               </p>
             </div>
-            <Badge variant={getVehicleStatusVariant(vehicle.status)}>{vehicle.status}</Badge>
+
+            <div className="flex flex-col items-end gap-2">
+              <Badge variant={getVehicleStatusVariant(vehicle.status)}>{vehicle.status}</Badge>
+              <Badge variant={vehicle.isActive ? "success" : "danger"}>
+                {vehicle.isActive ? "Aktivno vozilo" : "Deaktivirano vozilo"}
+              </Badge>
+              <VehicleActivationControls vehicleId={vehicle.id} isActive={vehicle.isActive} />
+            </div>
           </div>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div className="rounded-xl border border-border bg-surface p-3">
               <p className="text-xs uppercase tracking-[0.18em] text-muted">Kilometraža</p>
               <p className="data-font mt-2 text-lg text-slate-100">
@@ -238,12 +290,24 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
               <p className="data-font mt-2 text-lg text-slate-100">{vehicle.fuelCapacity} L</p>
             </div>
             <div className="rounded-xl border border-border bg-surface p-3">
-              <p className="text-xs uppercase tracking-[0.18em] text-muted">Otvoreni kvarovi</p>
-              <p className="data-font mt-2 text-lg text-amber-300">{openFaultCount}</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-muted">Tip goriva</p>
+              <p className="mt-2 text-lg text-slate-100">{vehicle.fuelTypeLabel ?? "Nije definirano"}</p>
             </div>
             <div className="rounded-xl border border-border bg-surface p-3">
-              <p className="text-xs uppercase tracking-[0.18em] text-muted">Otvoreni servisi</p>
-              <p className="data-font mt-2 text-lg text-sky-300">{openServiceCount}</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-muted">Broj šasije</p>
+              <p className="data-font mt-2 text-sm text-slate-100">{vehicle.vin ?? "N/A"}</p>
+            </div>
+            <div className="rounded-xl border border-border bg-surface p-3">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted">Godina proizvodnje</p>
+              <p className="data-font mt-2 text-lg text-slate-100">{vehicle.productionYear ?? "N/A"}</p>
+            </div>
+            <div className="rounded-xl border border-border bg-surface p-3">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted">Nabavna vrijednost</p>
+              <p className="data-font mt-2 text-sm text-slate-100">{formatCurrency(vehicle.acquisitionValue)}</p>
+            </div>
+            <div className="rounded-xl border border-border bg-surface p-3">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted">Grad registracije</p>
+              <p className="mt-2 text-sm text-slate-100">{vehicle.registrationCity ?? "N/A"}</p>
             </div>
           </div>
 
@@ -256,7 +320,14 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
             ) : (
               <Badge variant="neutral">Nema aktivnog zaduženja</Badge>
             )}
+            {!vehicle.isActive && vehicle.deactivationReason ? (
+              <Badge variant="danger">Razlog deaktivacije: {vehicle.deactivationReason}</Badge>
+            ) : null}
           </div>
+
+          {vehicle.registrationExpiryDays !== null && vehicle.registrationExpiryDays < 0 ? (
+            <RegistrationExtensionForm vehicleId={vehicle.id} />
+          ) : null}
         </Card>
 
         <Card>
@@ -266,7 +337,7 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
                 Servisni rizik
               </h2>
               <p className="mt-2 text-sm text-muted">
-                Preostali interval do malog servisa i trenutni rizik od prekoračenja.
+                Kombinirani prikaz malog i velikog servisa prema kilometraži i vremenskom intervalu.
               </p>
             </div>
             <Wrench className={isServiceUrgent ? "text-rose-300" : "text-cyan-300"} size={18} />
@@ -276,7 +347,7 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
             <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.18em]">
               <span className="text-muted">Servis za</span>
               <span className={isServiceUrgent ? "text-rose-300" : "text-slate-200"}>
-                {formatServiceDue(vehicle.serviceDueKm)}
+                {vehicle.serviceDueLabel}
               </span>
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
@@ -303,49 +374,98 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
               <dd className="data-font text-amber-300">{openFaultCount}</dd>
             </div>
             <div className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2">
-              <dt className="flex items-center gap-2 text-muted">
-                <UserRound size={14} />
-                Aktivno zaduženje
-              </dt>
+              <dt className="text-muted">Zadnji mali servis</dt>
               <dd className="text-right text-slate-200">
-                {digitalTwinData.activeAssignment
-                  ? digitalTwinData.activeAssignment.employeeName
-                  : "Nije aktivno"}
+                {formatServiceSnapshot(vehicle.lastSmallServiceDate, vehicle.lastSmallServiceKm)}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2">
+              <dt className="text-muted">Zadnji veliki servis</dt>
+              <dd className="text-right text-slate-200">
+                {formatServiceSnapshot(vehicle.lastLargeServiceDate, vehicle.lastLargeServiceKm)}
               </dd>
             </div>
           </dl>
         </Card>
       </section>
 
-      <section className="grid gap-5 2xl:grid-cols-3">
+      <Card>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
+            Troškovi po vozilu
+          </h2>
+          <Badge variant="info">Zadnjih 6 mjeseci</Badge>
+        </div>
+        <VehicleCostBreakdownChart series={digitalTwinData.costBreakdownSeries} />
+      </Card>
+
+      <section className="grid gap-5 xl:grid-cols-2">
         <Card>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
-              Povijest kvarova
+              Servisna povijest
             </h2>
-            <Badge variant={openFaultCount > 0 ? "warning" : "success"}>Ukupno: {digitalTwinData.faultHistory.length}</Badge>
+            <Badge variant={openUnifiedServiceCount > 0 ? "warning" : "success"}>
+              Stavki: {unifiedServiceHistory.length}
+            </Badge>
           </div>
 
-          {digitalTwinData.faultHistory.length === 0 ? (
-            <p className="text-sm text-muted">Nema prijava kvarova za odabrano vozilo.</p>
+          {unifiedServiceHistory.length === 0 ? (
+            <p className="text-sm text-muted">Nema servisnih stavki za odabrano vozilo.</p>
           ) : (
             <ul className="space-y-3">
-              {digitalTwinData.faultHistory.slice(0, 12).map((fault) => (
-                <li key={fault.id} className="rounded-xl border border-border bg-surface px-3 py-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <p className="text-sm font-medium text-slate-100">{fault.description}</p>
-                    <div className="flex gap-2">
-                      <Badge variant={getFaultPriorityVariant(fault.priority)}>
-                        {getFaultPriorityLabel(fault.priority)}
-                      </Badge>
-                      <Badge variant={getFaultStatusVariant(fault.statusLabel)}>{fault.statusLabel}</Badge>
+              {unifiedServiceHistory.slice(0, MAX_DETAIL_ITEMS).map((historyItem) => {
+                if (historyItem.type === "service") {
+                  const service = historyItem.payload;
+
+                  return (
+                    <li key={`service-${service.id}`} className="rounded-xl border border-border bg-surface px-3 py-3">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <p className="text-sm font-medium text-slate-100">{service.description}</p>
+                        <div className="flex flex-wrap gap-2">
+                          {service.categoryLabel ? <Badge variant="neutral">{service.categoryLabel}</Badge> : null}
+                          <Badge variant={service.isOpen ? "warning" : "success"}>
+                            {service.isOpen ? "U tijeku" : "Završeno"}
+                          </Badge>
+                        </div>
+                      </div>
+                      <p className="mt-2 flex items-center gap-2 text-xs text-muted">
+                        <CalendarClock size={13} />
+                        {formatDate(service.startedAtIso)}
+                        {service.endedAtIso ? ` - ${formatDate(service.endedAtIso)}` : " - u tijeku"}
+                      </p>
+                      <div className="mt-2 flex items-center justify-between text-xs text-muted">
+                        <span>
+                          KM: <span className="data-font text-slate-200">{service.kmAtMoment.toLocaleString("hr-HR")}</span>
+                        </span>
+                        <span>
+                          Cijena: <span className="data-font text-amber-200">{formatAmount(service.cost)} EUR</span>
+                        </span>
+                      </div>
+                    </li>
+                  );
+                }
+
+                const fault = historyItem.payload;
+
+                return (
+                  <li key={`fault-${fault.id}`} className="rounded-xl border border-border bg-surface px-3 py-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="text-sm font-medium text-slate-100">{fault.description}</p>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="neutral">Prijava kvara</Badge>
+                        <Badge variant={getFaultPriorityVariant(fault.priority)}>
+                          {getFaultPriorityLabel(fault.priority)}
+                        </Badge>
+                        <Badge variant={getFaultStatusVariant(fault.statusLabel)}>{fault.statusLabel}</Badge>
+                      </div>
                     </div>
-                  </div>
-                  <p className="mt-2 text-xs text-muted">
-                    Prijavio: {fault.reporterName} • {formatDateTime(fault.reportedAtIso)}
-                  </p>
-                </li>
-              ))}
+                    <p className="mt-2 text-xs text-muted">
+                      Prijavio: {fault.reporterName} • {formatDateTime(fault.reportedAtIso)}
+                    </p>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>
@@ -362,7 +482,7 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
             <p className="text-sm text-muted">Nema unosa goriva za odabrano vozilo.</p>
           ) : (
             <ul className="space-y-3">
-              {digitalTwinData.fuelHistory.slice(0, 14).map((entry) => (
+              {digitalTwinData.fuelHistory.slice(0, MAX_DETAIL_ITEMS).map((entry) => (
                 <li key={entry.id} className="rounded-xl border border-border bg-surface px-3 py-3 text-sm">
                   <div className="flex items-start justify-between gap-2">
                     <div>
@@ -374,6 +494,7 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
                   <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                     <p className="text-muted">KM: <span className="data-font text-slate-200">{entry.kmAtFill.toLocaleString("hr-HR")}</span></p>
                     <p className="text-muted">Litraža: <span className="data-font text-slate-200">{formatAmount(entry.liters)} L</span></p>
+                    <p className="text-muted">Gorivo: <span className="text-slate-200">{entry.fuelTypeLabel ?? "N/A"}</span></p>
                     <p className="text-muted">EUR/L: <span className="data-font text-slate-200">{formatAmount(entry.pricePerLiter)}</span></p>
                     <p className="text-muted">Ukupno: <span className="data-font text-amber-200">{formatAmount(entry.totalAmount)} EUR</span></p>
                   </div>
@@ -386,36 +507,31 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
         <Card>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
-              Servisna povijest
+              Evidencija guma
             </h2>
-            <Badge variant={openServiceCount > 0 ? "warning" : "success"}>Stavki: {digitalTwinData.serviceHistory.length}</Badge>
+            <Badge variant="info">Zapisa: {digitalTwinData.tireHistory.length}</Badge>
           </div>
 
-          {digitalTwinData.serviceHistory.length === 0 ? (
-            <p className="text-sm text-muted">Nema servisnih intervencija za odabrano vozilo.</p>
+          {digitalTwinData.tireHistory.length === 0 ? (
+            <p className="text-sm text-muted">Nema evidentiranih kupovina guma za ovo vozilo.</p>
           ) : (
             <ul className="space-y-3">
-              {digitalTwinData.serviceHistory.slice(0, 12).map((service) => (
-                <li key={service.id} className="rounded-xl border border-border bg-surface px-3 py-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <p className="text-sm font-medium text-slate-100">{service.description}</p>
-                    <Badge variant={service.isOpen ? "warning" : "success"}>
-                      {service.isOpen ? "U tijeku" : "Završeno"}
-                    </Badge>
+              {digitalTwinData.tireHistory.slice(0, MAX_DETAIL_ITEMS).map((tireEntry) => (
+                <li key={tireEntry.id} className="rounded-xl border border-border bg-surface px-3 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-slate-100">
+                      {tireEntry.manufacturer ?? "Nepoznat proizvođač"}
+                    </p>
+                    <div className="flex gap-2">
+                      <Badge variant="neutral">{tireEntry.season ?? "Sezona N/A"}</Badge>
+                      {tireEntry.cost !== null ? (
+                        <Badge variant="warning">{formatAmount(tireEntry.cost)} EUR</Badge>
+                      ) : null}
+                    </div>
                   </div>
-                  <p className="mt-2 flex items-center gap-2 text-xs text-muted">
-                    <CalendarClock size={13} />
-                    {formatDate(service.startedAtIso)}
-                    {service.endedAtIso ? ` - ${formatDate(service.endedAtIso)}` : " - u tijeku"}
+                  <p className="mt-2 text-xs text-muted">
+                    Datum kupovine: {tireEntry.purchaseDateIso ? formatDate(tireEntry.purchaseDateIso) : "N/A"}
                   </p>
-                  <div className="mt-2 flex items-center justify-between text-xs text-muted">
-                    <span>
-                      KM: <span className="data-font text-slate-200">{service.kmAtMoment.toLocaleString("hr-HR")}</span>
-                    </span>
-                    <span>
-                      Cijena: <span className="data-font text-amber-200">{formatAmount(service.cost)} EUR</span>
-                    </span>
-                  </div>
                 </li>
               ))}
             </ul>

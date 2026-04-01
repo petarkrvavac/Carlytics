@@ -59,7 +59,7 @@ export async function requireSessionUser(options: RequireSessionOptions = {}) {
   ) {
     redirect(
       options.forbiddenRedirectTo ??
-        (sessionUser.role === "radnik" ? "/m" : "/dashboard"),
+        (sessionUser.role === "zaposlenik" ? "/m" : "/dashboard"),
     );
   }
 

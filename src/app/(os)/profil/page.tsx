@@ -27,7 +27,7 @@ function buildFallbackProfile(sessionUser: SessionAppUser): EmployeeProfileDetai
 
 export default async function ProfilPage() {
   const sessionUser = await requireSessionUser({
-    allowedRoles: ["admin", "serviser"],
+    allowedRoles: ["admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/m",
   });

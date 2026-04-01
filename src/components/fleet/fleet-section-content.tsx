@@ -1,18 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, SlidersHorizontal, X } from "lucide-react";
+import { Plus, Search, SlidersHorizontal, X } from "lucide-react";
 
 import { AddVehicleForm } from "@/components/fleet/add-vehicle-form";
 import { VehicleStatusCard } from "@/components/fleet/vehicle-status-card";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { PageHeader } from "@/components/ui/page-header";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import type { VehicleFormContext } from "@/lib/fleet/vehicle-form-context-service";
 import { cn } from "@/lib/utils/cn";
 
-export type FleetStatusFilter = "sve" | "slobodno" | "zauzeto" | "servis";
+const ITEMS_PER_PAGE = 10;
+
+export type FleetStatusFilter = "sve" | "slobodno" | "zauzeto" | "servis" | "neaktivna";
 
 interface FleetSectionContentProps {
   vehicles: VehicleListItem[];
@@ -28,22 +31,59 @@ const FILTERS: Array<{
   { key: "slobodno", label: "Slobodno" },
   { key: "zauzeto", label: "Zauzeto" },
   { key: "servis", label: "Na servisu" },
+  { key: "neaktivna", label: "Neaktivna vozila" },
 ];
 
-function getFilteredVehicles(vehicles: VehicleListItem[], filter: FleetStatusFilter) {
+function matchesVehicleSearch(vehicle: VehicleListItem, normalizedSearchQuery: string) {
+  if (!normalizedSearchQuery) {
+    return true;
+  }
+
+  const searchable = [vehicle.make, vehicle.model, vehicle.plate, vehicle.vin ?? ""]
+    .join(" ")
+    .toLowerCase();
+
+  return searchable.includes(normalizedSearchQuery);
+}
+
+function getFilteredVehicles(
+  vehicles: VehicleListItem[],
+  filter: FleetStatusFilter,
+  searchQuery: string,
+) {
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  if (filter === "neaktivna") {
+    return vehicles.filter(
+      (vehicle) => !vehicle.isActive && matchesVehicleSearch(vehicle, normalizedSearchQuery),
+    );
+  }
+
+  const activeVehicles = vehicles.filter((vehicle) => vehicle.isActive);
+
   if (filter === "slobodno") {
-    return vehicles.filter((vehicle) => vehicle.status === "Slobodno");
+    return activeVehicles.filter(
+      (vehicle) =>
+        vehicle.status === "Slobodno" && matchesVehicleSearch(vehicle, normalizedSearchQuery),
+    );
   }
 
   if (filter === "zauzeto") {
-    return vehicles.filter((vehicle) => vehicle.status === "Zauzeto");
+    return activeVehicles.filter(
+      (vehicle) =>
+        vehicle.status === "Zauzeto" && matchesVehicleSearch(vehicle, normalizedSearchQuery),
+    );
   }
 
   if (filter === "servis") {
-    return vehicles.filter((vehicle) => vehicle.status === "Na servisu");
+    return activeVehicles.filter(
+      (vehicle) =>
+        (vehicle.openFaultCount > 0 || vehicle.status === "Na servisu") &&
+        matchesVehicleSearch(vehicle, normalizedSearchQuery),
+    );
   }
 
-  return vehicles;
+  return activeVehicles.filter((vehicle) => matchesVehicleSearch(vehicle, normalizedSearchQuery));
 }
 
 export function FleetSectionContent({
@@ -52,11 +92,24 @@ export function FleetSectionContent({
   initialFilter,
 }: FleetSectionContentProps) {
   const [activeFilter, setActiveFilter] = useState<FleetStatusFilter>(initialFilter);
+  const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const visibleVehicles = useMemo(
-    () => getFilteredVehicles(vehicles, activeFilter),
-    [activeFilter, vehicles],
+    () => getFilteredVehicles(vehicles, activeFilter, searchQuery),
+    [activeFilter, searchQuery, vehicles],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(visibleVehicles.length / ITEMS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pagedVehicles = useMemo(
+    () =>
+      visibleVehicles.slice(
+        (safeCurrentPage - 1) * ITEMS_PER_PAGE,
+        safeCurrentPage * ITEMS_PER_PAGE,
+      ),
+    [safeCurrentPage, visibleVehicles],
   );
 
   useEffect(() => {
@@ -102,9 +155,26 @@ export function FleetSectionContent({
       />
 
       <Card className="p-4">
-        <div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted">
-          <SlidersHorizontal size={14} />
-          Filter po statusu
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted">
+            <SlidersHorizontal size={14} />
+            Filter po statusu
+          </div>
+
+          <label className="flex h-9 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm text-muted sm:max-w-md">
+            <Search size={14} className="text-muted" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="Pretraži proizvođača, model, registraciju ili VIN"
+              className="h-full w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
+              aria-label="Pretraga vozila"
+            />
+          </label>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -112,7 +182,10 @@ export function FleetSectionContent({
             <button
               key={filter.key}
               type="button"
-              onClick={() => setActiveFilter(filter.key)}
+              onClick={() => {
+                setActiveFilter(filter.key);
+                setCurrentPage(1);
+              }}
               className={cn(
                 "inline-flex h-8 items-center rounded-lg border px-3 text-xs font-semibold uppercase tracking-[0.14em] transition",
                 activeFilter === filter.key
@@ -134,11 +207,19 @@ export function FleetSectionContent({
           onActionClick={openModal}
         />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {visibleVehicles.map((vehicle) => (
-            <VehicleStatusCard key={vehicle.id} vehicle={vehicle} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+            {pagedVehicles.map((vehicle) => (
+              <VehicleStatusCard key={vehicle.id} vehicle={vehicle} />
+            ))}
+          </div>
+
+          <PaginationControls
+            currentPage={safeCurrentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+          />
+        </>
       )}
 
       {isModalOpen ? (
@@ -174,6 +255,7 @@ export function FleetSectionContent({
                 modelOptions={formContext.modelOptions}
                 statusOptions={formContext.statusOptions}
                 manufacturerOptions={formContext.manufacturerOptions}
+                fuelTypeOptions={formContext.fuelTypeOptions}
                 onCancel={closeModal}
                 onSuccess={handleFormSuccess}
                 mode="modal"

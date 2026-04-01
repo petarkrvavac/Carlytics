@@ -1,7 +1,8 @@
 "use client";
 
-import { Loader2, Plus, RefreshCcw, SlidersHorizontal, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Loader2, Plus, RefreshCcw, Search, SlidersHorizontal, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import { updateEmployeeActivationAction } from "@/lib/actions/employee-actions";
@@ -15,8 +16,11 @@ import { FallbackChip } from "@/components/dashboard/fallback-chip";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils/cn";
+
+const ITEMS_PER_PAGE = 10;
 
 type EmployeeStatusFilter = "aktivni" | "deaktivirani" | "svi";
 type FormContextLoadStatus = "idle" | "loading" | "ready" | "error";
@@ -64,16 +68,29 @@ const FILTERS: Array<{ key: EmployeeStatusFilter; label: string }> = [
 function getVisibleEmployees(
   employees: EmployeeOverviewItem[],
   filter: EmployeeStatusFilter,
+  searchQuery: string,
 ) {
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  const matchesSearch = (employee: EmployeeOverviewItem) => {
+    if (!normalizedSearchQuery) {
+      return true;
+    }
+
+    return `${employee.firstName} ${employee.lastName}`
+      .toLowerCase()
+      .includes(normalizedSearchQuery);
+  };
+
   if (filter === "aktivni") {
-    return employees.filter((employee) => employee.isActive);
+    return employees.filter((employee) => employee.isActive && matchesSearch(employee));
   }
 
   if (filter === "deaktivirani") {
-    return employees.filter((employee) => !employee.isActive);
+    return employees.filter((employee) => !employee.isActive && matchesSearch(employee));
   }
 
-  return employees;
+  return employees.filter(matchesSearch);
 }
 
 function hasErrorMessage(value: unknown): value is { message: string } {
@@ -112,20 +129,38 @@ export function EmployeesSectionContent({
 }: EmployeesSectionContentProps) {
   const [activeFilter, setActiveFilter] =
     useState<EmployeeStatusFilter>("aktivni");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [deactivationTarget, setDeactivationTarget] = useState<EmployeeOverviewItem | null>(null);
+  const [deactivationReason, setDeactivationReason] = useState("");
+  const [deactivationReasonError, setDeactivationReasonError] = useState("");
   const [formContext, setFormContext] = useState<EmployeeFormContext | null>(null);
   const [formContextStatus, setFormContextStatus] = useState<FormContextLoadStatus>("idle");
   const [formContextError, setFormContextError] = useState("");
+  const deactivationFormRef = useRef<HTMLFormElement>(null);
+  const deactivationEmployeeIdRef = useRef<HTMLInputElement>(null);
+  const deactivationReasonRef = useRef<HTMLInputElement>(null);
 
   const visibleEmployees = useMemo(
-    () => getVisibleEmployees(overviewData.employees, activeFilter),
-    [activeFilter, overviewData.employees],
+    () => getVisibleEmployees(overviewData.employees, activeFilter, searchQuery),
+    [activeFilter, overviewData.employees, searchQuery],
+  );
+  const totalPages = Math.max(1, Math.ceil(visibleEmployees.length / ITEMS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pagedEmployees = useMemo(
+    () =>
+      visibleEmployees.slice(
+        (safeCurrentPage - 1) * ITEMS_PER_PAGE,
+        safeCurrentPage * ITEMS_PER_PAGE,
+      ),
+    [safeCurrentPage, visibleEmployees],
   );
 
   const isFormContextLoading = formContextStatus === "loading";
 
   useEffect(() => {
-    if (!isModalOpen) {
+    if (!isModalOpen && !deactivationTarget) {
       return;
     }
 
@@ -135,7 +170,7 @@ export function EmployeesSectionContent({
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [isModalOpen]);
+  }, [deactivationTarget, isModalOpen]);
 
   async function loadFormContext() {
     setFormContextStatus("loading");
@@ -189,6 +224,36 @@ export function EmployeesSectionContent({
     void loadFormContext();
   }
 
+  function closeDeactivationModal() {
+    setDeactivationTarget(null);
+    setDeactivationReason("");
+    setDeactivationReasonError("");
+  }
+
+  function submitEmployeeDeactivation() {
+    if (!deactivationTarget) {
+      return;
+    }
+
+    const normalizedReason = deactivationReason.trim();
+
+    if (normalizedReason.length < 3) {
+      setDeactivationReasonError("Razlog deaktivacije mora imati barem 3 znaka.");
+      return;
+    }
+
+    if (deactivationEmployeeIdRef.current) {
+      deactivationEmployeeIdRef.current.value = String(deactivationTarget.id);
+    }
+
+    if (deactivationReasonRef.current) {
+      deactivationReasonRef.current.value = normalizedReason;
+    }
+
+    closeDeactivationModal();
+    deactivationFormRef.current?.requestSubmit();
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -217,9 +282,26 @@ export function EmployeesSectionContent({
       />
 
       <Card className="p-4">
-        <div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted">
-          <SlidersHorizontal size={14} />
-          Filter po statusu
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted">
+            <SlidersHorizontal size={14} />
+            Filter po statusu
+          </div>
+
+          <label className="flex h-9 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm text-muted sm:max-w-md">
+            <Search size={14} className="text-muted" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="Pretraži ime i prezime"
+              className="h-full w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
+              aria-label="Pretraga zaposlenika"
+            />
+          </label>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -227,7 +309,10 @@ export function EmployeesSectionContent({
             <button
               key={filter.key}
               type="button"
-              onClick={() => setActiveFilter(filter.key)}
+              onClick={() => {
+                setActiveFilter(filter.key);
+                setCurrentPage(1);
+              }}
               className={cn(
                 "inline-flex h-8 items-center rounded-lg border px-3 text-xs font-semibold uppercase tracking-[0.14em] transition",
                 activeFilter === filter.key
@@ -262,11 +347,12 @@ export function EmployeesSectionContent({
                   <th className="px-3 py-3">Županija</th>
                   <th className="px-3 py-3">Država</th>
                   <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">Detalji</th>
                   <th className="px-3 py-3 text-right">Akcija</th>
                 </tr>
               </thead>
               <tbody>
-                {visibleEmployees.map((employee) => (
+                {pagedEmployees.map((employee) => (
                   <tr key={employee.id} className="border-b border-border/60 last:border-0">
                     <td className="px-3 py-3 font-medium text-slate-100">{employee.firstName}</td>
                     <td className="px-3 py-3 text-slate-200">{employee.lastName}</td>
@@ -280,43 +366,129 @@ export function EmployeesSectionContent({
                         {employee.isActive ? "Aktiviran" : "Deaktiviran"}
                       </Badge>
                     </td>
+                    <td className="px-3 py-3">
+                      <Link
+                        href={`/zaposlenici/${employee.id}`}
+                        className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+                      >
+                        Profil aktivnosti
+                      </Link>
+                    </td>
                     <td className="px-3 py-3 text-right">
-                      <form action={updateEmployeeActivationAction}>
-                        <input type="hidden" name="employeeId" value={employee.id} />
-                        <input
-                          type="hidden"
-                          name="isAktivan"
-                          value={employee.isActive ? "false" : "true"}
-                        />
+                      {employee.isActive ? (
                         <button
-                          type="submit"
-                          onClick={(event) => {
-                            if (!employee.isActive) {
-                              return;
-                            }
-
-                            if (!window.confirm("Potvrdi deaktivaciju zaposlenika.")) {
-                              event.preventDefault();
-                            }
+                          type="button"
+                          onClick={() => {
+                            setDeactivationTarget(employee);
+                            setDeactivationReason("");
+                            setDeactivationReasonError("");
                           }}
-                          className={cn(
-                            "inline-flex h-8 items-center rounded-lg border px-3 text-xs font-semibold transition",
-                            employee.isActive
-                              ? "border-rose-300 bg-rose-100 text-rose-800 hover:bg-rose-200 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-200"
-                              : "border-emerald-300 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:border-emerald-500/35 dark:bg-emerald-500/15 dark:text-emerald-200",
-                          )}
+                          className="inline-flex h-8 items-center rounded-lg border border-rose-300 bg-rose-100 px-3 text-xs font-semibold text-rose-800 transition hover:bg-rose-200 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-200"
                         >
-                          {employee.isActive ? "Deaktiviraj" : "Aktiviraj"}
+                          Deaktiviraj
                         </button>
-                      </form>
+                      ) : (
+                        <form action={updateEmployeeActivationAction}>
+                          <input type="hidden" name="employeeId" value={employee.id} />
+                          <input type="hidden" name="isAktivan" value="true" />
+                          <input type="hidden" name="razlogDeaktivacije" defaultValue="" />
+                          <button
+                            type="submit"
+                            className="inline-flex h-8 items-center rounded-lg border border-emerald-300 bg-emerald-100 px-3 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-200 dark:border-emerald-500/35 dark:bg-emerald-500/15 dark:text-emerald-200"
+                          >
+                            Aktiviraj
+                          </button>
+                        </form>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          <PaginationControls
+            currentPage={safeCurrentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            className="px-3 py-3"
+          />
         </Card>
       )}
+
+      <form ref={deactivationFormRef} action={updateEmployeeActivationAction}>
+        <input ref={deactivationEmployeeIdRef} type="hidden" name="employeeId" defaultValue="" />
+        <input type="hidden" name="isAktivan" value="false" />
+        <input ref={deactivationReasonRef} type="hidden" name="razlogDeaktivacije" defaultValue="" />
+      </form>
+
+      {deactivationTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-3 py-4 sm:p-6">
+          <button
+            type="button"
+            onClick={closeDeactivationModal}
+            aria-label="Zatvori popup razloga deaktivacije"
+            className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"
+          />
+
+          <div className="relative w-full max-w-lg rounded-2xl border border-border bg-background p-5 shadow-[0_0_0_1px_rgba(15,23,42,0.6),0_28px_80px_rgba(2,6,23,0.7)]">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">Deaktivacija zaposlenika</p>
+                <h3 className="mt-2 text-lg font-semibold text-foreground">Unesi razlog deaktivacije</h3>
+                <p className="mt-1 text-sm text-muted">
+                  {deactivationTarget.firstName} {deactivationTarget.lastName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeDeactivationModal}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-surface text-muted transition hover:border-cyan-500/45 hover:text-cyan-200"
+                aria-label="Zatvori popup"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.18em] text-muted">Razlog</span>
+              <textarea
+                value={deactivationReason}
+                onChange={(event) => {
+                  setDeactivationReason(event.target.value);
+                  if (deactivationReasonError) {
+                    setDeactivationReasonError("");
+                  }
+                }}
+                rows={4}
+                placeholder="Npr. Korisnik više nije aktivan u operativnom timu."
+                className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition focus:border-cyan-500/45"
+              />
+            </label>
+
+            {deactivationReasonError ? (
+              <p className="mt-2 text-sm text-rose-300">{deactivationReasonError}</p>
+            ) : null}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeDeactivationModal}
+                className="inline-flex h-9 items-center rounded-lg border border-border bg-surface px-3 text-xs font-semibold uppercase tracking-[0.12em] text-foreground transition hover:border-cyan-500/45 hover:text-cyan-200"
+              >
+                Odustani
+              </button>
+              <button
+                type="button"
+                onClick={submitEmployeeDeactivation}
+                className="inline-flex h-9 items-center rounded-lg border border-rose-300 bg-rose-100 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-rose-800 transition hover:bg-rose-200 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-200"
+              >
+                Potvrdi deaktivaciju
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isModalOpen ? (
         <div className="fixed inset-0 z-50 px-3 py-4 sm:p-6">

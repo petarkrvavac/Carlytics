@@ -83,6 +83,7 @@ const addVehicleSchema = z.object({
   noviModelNaziv: optionalTextSchema,
   noviProizvodjacNaziv: optionalTextSchema,
   kapacitetRezervoara: optionalNumberSchema,
+  tipGorivaId: optionalIntegerSchema,
   maliServisIntervalKm: optionalKmIntervalSchema,
   velikiServisIntervalKm: optionalKmIntervalSchema,
   statusId: z.coerce.number().int().positive("Status je obavezan."),
@@ -95,8 +96,203 @@ const addVehicleSchema = z.object({
   datumIstekaRegistracije: z.string().min(1, "Datum isteka registracije je obavezan."),
 });
 
+const extendVehicleRegistrationSchema = z.object({
+  vehicleId: z.coerce.number().int().positive("Vozilo je obavezno."),
+  datumIstekaRegistracije: z.string().min(1, "Novi datum isteka je obavezan."),
+});
+
+const updateVehicleActivationSchema = z.object({
+  vehicleId: z.coerce.number().int().positive("Vozilo je obavezno."),
+  isAktivan: z.enum(["true", "false"]),
+  razlogDeaktivacije: z.preprocess((value) => {
+    if (value === null || value === undefined) {
+      return "";
+    }
+
+    return String(value).trim();
+  }, z.string()),
+});
+
 function getDbClient() {
   return createOptionalServiceRoleSupabaseClient() ?? createOptionalServerSupabaseClient();
+}
+
+function isValidDateOnly(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime());
+}
+
+export async function extendVehicleRegistrationAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = extendVehicleRegistrationSchema.safeParse({
+    vehicleId: formData.get("vehicleId"),
+    datumIstekaRegistracije: formData.get("datumIstekaRegistracije"),
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Provjeri unesene podatke za produženje registracije.",
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    };
+  }
+
+  if (!isValidDateOnly(parsed.data.datumIstekaRegistracije)) {
+    return {
+      status: "error",
+      message: "Unesi ispravan datum isteka registracije.",
+      fieldErrors: {
+        datumIstekaRegistracije: ["Datum nije u ispravnom formatu."],
+      },
+    };
+  }
+
+  await requireSessionUser({
+    allowedRoles: ["admin", "voditelj_flote"],
+    redirectTo: "/prijava",
+    forbiddenRedirectTo: "/m",
+  });
+
+  const client = getDbClient();
+
+  if (!client) {
+    return {
+      status: "error",
+      message: "Supabase nije konfiguriran. Registracija nije produžena.",
+    };
+  }
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  if (parsed.data.datumIstekaRegistracije < todayIso) {
+    return {
+      status: "error",
+      message: "Datum isteka mora biti danas ili u budućnosti.",
+      fieldErrors: {
+        datumIstekaRegistracije: ["Unesi datum koji nije u prošlosti."],
+      },
+    };
+  }
+
+  const { data: registrationRow, error: registrationFetchError } = await client
+    .from("registracije")
+    .select("id, datum_isteka")
+    .eq("vozilo_id", parsed.data.vehicleId)
+    .order("datum_isteka", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (registrationFetchError) {
+    console.error(
+      "[carlytics] Neuspješan dohvat registracije za produženje:",
+      registrationFetchError.message,
+    );
+
+    return {
+      status: "error",
+      message: "Neuspješan dohvat postojeće registracije.",
+    };
+  }
+
+  if (!registrationRow) {
+    return {
+      status: "error",
+      message: "Vozilo nema registraciju za produženje.",
+    };
+  }
+
+  if (registrationRow.datum_isteka >= todayIso) {
+    return {
+      status: "error",
+      message: "Registraciju je moguće produžiti tek nakon isteka postojeće.",
+    };
+  }
+
+  const { error: registrationUpdateError } = await client
+    .from("registracije")
+    .update({
+      datum_registracije: todayIso,
+      datum_isteka: parsed.data.datumIstekaRegistracije,
+    })
+    .eq("id", registrationRow.id);
+
+  if (registrationUpdateError) {
+    console.error(
+      "[carlytics] Neuspješno produženje registracije:",
+      registrationUpdateError.message,
+    );
+
+    return {
+      status: "error",
+      message: "Produženje registracije nije uspjelo. Pokušaj ponovno.",
+    };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/flota");
+  revalidatePath(`/flota/${parsed.data.vehicleId}`);
+
+  return {
+    status: "success",
+    message: `Registracija je produžena do ${parsed.data.datumIstekaRegistracije}.`,
+  };
+}
+
+export async function updateVehicleActivationAction(formData: FormData) {
+  const parsed = updateVehicleActivationSchema.safeParse({
+    vehicleId: formData.get("vehicleId"),
+    isAktivan: formData.get("isAktivan"),
+    razlogDeaktivacije: formData.get("razlogDeaktivacije"),
+  });
+
+  if (!parsed.success) {
+    console.warn("[carlytics] Neispravan payload za updateVehicleActivationAction:", parsed.error.flatten().fieldErrors);
+    return;
+  }
+
+  await requireSessionUser({
+    allowedRoles: ["admin", "voditelj_flote"],
+    redirectTo: "/prijava",
+    forbiddenRedirectTo: "/m",
+  });
+
+  const client = getDbClient();
+
+  if (!client) {
+    console.error("[carlytics] Supabase nije konfiguriran za updateVehicleActivationAction.");
+    return;
+  }
+
+  const nextIsActive = parsed.data.isAktivan === "true";
+  const deactivationReason = parsed.data.razlogDeaktivacije;
+
+  if (!nextIsActive && deactivationReason.length < 3) {
+    console.warn("[carlytics] Deaktivacija vozila odbijena: razlog je prekratak.");
+    return;
+  }
+
+  const { error } = await client
+    .from("vozila")
+    .update({
+      is_aktivan: nextIsActive,
+      razlog_deaktivacije: nextIsActive ? null : deactivationReason,
+    })
+    .eq("id", parsed.data.vehicleId);
+
+  if (error) {
+    console.error("[carlytics] Neuspjelo ažuriranje statusa vozila:", error.message);
+    return;
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/flota");
+  revalidatePath(`/flota/${parsed.data.vehicleId}`);
 }
 
 export async function submitNewVehicleAction(
@@ -111,6 +307,7 @@ export async function submitNewVehicleAction(
     noviModelNaziv: formData.get("noviModelNaziv"),
     noviProizvodjacNaziv: formData.get("noviProizvodjacNaziv"),
     kapacitetRezervoara: formData.get("kapacitetRezervoara"),
+    tipGorivaId: formData.get("tipGorivaId"),
     maliServisIntervalKm: formData.get("maliServisIntervalKm"),
     velikiServisIntervalKm: formData.get("velikiServisIntervalKm"),
     statusId: formData.get("statusId"),
@@ -177,7 +374,7 @@ export async function submitNewVehicleAction(
   }
 
   await requireSessionUser({
-    allowedRoles: ["admin", "serviser"],
+    allowedRoles: ["admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/m",
   });
@@ -280,6 +477,7 @@ export async function submitNewVehicleAction(
           naziv: normalizedModelName,
           proizvodjac_id: resolvedManufacturerId,
           kapacitet_rezervoara: parsed.data.kapacitetRezervoara ?? null,
+          tip_goriva_id: parsed.data.tipGorivaId ?? null,
           mali_servis_interval_km: parsed.data.maliServisIntervalKm ?? null,
           veliki_servis_interval_km: parsed.data.velikiServisIntervalKm ?? null,
         })
@@ -344,6 +542,8 @@ export async function submitNewVehicleAction(
     };
   }
 
+  const initialServiceDate = parsed.data.datumKupovine ?? new Date().toISOString().slice(0, 10);
+
   const { data: insertedVehicle, error: vehicleInsertError } = await client
     .from("vozila")
     .insert({
@@ -351,7 +551,9 @@ export async function submitNewVehicleAction(
       model_id: resolvedModelId,
       status_id: parsed.data.statusId,
       trenutna_km: parsed.data.trenutnaKm,
+      zadnji_mali_servis_datum: initialServiceDate,
       zadnji_mali_servis_km: parsed.data.trenutnaKm,
+      zadnji_veliki_servis_datum: initialServiceDate,
       zadnji_veliki_servis_km: parsed.data.trenutnaKm,
       datum_kupovine: parsed.data.datumKupovine ?? null,
       nabavna_vrijednost: parsed.data.nabavnaVrijednost ?? null,

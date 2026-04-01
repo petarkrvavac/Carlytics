@@ -101,7 +101,7 @@ export async function submitFuelEntryAction(
   }
 
   const sessionUser = await requireSessionUser({
-    allowedRoles: ["radnik", "admin"],
+    allowedRoles: ["zaposlenik", "admin"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/dashboard",
   });
@@ -147,6 +147,7 @@ export async function submitFuelEntryAction(
     km_tocenja: parsed.data.kmTocenja,
     litraza: parsed.data.litraza,
     cijena_po_litri: parsed.data.cijenaPoLitri,
+    ukupni_iznos: ukupniIznos,
     zaduzenje_id: activeContext.assignmentId,
   });
 
@@ -198,6 +199,5 @@ export async function submitFuelEntryAction(
     };
   }
 
-  void ukupniIznos;
   redirect("/m");
 }

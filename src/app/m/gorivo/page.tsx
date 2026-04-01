@@ -5,7 +5,7 @@ import { getActiveWorkerVehicleContext } from "@/lib/fleet/worker-context-servic
 
 export default async function MobileGorivoPage() {
   const sessionUser = await requireSessionUser({
-    allowedRoles: ["radnik", "admin"],
+    allowedRoles: ["zaposlenik", "admin"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/dashboard",
   });

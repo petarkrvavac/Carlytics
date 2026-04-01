@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function MobileLayout({ children }: MobileLayoutProps) {
   const currentUser = await requireSessionUser({
-    allowedRoles: ["radnik", "admin"],
+    allowedRoles: ["zaposlenik", "admin"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/dashboard",
   });
@@ -41,7 +41,7 @@ export default async function MobileLayout({ children }: MobileLayoutProps) {
             <div className="flex items-center gap-2">
               <ThemeToggle compact />
               <MobileSignOutButton />
-              {currentUser.role !== "radnik" ? (
+              {currentUser.role !== "zaposlenik" ? (
                 <Link
                   href="/dashboard"
                   className="inline-flex h-8 items-center rounded-lg border border-cyan-500/35 bg-cyan-100 px-2.5 text-xs font-medium text-cyan-800 transition hover:border-cyan-500/55 hover:bg-cyan-200 dark:bg-cyan-500/12 dark:text-cyan-200 dark:hover:bg-cyan-500/20"
@@ -51,7 +51,7 @@ export default async function MobileLayout({ children }: MobileLayoutProps) {
               ) : null}
             </div>
           </div>
-          <p className="mt-2 text-xs text-muted">Brze akcije za radnike na terenu.</p>
+          <p className="mt-2 text-xs text-muted">Brze akcije za zaposlenike na terenu.</p>
           <p className="mt-1 text-xs text-muted">
             {currentUser.fullName} • {currentUser.roleLabel}
           </p>

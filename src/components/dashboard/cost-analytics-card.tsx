@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import {
   CategoryScale,
   Chart as ChartJS,
@@ -18,14 +17,12 @@ import { Line } from "react-chartjs-2";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import type { CostSeriesPoint } from "@/lib/fleet/types";
+import { useIsLightTheme } from "@/lib/hooks/use-is-light-theme";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler);
 
-export type CostCompareMode = "standard" | "ukupno" | "razlika";
-
 interface CostAnalyticsCardProps {
   series: CostSeriesPoint[];
-  mode?: CostCompareMode;
   isUsingFallbackData?: boolean;
 }
 
@@ -140,137 +137,57 @@ function getTicksStep(values: number[]) {
 
 export function CostAnalyticsCard({
   series,
-  mode = "standard",
   isUsingFallbackData = false,
 }: CostAnalyticsCardProps) {
-  const [isLightTheme, setIsLightTheme] = useState(false);
-
-  useEffect(() => {
-    const root = document.documentElement;
-
-    const applyTheme = () => {
-      setIsLightTheme(root.classList.contains("light"));
-    };
-
-    applyTheme();
-
-    const observer = new MutationObserver(applyTheme);
-    observer.observe(root, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
+  const isLightTheme = useIsLightTheme();
 
   const palette = resolveChartPalette(isLightTheme);
 
   const fuelValues = series.map((entry) => entry.fuelCost);
   const serviceValues = series.map((entry) => entry.serviceCost);
-  const totalValues = series.map((entry) => entry.fuelCost + entry.serviceCost);
-  const deltaValues = series.map((entry) => entry.serviceCost - entry.fuelCost);
 
   const totalFuel = fuelValues.reduce((sum, value) => sum + value, 0);
   const totalService = serviceValues.reduce((sum, value) => sum + value, 0);
-  const totalCombined = totalValues.reduce((sum, value) => sum + value, 0);
-  const deltaCombined = deltaValues.reduce((sum, value) => sum + value, 0);
 
-  const standardDomain = getChartDomain([...fuelValues, ...serviceValues]);
-  const totalDomain = getChartDomain(totalValues);
-  const deltaDomain = getChartDomain(deltaValues, true);
-
-  const domain =
-    mode === "ukupno"
-      ? totalDomain
-      : mode === "razlika"
-        ? deltaDomain
-        : standardDomain;
+  const domain = getChartDomain([...fuelValues, ...serviceValues]);
 
   const labels = series.map((entry) => entry.monthLabel);
 
-  const chartData: ChartData<"line"> =
-    mode === "ukupno"
-      ? {
-          labels,
-          datasets: [
-            {
-              label: "Ukupni trošak",
-              data: totalValues,
-              borderColor: palette.total,
-              backgroundColor: palette.fillTotal,
-              fill: true,
-              borderWidth: 3,
-              pointRadius: 3,
-              pointHoverRadius: 5,
-              pointBackgroundColor: palette.total,
-              pointBorderColor: "#ffffff",
-              pointBorderWidth: 2,
-              tension: 0.35,
-            },
-          ],
-        }
-      : mode === "razlika"
-        ? {
-            labels,
-            datasets: [
-              {
-                label: "Razlika servis - gorivo",
-                data: deltaValues,
-                borderColor: palette.delta,
-                backgroundColor: palette.fillDelta,
-                fill: true,
-                borderWidth: 3,
-                pointRadius: 3,
-                pointHoverRadius: 5,
-                pointBackgroundColor: palette.delta,
-                pointBorderColor: "#ffffff",
-                pointBorderWidth: 2,
-                tension: 0.35,
-              },
-            ],
-          }
-        : {
-            labels,
-            datasets: [
-              {
-                label: "Gorivo",
-                data: fuelValues,
-                borderColor: palette.fuel,
-                backgroundColor: palette.fillFuel,
-                fill: true,
-                borderWidth: 3,
-                pointRadius: 2.5,
-                pointHoverRadius: 4,
-                pointBackgroundColor: palette.fuel,
-                pointBorderColor: "#ffffff",
-                pointBorderWidth: 1.5,
-                tension: 0.35,
-              },
-              {
-                label: "Servis",
-                data: serviceValues,
-                borderColor: palette.service,
-                backgroundColor: palette.fillService,
-                fill: true,
-                borderWidth: 3,
-                pointRadius: 2.5,
-                pointHoverRadius: 4,
-                pointBackgroundColor: palette.service,
-                pointBorderColor: "#ffffff",
-                pointBorderWidth: 1.5,
-                tension: 0.35,
-              },
-            ],
-          };
+  const chartData: ChartData<"line"> = {
+    labels,
+    datasets: [
+      {
+        label: "Gorivo",
+        data: fuelValues,
+        borderColor: palette.fuel,
+        backgroundColor: palette.fillFuel,
+        fill: true,
+        borderWidth: 3,
+        pointRadius: 2.5,
+        pointHoverRadius: 4,
+        pointBackgroundColor: palette.fuel,
+        pointBorderColor: "#ffffff",
+        pointBorderWidth: 1.5,
+        tension: 0.35,
+      },
+      {
+        label: "Servis",
+        data: serviceValues,
+        borderColor: palette.service,
+        backgroundColor: palette.fillService,
+        fill: true,
+        borderWidth: 3,
+        pointRadius: 2.5,
+        pointHoverRadius: 4,
+        pointBackgroundColor: palette.service,
+        pointBorderColor: "#ffffff",
+        pointBorderWidth: 1.5,
+        tension: 0.35,
+      },
+    ],
+  };
 
-  const valuesForTicks =
-    mode === "ukupno"
-      ? totalValues
-      : mode === "razlika"
-        ? deltaValues
-        : [...fuelValues, ...serviceValues];
+  const valuesForTicks = [...fuelValues, ...serviceValues];
 
   const stepSize = getTicksStep(valuesForTicks);
 
@@ -321,18 +238,10 @@ export function CostAnalyticsCard({
           },
         },
         grid: {
-          color(context) {
-            if (mode === "razlika" && Number(context.tick.value) === 0) {
-              return palette.zeroLine;
-            }
-
+          color() {
             return palette.grid;
           },
-          lineWidth(context) {
-            if (mode === "razlika" && Number(context.tick.value) === 0) {
-              return 1.4;
-            }
-
+          lineWidth() {
             return 1;
           },
         },
@@ -340,12 +249,7 @@ export function CostAnalyticsCard({
     },
   };
 
-  const modeDescription =
-    mode === "ukupno"
-      ? "Trend ukupnog mjesečnog troška (gorivo + servis)."
-      : mode === "razlika"
-        ? "Mjesečna razlika servis - gorivo. Pozitivna vrijednost znači skuplji servis."
-        : "Usporedba troška goriva i servisa kroz zadnjih 6 mjeseci.";
+  const modeDescription = "Standardni prikaz troška goriva i servisa kroz zadnjih 6 mjeseci.";
 
   return (
     <Card className="p-4">
@@ -355,18 +259,8 @@ export function CostAnalyticsCard({
           <CardDescription className="mt-1">{modeDescription}</CardDescription>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {mode === "ukupno" ? (
-            <Badge variant="info">Ukupno {totalCombined.toLocaleString("hr-HR")} EUR</Badge>
-          ) : mode === "razlika" ? (
-            <Badge variant={deltaCombined >= 0 ? "warning" : "info"}>
-              Δ {deltaCombined.toLocaleString("hr-HR")} EUR
-            </Badge>
-          ) : (
-            <>
-              <Badge variant="info">Gorivo {totalFuel.toLocaleString("hr-HR")} EUR</Badge>
-              <Badge variant="warning">Servis {totalService.toLocaleString("hr-HR")} EUR</Badge>
-            </>
-          )}
+          <Badge variant="info">Gorivo {totalFuel.toLocaleString("hr-HR")} EUR</Badge>
+          <Badge variant="warning">Servis {totalService.toLocaleString("hr-HR")} EUR</Badge>
         </div>
       </div>
 

@@ -8,6 +8,7 @@ import { INITIAL_ACTION_STATE } from "@/lib/actions/action-state";
 import { submitNewVehicleAction } from "@/lib/actions/vehicle-actions";
 import { cn } from "@/lib/utils/cn";
 import type {
+  VehicleFuelTypeOption,
   VehicleManufacturerOption,
   VehicleModelOption,
   VehicleStatusOption,
@@ -17,6 +18,7 @@ interface AddVehicleFormProps {
   modelOptions: VehicleModelOption[];
   statusOptions: VehicleStatusOption[];
   manufacturerOptions: VehicleManufacturerOption[];
+  fuelTypeOptions: VehicleFuelTypeOption[];
   cancelHref?: string;
   onCancel?: () => void;
   onSuccess?: () => void;
@@ -27,6 +29,7 @@ export function AddVehicleForm({
   modelOptions,
   statusOptions,
   manufacturerOptions,
+  fuelTypeOptions,
   cancelHref = "/flota",
   onCancel,
   onSuccess,
@@ -61,10 +64,6 @@ export function AddVehicleForm({
     router.refresh();
     onSuccess?.();
   }, [onSuccess, router, state.status]);
-
-  useEffect(() => {
-    setSelectedModelId("");
-  }, [selectedManufacturerId]);
 
   const inputClassName =
     "mt-1.5 w-full rounded-xl border border-border bg-surface-elevated px-3 py-1.5 text-xs text-foreground placeholder:text-muted xl:py-2 xl:text-sm";
@@ -158,7 +157,10 @@ export function AddVehicleForm({
               <select
                 name="proizvodjacId"
                 value={selectedManufacturerId}
-                onChange={(event) => setSelectedManufacturerId(event.target.value)}
+                onChange={(event) => {
+                  setSelectedManufacturerId(event.target.value);
+                  setSelectedModelId("");
+                }}
                 className="carlytics-select mt-1.5 w-full px-3 py-1.5 text-xs xl:py-2 xl:text-sm"
               >
                 <option value="">Odaberi proizvođača</option>
@@ -292,6 +294,21 @@ export function AddVehicleForm({
                     className={cn("data-font", inputClassName)}
                     placeholder="70"
                   />
+                </label>
+
+                <label className="text-xs uppercase tracking-[0.2em] text-muted">
+                  Tip goriva
+                  <select
+                    name="tipGorivaId"
+                    className="carlytics-select mt-1.5 w-full px-3 py-1.5 text-xs xl:py-2 xl:text-sm"
+                  >
+                    <option value="">Odaberi tip goriva</option>
+                    {fuelTypeOptions.map((fuelType) => (
+                      <option key={fuelType.id} value={fuelType.id}>
+                        {fuelType.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
 
                 <label className="text-xs uppercase tracking-[0.2em] text-muted">

@@ -70,7 +70,7 @@ export function DesktopFaultReportForm({
             <option value="">Odaberi vozilo</option>
             {vehicles.map((vehicle) => (
               <option key={vehicle.id} value={vehicle.id}>
-                {vehicle.make} {vehicle.model} ({vehicle.plate})
+                {vehicle.make} {vehicle.model} ({vehicle.plate}) - {vehicle.status}
               </option>
             ))}
           </select>

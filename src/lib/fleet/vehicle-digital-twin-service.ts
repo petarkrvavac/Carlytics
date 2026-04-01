@@ -5,6 +5,12 @@ import {
   type FuelLedgerItem,
   type ServiceTimelineItem,
 } from "@/lib/fleet/operations-service";
+import { evaluateVehicleServiceDue } from "@/lib/fleet/service-due";
+import {
+  applyInterventionVisibilityFilter,
+  isInterventionInProgress,
+  isInterventionOpen,
+} from "@/lib/fleet/intervention-utils";
 import { createOptionalServerSupabaseClient } from "@/lib/supabase/server";
 import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import type { VehicleListItem, VehicleStatus } from "@/lib/fleet/types";
@@ -12,38 +18,84 @@ import type { Tables } from "@/types/database";
 
 type VehicleRow = Pick<
   Tables<"vozila">,
-  "id" | "model_id" | "status_id" | "trenutna_km" | "zadnji_mali_servis_km"
+  | "id"
+  | "broj_sasije"
+  | "model_id"
+  | "status_id"
+  | "trenutna_km"
+  | "datum_kupovine"
+  | "godina_proizvodnje"
+  | "is_aktivan"
+  | "mjesto_id"
+  | "nabavna_vrijednost"
+  | "razlog_deaktivacije"
+  | "zadnji_mali_servis_datum"
+  | "zadnji_mali_servis_km"
+  | "zadnji_veliki_servis_datum"
+  | "zadnji_veliki_servis_km"
 >;
 type ModelRow = Pick<
   Tables<"modeli">,
-  "id" | "naziv" | "proizvodjac_id" | "kapacitet_rezervoara" | "mali_servis_interval_km"
+  | "id"
+  | "naziv"
+  | "proizvodjac_id"
+  | "kapacitet_rezervoara"
+  | "tip_goriva_id"
+  | "mali_servis_interval_km"
+  | "veliki_servis_interval_km"
 >;
 type ManufacturerRow = Pick<Tables<"proizvodjaci">, "id" | "naziv">;
+type FuelTypeRow = Pick<Tables<"tipovi_goriva">, "id" | "naziv">;
 type StatusRow = Pick<Tables<"statusi_vozila">, "id" | "naziv">;
+type PlaceRow = Pick<Tables<"mjesta">, "id" | "naziv">;
 type RegistrationRow = Pick<
   Tables<"registracije">,
   "vozilo_id" | "registracijska_oznaka" | "datum_isteka"
->;
-type FaultRow = Pick<
-  Tables<"prijave_kvarova">,
-  "id" | "datum_prijave" | "vozilo_id" | "zaposlenik_id" | "opis_problema" | "hitnost" | "status_prijave"
 >;
 type AssignmentRow = Pick<
   Tables<"zaduzenja">,
   "id" | "datum_od" | "vozilo_id" | "zaposlenik_id" | "km_pocetna" | "km_zavrsna" | "is_aktivno"
 >;
 type EmployeeRow = Pick<Tables<"zaposlenici">, "id" | "ime" | "prezime" | "korisnicko_ime">;
+type TireRow = Pick<
+  Tables<"evidencija_guma">,
+  "id" | "datum_kupovine" | "sezona" | "proizvodjac" | "cijena" | "vozilo_id"
+>;
 type FuelRow = Pick<
   Tables<"evidencija_goriva">,
   "id" | "datum" | "km_tocenja" | "litraza" | "cijena_po_litri" | "ukupni_iznos" | "zaduzenje_id"
 >;
-type ServiceRow = Pick<
+type InterventionRow = Pick<
   Tables<"servisne_intervencije">,
-  "id" | "datum_pocetka" | "datum_zavrsetka" | "vozilo_id" | "km_u_tom_trenutku" | "opis" | "cijena"
+  "id"
+  | "datum_pocetka"
+  | "datum_zavrsetka"
+  | "vozilo_id"
+  | "zaposlenik_id"
+  | "km_u_tom_trenutku"
+  | "opis"
+  | "hitnost"
+  | "status_prijave"
+  | "cijena"
+  | "kategorija_id"
 >;
 
-const OPEN_FAULT_HINTS = ["novo", "otvor", "cek", "ceka", "obrada", "pending", "active"];
-const CLOSED_FAULT_HINTS = ["zatvor", "rijes", "rije", "closed", "resolved", "done"];
+const SERVICE_FAULT_CATEGORY_ID = 9;
+const MONTH_BUCKET_COUNT = 6;
+const HR_MONTH_LABELS = [
+  "Sij",
+  "Velj",
+  "Ožu",
+  "Tra",
+  "Svi",
+  "Lip",
+  "Srp",
+  "Kol",
+  "Ruj",
+  "Lis",
+  "Stu",
+  "Pro",
+] as const;
 const PRIORITY_RANK = {
   kriticno: 0,
   visoko: 1,
@@ -52,11 +104,30 @@ const PRIORITY_RANK = {
 } as const;
 type FaultPriority = keyof typeof PRIORITY_RANK;
 
+export interface VehicleTireHistoryItem {
+  id: number;
+  season: string | null;
+  manufacturer: string | null;
+  purchaseDateIso: string | null;
+  cost: number | null;
+}
+
+export interface VehicleCostBreakdownPoint {
+  monthKey: string;
+  monthLabel: string;
+  fuelCost: number;
+  tireCost: number;
+  regularServiceCost: number;
+  extraordinaryServiceCost: number;
+}
+
 export interface VehicleDigitalTwinData {
   vehicle: VehicleListItem | null;
   activeAssignment: ActiveAssignmentOverviewItem | null;
   faultHistory: FaultQueueItem[];
   fuelHistory: FuelLedgerItem[];
+  tireHistory: VehicleTireHistoryItem[];
+  costBreakdownSeries: VehicleCostBreakdownPoint[];
   serviceHistory: ServiceTimelineItem[];
   isUsingFallbackData: boolean;
 }
@@ -73,6 +144,112 @@ function parseDate(value: string | null | undefined) {
   }
 
   return parsed;
+}
+
+function normalizeLabel(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function toMonthKey(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${date.getFullYear()}-${month}`;
+}
+
+function getMonthBuckets(months: number): VehicleCostBreakdownPoint[] {
+  const now = new Date();
+  const buckets: VehicleCostBreakdownPoint[] = [];
+
+  for (let index = months - 1; index >= 0; index -= 1) {
+    const bucketDate = new Date(now.getFullYear(), now.getMonth() - index, 1);
+
+    buckets.push({
+      monthKey: toMonthKey(bucketDate),
+      monthLabel: HR_MONTH_LABELS[bucketDate.getMonth()],
+      fuelCost: 0,
+      tireCost: 0,
+      regularServiceCost: 0,
+      extraordinaryServiceCost: 0,
+    });
+  }
+
+  return buckets;
+}
+
+function buildCostBreakdownSeries(
+  fuelRows: FuelRow[],
+  tireRows: TireRow[],
+  serviceRows: InterventionRow[],
+) {
+  const buckets = getMonthBuckets(MONTH_BUCKET_COUNT);
+  const bucketByKey = new Map(buckets.map((bucket) => [bucket.monthKey, bucket]));
+
+  for (const fuel of fuelRows) {
+    const date = parseDate(fuel.datum);
+
+    if (!date) {
+      continue;
+    }
+
+    const bucket = bucketByKey.get(toMonthKey(date));
+
+    if (!bucket) {
+      continue;
+    }
+
+    const total = fuel.ukupni_iznos ?? fuel.litraza * fuel.cijena_po_litri;
+    bucket.fuelCost += total;
+  }
+
+  for (const tire of tireRows) {
+    const date = parseDate(tire.datum_kupovine);
+
+    if (!date || !tire.cijena) {
+      continue;
+    }
+
+    const bucket = bucketByKey.get(toMonthKey(date));
+
+    if (!bucket) {
+      continue;
+    }
+
+    bucket.tireCost += tire.cijena;
+  }
+
+  for (const service of serviceRows) {
+    const date = parseDate(service.datum_zavrsetka ?? service.datum_pocetka);
+
+    if (!date) {
+      continue;
+    }
+
+    const bucket = bucketByKey.get(toMonthKey(date));
+
+    if (!bucket) {
+      continue;
+    }
+
+    const cost = service.cijena ?? 0;
+
+    if (service.kategorija_id === SERVICE_FAULT_CATEGORY_ID) {
+      bucket.regularServiceCost += cost;
+    } else {
+      bucket.extraordinaryServiceCost += cost;
+    }
+  }
+
+  return buckets.map((bucket) => ({
+    ...bucket,
+    fuelCost: Number(bucket.fuelCost.toFixed(2)),
+    tireCost: Number(bucket.tireCost.toFixed(2)),
+    regularServiceCost: Number(bucket.regularServiceCost.toFixed(2)),
+    extraordinaryServiceCost: Number(bucket.extraordinaryServiceCost.toFixed(2)),
+  }));
 }
 
 function getDaysUntil(isoDate: string | null | undefined) {
@@ -108,22 +285,34 @@ function normalizeStatus(label: string | null | undefined): VehicleStatus {
   return "Slobodno";
 }
 
-function isFaultOpen(status: string | null) {
-  if (!status) {
-    return true;
+function resolveVehicleStatus(params: {
+  statusLabel: string | null | undefined;
+  hasInProgressIntervention: boolean;
+  hasActiveAssignment: boolean;
+}): VehicleStatus {
+  if (params.hasInProgressIntervention) {
+    return "Na servisu";
   }
 
-  const normalized = status.toLowerCase();
-
-  if (CLOSED_FAULT_HINTS.some((hint) => normalized.includes(hint))) {
-    return false;
+  if (params.hasActiveAssignment) {
+    return "Zauzeto";
   }
 
-  if (OPEN_FAULT_HINTS.some((hint) => normalized.includes(hint))) {
-    return true;
+  return normalizeStatus(params.statusLabel);
+}
+
+function mapLocationByCity(places: PlaceRow[]) {
+  const cityById = new Map<number, string>();
+
+  for (const place of places) {
+    const cityLabel = normalizeLabel(place.naziv);
+
+    if (cityLabel) {
+      cityById.set(place.id, cityLabel);
+    }
   }
 
-  return true;
+  return cityById;
 }
 
 function normalizeFaultPriority(hitnost: string | null): FaultPriority {
@@ -150,7 +339,7 @@ function normalizeFaultPriority(hitnost: string | null): FaultPriority {
 
 function normalizeFaultStatusLabel(status: string | null, open: boolean) {
   if (!status) {
-    return open ? "Novo" : "Zatvoreno";
+    return open ? "Novo" : "Riješeno";
   }
 
   const normalized = status.toLowerCase();
@@ -159,8 +348,14 @@ function normalizeFaultStatusLabel(status: string | null, open: boolean) {
     return "U obradi";
   }
 
-  if (normalized.includes("zat") || normalized.includes("closed") || normalized.includes("res")) {
-    return "Zatvoreno";
+  if (
+    normalized.includes("zat") ||
+    normalized.includes("rije") ||
+    normalized.includes("rijes") ||
+    normalized.includes("closed") ||
+    normalized.includes("res")
+  ) {
+    return "Riješeno";
   }
 
   if (normalized.includes("novo") || normalized.includes("otvor")) {
@@ -221,37 +416,57 @@ async function getVehicleSnapshotById(vehicleId: number) {
       vehicleResult,
       modelsResult,
       manufacturersResult,
+      fuelTypesResult,
       statusesResult,
+      placesResult,
       registrationsResult,
-      faultsResult,
+      assignmentsResult,
+      interventionsResult,
     ] = await Promise.all([
       client
         .from("vozila")
-        .select("id, model_id, status_id, trenutna_km, zadnji_mali_servis_km")
+        .select(
+          "id, broj_sasije, model_id, status_id, trenutna_km, datum_kupovine, godina_proizvodnje, is_aktivan, mjesto_id, nabavna_vrijednost, razlog_deaktivacije, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km",
+        )
         .eq("id", vehicleId)
         .maybeSingle(),
       client
         .from("modeli")
-        .select("id, naziv, proizvodjac_id, kapacitet_rezervoara, mali_servis_interval_km"),
+        .select(
+          "id, naziv, proizvodjac_id, kapacitet_rezervoara, tip_goriva_id, mali_servis_interval_km, veliki_servis_interval_km",
+        ),
       client.from("proizvodjaci").select("id, naziv"),
+      client.from("tipovi_goriva").select("id, naziv"),
       client.from("statusi_vozila").select("id, naziv"),
+      client.from("mjesta").select("id, naziv"),
       client
         .from("registracije")
         .select("vozilo_id, registracijska_oznaka, datum_isteka")
         .eq("vozilo_id", vehicleId),
       client
-        .from("prijave_kvarova")
-        .select("id, datum_prijave, vozilo_id, zaposlenik_id, opis_problema, hitnost, status_prijave")
+        .from("zaduzenja")
+        .select("vozilo_id, is_aktivno")
         .eq("vozilo_id", vehicleId),
+      applyInterventionVisibilityFilter(
+        client
+          .from("servisne_intervencije")
+          .select(
+            "id, datum_pocetka, datum_zavrsetka, vozilo_id, zaposlenik_id, km_u_tom_trenutku, opis, hitnost, status_prijave, kategorija_id, cijena",
+          )
+          .eq("vozilo_id", vehicleId),
+      ),
     ] as const);
 
     const queryError = [
       vehicleResult.error,
       modelsResult.error,
       manufacturersResult.error,
+      fuelTypesResult.error,
       statusesResult.error,
+      placesResult.error,
       registrationsResult.error,
-      faultsResult.error,
+      assignmentsResult.error,
+      interventionsResult.error,
     ].find((error) => Boolean(error));
 
     if (queryError) {
@@ -268,15 +483,20 @@ async function getVehicleSnapshotById(vehicleId: number) {
     const vehicleRow = vehicleResult.data as VehicleRow;
     const models = (modelsResult.data ?? []) as ModelRow[];
     const manufacturers = (manufacturersResult.data ?? []) as ManufacturerRow[];
+    const fuelTypes = (fuelTypesResult.data ?? []) as FuelTypeRow[];
     const statuses = (statusesResult.data ?? []) as StatusRow[];
+    const places = (placesResult.data ?? []) as PlaceRow[];
     const registrations = (registrationsResult.data ?? []) as RegistrationRow[];
-    const faultRows = (faultsResult.data ?? []) as FaultRow[];
+    const assignments = (assignmentsResult.data ?? []) as AssignmentRow[];
+    const interventionRows = (interventionsResult.data ?? []) as InterventionRow[];
 
     const modelById = new Map(models.map((model: ModelRow) => [model.id, model]));
     const manufacturerById = new Map(
       manufacturers.map((manufacturer: ManufacturerRow) => [manufacturer.id, manufacturer]),
     );
+    const fuelTypeById = new Map(fuelTypes.map((fuelType: FuelTypeRow) => [fuelType.id, fuelType]));
     const statusById = new Map(statuses.map((status: StatusRow) => [status.id, status]));
+    const cityById = mapLocationByCity(places);
 
     const model = vehicleRow.model_id ? modelById.get(vehicleRow.model_id) : null;
     const manufacturer = model?.proizvodjac_id
@@ -285,11 +505,26 @@ async function getVehicleSnapshotById(vehicleId: number) {
     const statusLabel = vehicleRow.status_id ? statusById.get(vehicleRow.status_id)?.naziv : null;
 
     const latestRegistration = getLatestRegistration(registrations);
-    const openFaultCount = faultRows.filter((fault: FaultRow) => isFaultOpen(fault.status_prijave)).length;
+    const openFaultCount = interventionRows.filter((row) => isInterventionOpen(row.status_prijave, row.datum_zavrsetka)).length;
+    const hasInProgressIntervention = interventionRows.some(
+      (row) =>
+        isInterventionOpen(row.status_prijave, row.datum_zavrsetka) &&
+        isInterventionInProgress(row.status_prijave),
+    );
+    const hasActiveAssignment = assignments.some((assignment) => assignment.is_aktivno);
+    const isActive = vehicleRow.is_aktivan !== false;
+    const cityLabel = vehicleRow.mjesto_id ? (cityById.get(vehicleRow.mjesto_id) ?? null) : null;
 
     const currentKm = vehicleRow.trenutna_km ?? 0;
-    const lastSmallServiceKm = vehicleRow.zadnji_mali_servis_km ?? 0;
-    const smallServiceIntervalKm = model?.mali_servis_interval_km ?? 15000;
+    const serviceDue = evaluateVehicleServiceDue({
+      currentKm,
+      lastSmallServiceKm: vehicleRow.zadnji_mali_servis_km,
+      lastLargeServiceKm: vehicleRow.zadnji_veliki_servis_km,
+      smallServiceIntervalKm: model?.mali_servis_interval_km,
+      largeServiceIntervalKm: model?.veliki_servis_interval_km,
+      lastSmallServiceDate: vehicleRow.zadnji_mali_servis_datum ?? vehicleRow.datum_kupovine,
+      lastLargeServiceDate: vehicleRow.zadnji_veliki_servis_datum ?? vehicleRow.datum_kupovine,
+    });
 
     return {
       vehicle: {
@@ -299,10 +534,33 @@ async function getVehicleSnapshotById(vehicleId: number) {
         plate: latestRegistration?.registracijska_oznaka ?? `V-${vehicleRow.id}`,
         km: currentKm,
         fuelCapacity: model?.kapacitet_rezervoara ?? 0,
-        serviceDueKm: smallServiceIntervalKm - (currentKm - lastSmallServiceKm),
-        status: normalizeStatus(statusLabel),
+        fuelTypeLabel: model?.tip_goriva_id
+          ? (fuelTypeById.get(model.tip_goriva_id)?.naziv ?? null)
+          : null,
+        serviceDueKm: serviceDue.serviceDueKm,
+        serviceDueType: serviceDue.serviceDueType,
+        serviceDueLabel: serviceDue.serviceDueLabel,
+        serviceProgressIntervalKm: serviceDue.serviceProgressIntervalKm,
+        isServiceDue: serviceDue.isServiceDue,
+        status: resolveVehicleStatus({
+          statusLabel,
+          hasInProgressIntervention,
+          hasActiveAssignment,
+        }),
         registrationExpiryDays: getDaysUntil(latestRegistration?.datum_isteka),
+        registrationExpiryDateIso: latestRegistration?.datum_isteka ?? null,
         openFaultCount,
+        isActive,
+        deactivationReason: vehicleRow.razlog_deaktivacije ?? null,
+        vin: vehicleRow.broj_sasije,
+        acquisitionValue: vehicleRow.nabavna_vrijednost,
+        productionYear: vehicleRow.godina_proizvodnje,
+        registrationCity: cityLabel,
+        locationCity: cityLabel,
+        lastSmallServiceDate: vehicleRow.zadnji_mali_servis_datum,
+        lastSmallServiceKm: vehicleRow.zadnji_mali_servis_km,
+        lastLargeServiceDate: vehicleRow.zadnji_veliki_servis_datum,
+        lastLargeServiceKm: vehicleRow.zadnji_veliki_servis_km,
       } satisfies VehicleListItem,
       isUsingFallbackData: false,
     };
@@ -328,6 +586,8 @@ async function getVehicleOperationalHistory(
   activeAssignment: ActiveAssignmentOverviewItem | null;
   faultHistory: FaultQueueItem[];
   fuelHistory: FuelLedgerItem[];
+  tireHistory: VehicleTireHistoryItem[];
+  costBreakdownSeries: VehicleCostBreakdownPoint[];
   serviceHistory: ServiceTimelineItem[];
   isUsingFallbackData: boolean;
 }> {
@@ -338,33 +598,39 @@ async function getVehicleOperationalHistory(
       activeAssignment: null,
       faultHistory: [],
       fuelHistory: [],
+      tireHistory: [],
+      costBreakdownSeries: [],
       serviceHistory: [],
       isUsingFallbackData: true,
     };
   }
 
   try {
-    const [assignmentsResult, employeesResult, faultsResult, servicesResult] = await Promise.all([
+    const [assignmentsResult, employeesResult, interventionsResult, tiresResult] = await Promise.all([
       client
         .from("zaduzenja")
         .select("id, datum_od, vozilo_id, zaposlenik_id, km_pocetna, km_zavrsna, is_aktivno")
         .eq("vozilo_id", vehicleId),
       client.from("zaposlenici").select("id, ime, prezime, korisnicko_ime"),
+      applyInterventionVisibilityFilter(
+        client
+          .from("servisne_intervencije")
+          .select(
+            "id, datum_pocetka, datum_zavrsetka, vozilo_id, zaposlenik_id, km_u_tom_trenutku, opis, hitnost, status_prijave, cijena, kategorija_id",
+          )
+          .eq("vozilo_id", vehicleId),
+      ),
       client
-        .from("prijave_kvarova")
-        .select("id, datum_prijave, vozilo_id, zaposlenik_id, opis_problema, hitnost, status_prijave")
-        .eq("vozilo_id", vehicleId),
-      client
-        .from("servisne_intervencije")
-        .select("id, datum_pocetka, datum_zavrsetka, vozilo_id, km_u_tom_trenutku, opis, cijena")
+        .from("evidencija_guma")
+        .select("id, datum_kupovine, sezona, proizvodjac, cijena, vozilo_id")
         .eq("vozilo_id", vehicleId),
     ] as const);
 
     const queryError = [
       assignmentsResult.error,
       employeesResult.error,
-      faultsResult.error,
-      servicesResult.error,
+      interventionsResult.error,
+      tiresResult.error,
     ].find((error) => Boolean(error));
 
     if (queryError) {
@@ -373,8 +639,8 @@ async function getVehicleOperationalHistory(
 
     const assignments = (assignmentsResult.data ?? []) as AssignmentRow[];
     const employees = (employeesResult.data ?? []) as EmployeeRow[];
-    const faults = (faultsResult.data ?? []) as FaultRow[];
-    const services = (servicesResult.data ?? []) as ServiceRow[];
+    const interventions = (interventionsResult.data ?? []) as InterventionRow[];
+    const tires = (tiresResult.data ?? []) as TireRow[];
 
     const assignmentIds = assignments.map((assignment) => assignment.id);
     let fuelRows: FuelRow[] = [];
@@ -395,7 +661,7 @@ async function getVehicleOperationalHistory(
     const assignmentById = new Map(assignments.map((assignment) => [assignment.id, assignment]));
     const employeeLookup = buildEmployeeLookup(employees);
 
-    const openFaultCount = faults.filter((fault) => isFaultOpen(fault.status_prijave)).length;
+    const openFaultCount = interventions.filter((row) => isInterventionOpen(row.status_prijave, row.datum_zavrsetka)).length;
     const activeAssignmentRow = [...assignments]
       .filter((assignment) => assignment.is_aktivno)
       .sort((left, right) => compareDatesDesc(left.datum_od, right.datum_od))[0];
@@ -422,24 +688,24 @@ async function getVehicleOperationalHistory(
         }
       : null;
 
-    const faultHistory = faults
-      .map<FaultQueueItem>((fault) => {
-        const open = isFaultOpen(fault.status_prijave);
-        const priority = normalizeFaultPriority(fault.hitnost);
+    const faultHistory = interventions
+      .map<FaultQueueItem>((intervention) => {
+        const open = isInterventionOpen(intervention.status_prijave, intervention.datum_zavrsetka);
+        const priority = normalizeFaultPriority(intervention.hitnost);
 
         return {
-          id: fault.id,
-          reportedAtIso: fault.datum_prijave ?? new Date(0).toISOString(),
+          id: intervention.id,
+          reportedAtIso: intervention.datum_pocetka,
           vehicleId,
           vehicleLabel: `${vehicle.make} ${vehicle.model}`,
           plate: vehicle.plate,
-          reporterName: fault.zaposlenik_id
-            ? (employeeLookup.get(fault.zaposlenik_id)?.fullName ?? "Nepoznati zaposlenik")
+          reporterName: intervention.zaposlenik_id
+            ? (employeeLookup.get(intervention.zaposlenik_id)?.fullName ?? "Nepoznati zaposlenik")
             : "Nepoznati zaposlenik",
-          description: fault.opis_problema,
+          description: intervention.opis?.trim() || "Bez opisa",
           priority,
-          statusRaw: fault.status_prijave,
-          statusLabel: normalizeFaultStatusLabel(fault.status_prijave, open),
+          statusRaw: intervention.status_prijave,
+          statusLabel: normalizeFaultStatusLabel(intervention.status_prijave, open),
           isOpen: open,
         };
       })
@@ -473,6 +739,7 @@ async function getVehicleOperationalHistory(
           vehicleId,
           vehicleLabel: `${vehicle.make} ${vehicle.model}`,
           plate: vehicle.plate,
+          fuelTypeLabel: vehicle.fuelTypeLabel,
           employeeName: assignment?.zaposlenik_id
             ? (employeeLookup.get(assignment.zaposlenik_id)?.fullName ?? "Nepoznati zaposlenik")
             : "Nepoznati zaposlenik",
@@ -484,7 +751,7 @@ async function getVehicleOperationalHistory(
       })
       .sort((left, right) => compareDatesDesc(left.dateIso, right.dateIso));
 
-    const serviceHistory = services
+    const serviceHistory = interventions
       .map<ServiceTimelineItem>((service) => ({
         id: service.id,
         startedAtIso: service.datum_pocetka,
@@ -496,13 +763,32 @@ async function getVehicleOperationalHistory(
         description: service.opis?.trim() || "Bez opisa zahvata",
         cost: service.cijena ?? 0,
         isOpen: !service.datum_zavrsetka,
+        categoryId: service.kategorija_id,
+        categoryLabel:
+          service.kategorija_id === SERVICE_FAULT_CATEGORY_ID
+            ? "Redovni servis"
+            : "Izvanredni servis",
       }))
       .sort((left, right) => compareDatesDesc(left.startedAtIso, right.startedAtIso));
+
+    const tireHistory = [...tires]
+      .sort((left, right) => compareDatesDesc(left.datum_kupovine, right.datum_kupovine))
+      .map<VehicleTireHistoryItem>((entry) => ({
+        id: entry.id,
+        season: entry.sezona,
+        manufacturer: entry.proizvodjac,
+        purchaseDateIso: entry.datum_kupovine,
+        cost: entry.cijena,
+      }));
+
+    const costBreakdownSeries = buildCostBreakdownSeries(fuelRows, tires, interventions);
 
     return {
       activeAssignment,
       faultHistory,
       fuelHistory,
+      tireHistory,
+      costBreakdownSeries,
       serviceHistory,
       isUsingFallbackData: false,
     };
@@ -512,6 +798,8 @@ async function getVehicleOperationalHistory(
       activeAssignment: null,
       faultHistory: [],
       fuelHistory: [],
+      tireHistory: [],
+      costBreakdownSeries: [],
       serviceHistory: [],
       isUsingFallbackData: true,
     };
@@ -529,6 +817,8 @@ export async function getVehicleDigitalTwinData(
       activeAssignment: null,
       faultHistory: [],
       fuelHistory: [],
+      tireHistory: [],
+      costBreakdownSeries: [],
       serviceHistory: [],
       isUsingFallbackData: snapshotResult.isUsingFallbackData,
     };
@@ -541,6 +831,8 @@ export async function getVehicleDigitalTwinData(
     activeAssignment: history.activeAssignment,
     faultHistory: history.faultHistory,
     fuelHistory: history.fuelHistory,
+    tireHistory: history.tireHistory,
+    costBreakdownSeries: history.costBreakdownSeries,
     serviceHistory: history.serviceHistory,
     isUsingFallbackData: snapshotResult.isUsingFallbackData || history.isUsingFallbackData,
   };

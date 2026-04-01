@@ -129,36 +129,6 @@ export type Database = {
           },
         ]
       }
-      intervencije_kategorije: {
-        Row: {
-          intervencija_id: number
-          kategorija_id: number
-        }
-        Insert: {
-          intervencija_id: number
-          kategorija_id: number
-        }
-        Update: {
-          intervencija_id?: number
-          kategorija_id?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "intervencije_kategorije_intervencija_id_fkey"
-            columns: ["intervencija_id"]
-            isOneToOne: false
-            referencedRelation: "servisne_intervencije"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "intervencije_kategorije_kategorija_id_fkey"
-            columns: ["kategorija_id"]
-            isOneToOne: false
-            referencedRelation: "kategorije_kvarova"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       kategorije_kvarova: {
         Row: {
           id: number
@@ -273,61 +243,6 @@ export type Database = {
           },
         ]
       }
-      prijave_kvarova: {
-        Row: {
-          datum_prijave: string | null
-          hitnost: string | null
-          id: number
-          opis_problema: string
-          servis_id: number | null
-          status_prijave: string | null
-          vozilo_id: number | null
-          zaposlenik_id: number | null
-        }
-        Insert: {
-          datum_prijave?: string | null
-          hitnost?: string | null
-          id?: never
-          opis_problema: string
-          servis_id?: number | null
-          status_prijave?: string | null
-          vozilo_id?: number | null
-          zaposlenik_id?: number | null
-        }
-        Update: {
-          datum_prijave?: string | null
-          hitnost?: string | null
-          id?: never
-          opis_problema?: string
-          servis_id?: number | null
-          status_prijave?: string | null
-          vozilo_id?: number | null
-          zaposlenik_id?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "prijave_kvarova_servis_id_fkey"
-            columns: ["servis_id"]
-            isOneToOne: false
-            referencedRelation: "servisne_intervencije"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "prijave_kvarova_vozilo_id_fkey"
-            columns: ["vozilo_id"]
-            isOneToOne: false
-            referencedRelation: "vozila"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "prijave_kvarova_zaposlenik_id_fkey"
-            columns: ["zaposlenik_id"]
-            isOneToOne: false
-            referencedRelation: "zaposlenici"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       proizvodjaci: {
         Row: {
           id: number
@@ -383,35 +298,61 @@ export type Database = {
           cijena: number | null
           datum_pocetka: string
           datum_zavrsetka: string | null
+          hitnost: string | null
           id: number
+          kategorija_id: number | null
           km_u_tom_trenutku: number
           opis: string | null
+          status_prijave: string | null
           vozilo_id: number | null
+          zaposlenik_id: number | null
         }
         Insert: {
           cijena?: number | null
           datum_pocetka?: string
           datum_zavrsetka?: string | null
+          hitnost?: string | null
           id?: never
+          kategorija_id?: number | null
           km_u_tom_trenutku: number
           opis?: string | null
+          status_prijave?: string | null
           vozilo_id?: number | null
+          zaposlenik_id?: number | null
         }
         Update: {
           cijena?: number | null
           datum_pocetka?: string
           datum_zavrsetka?: string | null
+          hitnost?: string | null
           id?: never
+          kategorija_id?: number | null
           km_u_tom_trenutku?: number
           opis?: string | null
+          status_prijave?: string | null
           vozilo_id?: number | null
+          zaposlenik_id?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "servisne_intervencije_kategorija_id_fkey"
+            columns: ["kategorija_id"]
+            isOneToOne: false
+            referencedRelation: "kategorije_kvarova"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "servisne_intervencije_vozilo_id_fkey"
             columns: ["vozilo_id"]
             isOneToOne: false
             referencedRelation: "vozila"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "servisne_intervencije_zaposlenik_id_fkey"
+            columns: ["zaposlenik_id"]
+            isOneToOne: false
+            referencedRelation: "zaposlenici"
             referencedColumns: ["id"]
           },
         ]
@@ -467,12 +408,16 @@ export type Database = {
           datum_kupovine: string | null
           godina_proizvodnje: number | null
           id: number
+          is_aktivan: boolean | null
           mjesto_id: number | null
           model_id: number | null
           nabavna_vrijednost: number | null
+          razlog_deaktivacije: string | null
           status_id: number | null
           trenutna_km: number | null
+          zadnji_mali_servis_datum: string | null
           zadnji_mali_servis_km: number | null
+          zadnji_veliki_servis_datum: string | null
           zadnji_veliki_servis_km: number | null
         }
         Insert: {
@@ -480,12 +425,16 @@ export type Database = {
           datum_kupovine?: string | null
           godina_proizvodnje?: number | null
           id?: never
+          is_aktivan?: boolean | null
           mjesto_id?: number | null
           model_id?: number | null
           nabavna_vrijednost?: number | null
+          razlog_deaktivacije?: string | null
           status_id?: number | null
           trenutna_km?: number | null
+          zadnji_mali_servis_datum?: string | null
           zadnji_mali_servis_km?: number | null
+          zadnji_veliki_servis_datum?: string | null
           zadnji_veliki_servis_km?: number | null
         }
         Update: {
@@ -493,12 +442,16 @@ export type Database = {
           datum_kupovine?: string | null
           godina_proizvodnje?: number | null
           id?: never
+          is_aktivan?: boolean | null
           mjesto_id?: number | null
           model_id?: number | null
           nabavna_vrijednost?: number | null
+          razlog_deaktivacije?: string | null
           status_id?: number | null
           trenutna_km?: number | null
+          zadnji_mali_servis_datum?: string | null
           zadnji_mali_servis_km?: number | null
+          zadnji_veliki_servis_datum?: string | null
           zadnji_veliki_servis_km?: number | null
         }
         Relationships: [
@@ -585,6 +538,7 @@ export type Database = {
           pozivnica_token: string | null
           pozivnica_vrijedi_do: string | null
           prezime: string
+          razlog_deaktivacije: string | null
           uloga_id: number | null
         }
         Insert: {
@@ -598,6 +552,7 @@ export type Database = {
           pozivnica_token?: string | null
           pozivnica_vrijedi_do?: string | null
           prezime: string
+          razlog_deaktivacije?: string | null
           uloga_id?: number | null
         }
         Update: {
@@ -611,6 +566,7 @@ export type Database = {
           pozivnica_token?: string | null
           pozivnica_vrijedi_do?: string | null
           prezime?: string
+          razlog_deaktivacije?: string | null
           uloga_id?: number | null
         }
         Relationships: [

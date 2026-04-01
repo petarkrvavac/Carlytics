@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { Activity, Fuel, TriangleAlert, UserCheck, Wrench } from "lucide-react";
+import { Activity, CalendarClock, Fuel, TriangleAlert, UserCheck, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils/cn";
 
-export type ActivityFeedType = "kvar" | "servis" | "gorivo" | "zaduzenje";
+export type ActivityFeedType = "kvar" | "servis" | "gorivo" | "zaduzenje" | "registracija";
 
 export interface DashboardActivityItem {
   id: string;
@@ -50,6 +50,10 @@ function getTypeIcon(type: ActivityFeedType) {
     return Fuel;
   }
 
+  if (type === "registracija") {
+    return CalendarClock;
+  }
+
   return UserCheck;
 }
 
@@ -66,6 +70,10 @@ function getTypeLabel(type: ActivityFeedType) {
     return "Gorivo";
   }
 
+  if (type === "registracija") {
+    return "Registracija";
+  }
+
   return "Zaduženje";
 }
 
@@ -80,6 +88,10 @@ function getTypeBadgeVariant(type: ActivityFeedType) {
 
   if (type === "gorivo") {
     return "info" as const;
+  }
+
+  if (type === "registracija") {
+    return "warning" as const;
   }
 
   return "neutral" as const;
@@ -102,9 +114,9 @@ export function OperationsActivityFeed({ items }: OperationsActivityFeedProps) {
     <Card>
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <CardTitle>Activity Feed</CardTitle>
+          <CardTitle>Kritična upozorenja</CardTitle>
           <CardDescription className="mt-1">
-            Zadnje operativne promjene kroz kvarove, servise, gorivo i zaduženja.
+            Zadnja upozorenja i operativni događaji za flotu, uključujući registracije.
           </CardDescription>
         </div>
         <Badge variant="info">
