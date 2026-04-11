@@ -252,7 +252,7 @@ export function CostAnalyticsCard({
   const modeDescription = "Standardni prikaz troška goriva i servisa kroz zadnjih 6 mjeseci.";
 
   return (
-    <Card className="p-4">
+    <Card className="h-full p-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <CardTitle>Analitika troškova</CardTitle>

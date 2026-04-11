@@ -1,7 +1,7 @@
 import { compare } from "bcryptjs";
 import { verify as verifyArgon2 } from "argon2";
 
-import { mapRoleNameToAppRole, type AppRole } from "@/lib/auth/roles";
+import { mapRoleToAppRole, type AppRole } from "@/lib/auth/roles";
 import { createOptionalServerSupabaseClient } from "@/lib/supabase/server";
 import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import type { Tables } from "@/types/database";
@@ -67,16 +67,19 @@ async function resolveEmployeeRole(ulogaId: number | null) {
 
   const { data, error } = await client
     .from("uloge")
-    .select("naziv")
+    .select("id, naziv")
     .eq("id", ulogaId)
     .maybeSingle();
 
   if (error) {
     console.error("[carlytics] Neuspjelo čitanje uloge:", error.message);
-    return "zaposlenik" as const;
+    return mapRoleToAppRole({ roleId: ulogaId });
   }
 
-  return mapRoleNameToAppRole(data?.naziv);
+  return mapRoleToAppRole({
+    roleId: data?.id ?? ulogaId,
+    roleName: data?.naziv,
+  });
 }
 
 export async function authenticateEmployeeByCredentials(

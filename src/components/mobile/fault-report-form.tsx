@@ -23,7 +23,10 @@ export function FaultReportForm({ categories, activeContext }: FaultReportFormPr
   const isDisabled = !activeContext;
 
   return (
-    <form action={formAction} className="space-y-3 rounded-2xl border border-border bg-surface/90 p-4">
+    <form
+      action={formAction}
+      className="space-y-3 rounded-2xl border border-border bg-surface/90 p-4"
+    >
       <label className="block text-xs uppercase tracking-[0.2em] text-muted">
         Opis problema
         <textarea
@@ -77,6 +80,7 @@ export function FaultReportForm({ categories, activeContext }: FaultReportFormPr
         <input
           type="file"
           name="fotografija"
+          accept="image/*"
           disabled={isDisabled}
           className="mt-2 block w-full rounded-xl border border-dashed border-border bg-surface-elevated px-3 py-2 text-xs text-muted disabled:opacity-60"
         />

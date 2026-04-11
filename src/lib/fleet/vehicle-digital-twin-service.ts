@@ -50,7 +50,7 @@ type StatusRow = Pick<Tables<"statusi_vozila">, "id" | "naziv">;
 type PlaceRow = Pick<Tables<"mjesta">, "id" | "naziv">;
 type RegistrationRow = Pick<
   Tables<"registracije">,
-  "vozilo_id" | "registracijska_oznaka" | "datum_isteka"
+  "id" | "vozilo_id" | "registracijska_oznaka" | "datum_registracije" | "datum_isteka" | "cijena"
 >;
 type AssignmentRow = Pick<
   Tables<"zaduzenja">,
@@ -70,6 +70,7 @@ type InterventionRow = Pick<
   "id"
   | "datum_pocetka"
   | "datum_zavrsetka"
+  | "attachment_url"
   | "vozilo_id"
   | "zaposlenik_id"
   | "km_u_tom_trenutku"
@@ -121,12 +122,21 @@ export interface VehicleCostBreakdownPoint {
   extraordinaryServiceCost: number;
 }
 
+export interface VehicleRegistrationHistoryItem {
+  id: number;
+  registrationDateIso: string;
+  expiryDateIso: string;
+  registrationPlate: string;
+  cost: number | null;
+}
+
 export interface VehicleDigitalTwinData {
   vehicle: VehicleListItem | null;
   activeAssignment: ActiveAssignmentOverviewItem | null;
   faultHistory: FaultQueueItem[];
   fuelHistory: FuelLedgerItem[];
   tireHistory: VehicleTireHistoryItem[];
+  registrationHistory: VehicleRegistrationHistoryItem[];
   costBreakdownSeries: VehicleCostBreakdownPoint[];
   serviceHistory: ServiceTimelineItem[];
   isUsingFallbackData: boolean;
@@ -400,6 +410,29 @@ function getLatestRegistration(registrations: RegistrationRow[]) {
   return sorted[0] ?? null;
 }
 
+function buildRegistrationHistory(registrations: RegistrationRow[]): VehicleRegistrationHistoryItem[] {
+  return [...registrations]
+    .sort((left, right) => {
+      const leftRegistrationDate = parseDate(left.datum_registracije)?.getTime() ?? 0;
+      const rightRegistrationDate = parseDate(right.datum_registracije)?.getTime() ?? 0;
+
+      if (leftRegistrationDate !== rightRegistrationDate) {
+        return rightRegistrationDate - leftRegistrationDate;
+      }
+
+      const leftExpiryDate = parseDate(left.datum_isteka)?.getTime() ?? 0;
+      const rightExpiryDate = parseDate(right.datum_isteka)?.getTime() ?? 0;
+      return rightExpiryDate - leftExpiryDate;
+    })
+    .map((registration) => ({
+      id: registration.id,
+      registrationDateIso: registration.datum_registracije,
+      expiryDateIso: registration.datum_isteka,
+      registrationPlate: registration.registracijska_oznaka,
+      cost: registration.cijena,
+    }));
+}
+
 async function getVehicleSnapshotById(vehicleId: number) {
   const serviceRoleClient = createOptionalServiceRoleSupabaseClient();
   const client = serviceRoleClient ?? createOptionalServerSupabaseClient();
@@ -407,6 +440,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
   if (!client) {
     return {
       vehicle: MOCK_DASHBOARD_DATA.vehicles.find((vehicle) => vehicle.id === vehicleId) ?? null,
+      registrationHistory: [],
       isUsingFallbackData: true,
     };
   }
@@ -441,7 +475,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
       client.from("mjesta").select("id, naziv"),
       client
         .from("registracije")
-        .select("vozilo_id, registracijska_oznaka, datum_isteka")
+        .select("id, vozilo_id, registracijska_oznaka, datum_registracije, datum_isteka, cijena")
         .eq("vozilo_id", vehicleId),
       client
         .from("zaduzenja")
@@ -451,7 +485,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
         client
           .from("servisne_intervencije")
           .select(
-            "id, datum_pocetka, datum_zavrsetka, vozilo_id, zaposlenik_id, km_u_tom_trenutku, opis, hitnost, status_prijave, kategorija_id, cijena",
+            "id, datum_pocetka, datum_zavrsetka, attachment_url, vozilo_id, zaposlenik_id, km_u_tom_trenutku, opis, hitnost, status_prijave, kategorija_id, cijena",
           )
           .eq("vozilo_id", vehicleId),
       ),
@@ -476,6 +510,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
     if (!vehicleResult.data) {
       return {
         vehicle: null,
+        registrationHistory: [],
         isUsingFallbackData: false,
       };
     }
@@ -505,6 +540,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
     const statusLabel = vehicleRow.status_id ? statusById.get(vehicleRow.status_id)?.naziv : null;
 
     const latestRegistration = getLatestRegistration(registrations);
+    const registrationHistory = buildRegistrationHistory(registrations);
     const openFaultCount = interventionRows.filter((row) => isInterventionOpen(row.status_prijave, row.datum_zavrsetka)).length;
     const hasInProgressIntervention = interventionRows.some(
       (row) =>
@@ -562,6 +598,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
         lastLargeServiceDate: vehicleRow.zadnji_veliki_servis_datum,
         lastLargeServiceKm: vehicleRow.zadnji_veliki_servis_km,
       } satisfies VehicleListItem,
+      registrationHistory,
       isUsingFallbackData: false,
     };
   } catch (error) {
@@ -574,6 +611,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
 
     return {
       vehicle: MOCK_DASHBOARD_DATA.vehicles.find((vehicle) => vehicle.id === vehicleId) ?? null,
+      registrationHistory: [],
       isUsingFallbackData: true,
     };
   }
@@ -616,7 +654,7 @@ async function getVehicleOperationalHistory(
         client
           .from("servisne_intervencije")
           .select(
-            "id, datum_pocetka, datum_zavrsetka, vozilo_id, zaposlenik_id, km_u_tom_trenutku, opis, hitnost, status_prijave, cijena, kategorija_id",
+            "id, datum_pocetka, datum_zavrsetka, attachment_url, vozilo_id, zaposlenik_id, km_u_tom_trenutku, opis, hitnost, status_prijave, cijena, kategorija_id",
           )
           .eq("vozilo_id", vehicleId),
       ),
@@ -696,6 +734,7 @@ async function getVehicleOperationalHistory(
         return {
           id: intervention.id,
           reportedAtIso: intervention.datum_pocetka,
+          attachmentUrl: intervention.attachment_url,
           vehicleId,
           vehicleLabel: `${vehicle.make} ${vehicle.model}`,
           plate: vehicle.plate,
@@ -756,6 +795,7 @@ async function getVehicleOperationalHistory(
         id: service.id,
         startedAtIso: service.datum_pocetka,
         endedAtIso: service.datum_zavrsetka,
+        attachmentUrl: service.attachment_url,
         vehicleId,
         vehicleLabel: `${vehicle.make} ${vehicle.model}`,
         plate: vehicle.plate,
@@ -818,6 +858,7 @@ export async function getVehicleDigitalTwinData(
       faultHistory: [],
       fuelHistory: [],
       tireHistory: [],
+      registrationHistory: snapshotResult.registrationHistory,
       costBreakdownSeries: [],
       serviceHistory: [],
       isUsingFallbackData: snapshotResult.isUsingFallbackData,
@@ -832,6 +873,7 @@ export async function getVehicleDigitalTwinData(
     faultHistory: history.faultHistory,
     fuelHistory: history.fuelHistory,
     tireHistory: history.tireHistory,
+    registrationHistory: snapshotResult.registrationHistory,
     costBreakdownSeries: history.costBreakdownSeries,
     serviceHistory: history.serviceHistory,
     isUsingFallbackData: snapshotResult.isUsingFallbackData || history.isUsingFallbackData,

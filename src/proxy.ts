@@ -7,6 +7,7 @@ const desktopProtectedPrefixes = [
   "/flota",
   "/zaduzenja",
   "/zaposlenici",
+  "/povijest-servisa",
   "/servisni-centar",
   "/prijava-kvara",
   "/gorivo",
@@ -44,7 +45,7 @@ export async function proxy(request: NextRequest) {
   }
 
   if (pathname === "/m" || pathname.startsWith("/m/")) {
-    if (role !== "zaposlenik" && role !== "admin") {
+    if (role !== "zaposlenik" && role !== "admin" && role !== "voditelj_flote") {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
 
@@ -64,6 +65,7 @@ export const config = {
     "/flota/:path*",
     "/zaduzenja/:path*",
     "/zaposlenici/:path*",
+    "/povijest-servisa/:path*",
     "/servisni-centar/:path*",
     "/prijava-kvara/:path*",
     "/gorivo/:path*",

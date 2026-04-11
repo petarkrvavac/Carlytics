@@ -80,7 +80,7 @@ function revalidateAssignmentPaths() {
   revalidatePath("/zaduzenja");
   revalidatePath("/flota");
   revalidatePath("/prijava-kvara");
-  revalidatePath("/servisni-centar");
+  revalidatePath("/povijest-servisa");
 }
 
 async function finalizeVehicleRelease(params: {

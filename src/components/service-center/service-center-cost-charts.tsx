@@ -1,5 +1,6 @@
 "use client";
 
+import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
   ArcElement,
@@ -30,10 +31,32 @@ ChartJS.register(
   Legend,
 );
 
-type PeriodFilter = "3" | "6" | "12" | "all";
+export type PeriodFilter = "3" | "6" | "12" | "all";
 
 interface ServiceCenterCostChartsProps {
   serviceTimeline: ServiceTimelineItem[];
+  showTopVehicles?: boolean;
+  initialPeriod?: PeriodFilter;
+}
+
+interface TopVehicleLeaderboardItem {
+  key: string;
+  vehicleId: number | null;
+  label: string;
+  plate: string;
+  totalCost: number;
+  serviceCount: number;
+  averageCost: number;
+  regularCount: number;
+  extraordinaryCount: number;
+  regularCost: number;
+  extraordinaryCost: number;
+  regularSharePercent: number;
+  extraordinarySharePercent: number;
+  extraordinaryServiceSharePercent: number;
+  previousCost: number | null;
+  deltaCost: number | null;
+  deltaPercent: number | null;
 }
 
 const HR_MONTH_LABELS = [
@@ -77,7 +100,7 @@ function toMonthLabel(monthKey: string) {
   return `${HR_MONTH_LABELS[monthIndex]} '${shortYear}`;
 }
 
-function getMonthsForPeriod(period: PeriodFilter) {
+function getMonthsForPeriod(period: PeriodFilter, offsetPeriods = 0) {
   if (period === "all") {
     return [];
   }
@@ -87,21 +110,97 @@ function getMonthsForPeriod(period: PeriodFilter) {
   const keys: string[] = [];
 
   for (let index = monthCount - 1; index >= 0; index -= 1) {
-    const date = new Date(now.getFullYear(), now.getMonth() - index, 1);
+    const date = new Date(now.getFullYear(), now.getMonth() - (offsetPeriods * monthCount + index), 1);
     keys.push(toMonthKey(date));
   }
 
   return keys;
 }
 
-export function ServiceCenterCostCharts({ serviceTimeline }: ServiceCenterCostChartsProps) {
+function getPeriodLabel(period: PeriodFilter) {
+  if (period === "3") {
+    return "Zadnja 3 mjeseca";
+  }
+
+  if (period === "6") {
+    return "Zadnjih 6 mjeseci";
+  }
+
+  if (period === "12") {
+    return "Zadnjih 12 mjeseci";
+  }
+
+  return "Sve vrijeme";
+}
+
+function normalizeCategoryLabel(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim();
+}
+
+function isRegularServiceCategory(categoryLabel: string | null | undefined) {
+  const normalized = normalizeCategoryLabel(categoryLabel);
+
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes("redovni") ||
+    normalized.includes("odrzavanje") ||
+    normalized.includes("preventiv")
+  );
+}
+
+function formatCurrency(value: number) {
+  return value.toLocaleString("hr-HR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function getRankBadgeClass(index: number) {
+  if (index === 0) {
+    return "border-cyan-300 bg-cyan-100 text-cyan-900 dark:border-cyan-500/35 dark:bg-cyan-500/18 dark:text-cyan-200";
+  }
+
+  if (index === 1) {
+    return "border-emerald-300 bg-emerald-100 text-emerald-900 dark:border-emerald-500/35 dark:bg-emerald-500/18 dark:text-emerald-200";
+  }
+
+  if (index === 2) {
+    return "border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-500/35 dark:bg-amber-500/18 dark:text-amber-200";
+  }
+
+  return "border-slate-300 bg-slate-100 text-slate-800 dark:border-slate-600 dark:bg-slate-800/65 dark:text-slate-200";
+}
+
+export function ServiceCenterCostCharts({
+  serviceTimeline,
+  showTopVehicles = true,
+  initialPeriod = "6",
+}: ServiceCenterCostChartsProps) {
   const isLightTheme = useIsLightTheme();
+
   const [selectedCategory, setSelectedCategory] = useState("sve");
-  const [selectedPeriod, setSelectedPeriod] = useState<PeriodFilter>("6");
+  const selectedPeriod = initialPeriod;
 
   const completedServices = useMemo(() => {
     return serviceTimeline.filter((service) => !service.isOpen && service.cost > 0);
   }, [serviceTimeline]);
+
+  const currentPeriodMonthKeys = useMemo(() => getMonthsForPeriod(selectedPeriod), [selectedPeriod]);
+  const previousPeriodMonthKeys = useMemo(
+    () => getMonthsForPeriod(selectedPeriod, 1),
+    [selectedPeriod],
+  );
 
   const categoryOptions = useMemo(() => {
     const labels = new Set<string>();
@@ -131,8 +230,9 @@ export function ServiceCenterCostCharts({ serviceTimeline }: ServiceCenterCostCh
   }, [completedServices]);
 
   const monthlySeries = useMemo(() => {
-    const periodMonthKeys = getMonthsForPeriod(selectedPeriod);
+    const periodMonthKeys = currentPeriodMonthKeys;
     const isAllPeriod = selectedPeriod === "all";
+    const periodMonthSet = new Set(periodMonthKeys);
     const totalsByMonth = new Map<string, number>();
 
     for (const service of completedServices) {
@@ -151,7 +251,7 @@ export function ServiceCenterCostCharts({ serviceTimeline }: ServiceCenterCostCh
 
       const monthKey = toMonthKey(date);
 
-      if (!isAllPeriod && !periodMonthKeys.includes(monthKey)) {
+      if (!isAllPeriod && !periodMonthSet.has(monthKey)) {
         continue;
       }
 
@@ -168,7 +268,134 @@ export function ServiceCenterCostCharts({ serviceTimeline }: ServiceCenterCostCh
       monthLabel: toMonthLabel(monthKey),
       total: Number((totalsByMonth.get(monthKey) ?? 0).toFixed(2)),
     }));
-  }, [completedServices, effectiveSelectedCategory, selectedPeriod]);
+  }, [completedServices, currentPeriodMonthKeys, effectiveSelectedCategory, selectedPeriod]);
+
+  const topVehicleLeaderboard = useMemo<TopVehicleLeaderboardItem[]>(() => {
+    const periodMonthSet = new Set(currentPeriodMonthKeys);
+    const previousPeriodMonthSet = new Set(previousPeriodMonthKeys);
+    const isAllPeriod = selectedPeriod === "all";
+    const aggregatesByVehicle = new Map<
+      string,
+      {
+        key: string;
+        vehicleId: number | null;
+        label: string;
+        plate: string;
+        totalCost: number;
+        serviceCount: number;
+        regularCount: number;
+        extraordinaryCount: number;
+        regularCost: number;
+        extraordinaryCost: number;
+      }
+    >();
+    const previousCostByVehicle = new Map<string, number>();
+
+    for (const service of completedServices) {
+      const date = parseDate(service.endedAtIso ?? service.startedAtIso);
+
+      if (!date) {
+        continue;
+      }
+
+      const monthKey = toMonthKey(date);
+      const aggregationKey = service.vehicleId
+        ? `v-${service.vehicleId}`
+        : `${service.vehicleLabel}|${service.plate}`;
+
+      if (!isAllPeriod && previousPeriodMonthSet.has(monthKey)) {
+        const previous = previousCostByVehicle.get(aggregationKey) ?? 0;
+        previousCostByVehicle.set(aggregationKey, previous + service.cost);
+      }
+
+      if (!isAllPeriod && !periodMonthSet.has(monthKey)) {
+        continue;
+      }
+
+      const isRegular = isRegularServiceCategory(service.categoryLabel);
+
+      const previous = aggregatesByVehicle.get(aggregationKey) ?? {
+        key: aggregationKey,
+        vehicleId: service.vehicleId ?? null,
+        label: service.vehicleLabel,
+        plate: service.plate,
+        totalCost: 0,
+        serviceCount: 0,
+        regularCount: 0,
+        extraordinaryCount: 0,
+        regularCost: 0,
+        extraordinaryCost: 0,
+      };
+
+      previous.totalCost += service.cost;
+      previous.serviceCount += 1;
+
+      if (isRegular) {
+        previous.regularCount += 1;
+        previous.regularCost += service.cost;
+      } else {
+        previous.extraordinaryCount += 1;
+        previous.extraordinaryCost += service.cost;
+      }
+
+      aggregatesByVehicle.set(aggregationKey, previous);
+    }
+
+    return Array.from(aggregatesByVehicle.values())
+      .map<TopVehicleLeaderboardItem>((item) => {
+        const totalCost = Number(item.totalCost.toFixed(2));
+        const regularCost = Number(item.regularCost.toFixed(2));
+        const extraordinaryCost = Number(item.extraordinaryCost.toFixed(2));
+        const previousCostRaw = isAllPeriod
+          ? null
+          : Number((previousCostByVehicle.get(item.key) ?? 0).toFixed(2));
+        const deltaCost = previousCostRaw === null
+          ? null
+          : Number((totalCost - previousCostRaw).toFixed(2));
+
+        let deltaPercent: number | null = null;
+
+        if (deltaCost !== null && previousCostRaw !== null) {
+          if (previousCostRaw > 0) {
+            deltaPercent = Number(((deltaCost / previousCostRaw) * 100).toFixed(1));
+          } else if (totalCost === 0) {
+            deltaPercent = 0;
+          }
+        }
+
+        return {
+          key: item.key,
+          vehicleId: item.vehicleId,
+          label: item.label,
+          plate: item.plate,
+          totalCost,
+          serviceCount: item.serviceCount,
+          averageCost: Number((item.serviceCount > 0 ? totalCost / item.serviceCount : 0).toFixed(2)),
+          regularCount: item.regularCount,
+          extraordinaryCount: item.extraordinaryCount,
+          regularCost,
+          extraordinaryCost,
+          regularSharePercent:
+            item.serviceCount > 0 ? Number(((item.regularCount / item.serviceCount) * 100).toFixed(1)) : 0,
+          extraordinarySharePercent:
+            item.serviceCount > 0
+              ? Number(((item.extraordinaryCount / item.serviceCount) * 100).toFixed(1))
+              : 0,
+          extraordinaryServiceSharePercent:
+            item.serviceCount > 0
+              ? Number(((item.extraordinaryCount / item.serviceCount) * 100).toFixed(1))
+              : 0,
+          previousCost: previousCostRaw,
+          deltaCost,
+          deltaPercent,
+        };
+      })
+      .sort((left, right) => right.totalCost - left.totalCost)
+      .slice(0, 5)
+      .map((item) => ({
+        ...item,
+      }));
+  }, [completedServices, currentPeriodMonthKeys, previousPeriodMonthKeys, selectedPeriod]);
 
   const palette = useMemo(() => {
     if (isLightTheme) {
@@ -351,17 +578,6 @@ export function ServiceCenterCostCharts({ serviceTimeline }: ServiceCenterCostCh
                 </option>
               ))}
             </select>
-
-            <select
-              value={selectedPeriod}
-              onChange={(event) => setSelectedPeriod(event.target.value as PeriodFilter)}
-              className="carlytics-select h-9 rounded-lg px-3 text-xs"
-            >
-              <option value="3">Zadnja 3 mj.</option>
-              <option value="6">Zadnjih 6 mj.</option>
-              <option value="12">Zadnjih 12 mj.</option>
-              <option value="all">Sve</option>
-            </select>
           </div>
         </div>
 
@@ -369,6 +585,115 @@ export function ServiceCenterCostCharts({ serviceTimeline }: ServiceCenterCostCh
           <Line data={lineData} options={lineOptions} />
         </div>
       </Card>
+
+      {showTopVehicles ? (
+        <Card className="xl:col-span-2">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
+              Top 5 najskupljih vozila
+            </h3>
+            <Badge variant="info">Period: {getPeriodLabel(selectedPeriod)}</Badge>
+          </div>
+
+          {topVehicleLeaderboard.length === 0 ? (
+            <p className="text-sm text-muted">Nema završenih servisa s troškom u odabranom periodu.</p>
+          ) : (
+            <ol className="space-y-2">
+              {topVehicleLeaderboard.map((vehicleCost, index) => {
+                const regularWidth = Math.max(0, Math.min(100, vehicleCost.regularSharePercent));
+                const extraordinaryWidth = Math.max(0, Math.min(100, vehicleCost.extraordinarySharePercent));
+                const deltaCostValue = vehicleCost.deltaCost ?? 0;
+
+                const isTrendNotAvailable = vehicleCost.deltaCost === null;
+                const isTrendFlat = !isTrendNotAvailable && Math.abs(deltaCostValue) < 0.01;
+                const isTrendUp = !isTrendNotAvailable && !isTrendFlat && deltaCostValue > 0;
+
+                const TrendIcon = isTrendNotAvailable
+                  ? Minus
+                  : isTrendFlat
+                    ? Minus
+                    : isTrendUp
+                      ? TrendingUp
+                      : TrendingDown;
+
+                const trendClassName = isTrendNotAvailable
+                  ? "text-slate-400"
+                  : isTrendFlat
+                    ? "text-slate-300"
+                    : isTrendUp
+                      ? "text-amber-300"
+                      : "text-emerald-300";
+
+                const trendLabel = isTrendNotAvailable
+                  ? "N/A"
+                  : vehicleCost.deltaPercent === null
+                    ? "Novi trošak"
+                    : `${vehicleCost.deltaPercent > 0 ? "+" : ""}${vehicleCost.deltaPercent.toFixed(1)}%`;
+
+                return (
+                <li
+                  key={vehicleCost.key}
+                  className="section-transition rounded-xl border border-border bg-surface-elevated px-3 py-3 transition-all duration-300 hover:border-cyan-500/40"
+                  style={{ animationDelay: `${index * 45}ms` }}
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                    <Badge className={`h-6 px-2 text-[10px] font-semibold ${getRankBadgeClass(index)}`}>
+                      #{index + 1}
+                    </Badge>
+                    <div className="min-w-0 sm:min-w-52">
+                      <p className="truncate text-sm font-semibold text-foreground">{vehicleCost.label}</p>
+                      <p className="text-xs text-muted">{vehicleCost.plate}</p>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1 flex items-center justify-between text-[11px] text-muted">
+                        <span>Redovni: {vehicleCost.regularCount}</span>
+                        <span>Izvanredni: {vehicleCost.extraordinaryCount}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full border border-border/60 bg-slate-200/40 dark:bg-slate-800/65">
+                        <div className="flex h-full w-full">
+                          <div
+                            className="h-full bg-emerald-400 transition-all duration-300"
+                            style={{ width: `${regularWidth}%` }}
+                          />
+                          <div
+                            className="h-full bg-amber-400 transition-all duration-300"
+                            style={{ width: `${extraordinaryWidth}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+                        <span>Servisa: {vehicleCost.serviceCount}</span>
+                        <span>Prosjek: {formatCurrency(vehicleCost.averageCost)} EUR</span>
+                        <span>Izvanredni udio: {vehicleCost.extraordinaryServiceSharePercent.toFixed(1)}%</span>
+                      </div>
+                    </div>
+
+                    <div className="ml-auto flex min-w-36 flex-col items-end gap-1 text-right">
+                      <div className={`inline-flex items-center gap-1 text-xs font-semibold ${trendClassName}`}>
+                        <TrendIcon size={13} />
+                        {trendLabel}
+                      </div>
+
+                      <p className="data-font text-sm font-semibold text-amber-200">
+                        {formatCurrency(vehicleCost.totalCost)}
+                        <span className="ml-1 text-xs text-amber-300">EUR</span>
+                      </p>
+
+                      <p className="text-[11px] text-muted">
+                        {vehicleCost.previousCost === null
+                          ? "Prethodni period: N/A"
+                          : `Prethodni period: ${formatCurrency(vehicleCost.previousCost)} EUR`}
+                      </p>
+                    </div>
+                  </div>
+                </li>
+                );
+              })}
+            </ol>
+          )}
+        </Card>
+      ) : null}
     </div>
   );
 }

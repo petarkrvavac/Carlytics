@@ -208,7 +208,7 @@ export function FleetSectionContent({
         />
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+          <div className="grid gap-4 md:auto-rows-fr md:grid-cols-2 lg:grid-cols-3">
             {pagedVehicles.map((vehicle) => (
               <VehicleStatusCard key={vehicle.id} vehicle={vehicle} />
             ))}

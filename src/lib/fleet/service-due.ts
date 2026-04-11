@@ -21,6 +21,9 @@ export interface VehicleServiceDueSummary {
   largeServiceIntervalKm: number;
   smallServiceDueKm: number;
   largeServiceDueKm: number;
+  smallServiceDueDays: number | null;
+  largeServiceDueDays: number | null;
+  serviceDueDays: number | null;
   isSmallServiceDue: boolean;
   isLargeServiceDue: boolean;
   isServiceDue: boolean;
@@ -56,7 +59,14 @@ function getDayStart(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-function isDueByTime(
+function getDaysUntilDate(targetDate: Date, now: Date) {
+  const dueDay = getDayStart(targetDate);
+  const currentDay = getDayStart(now);
+  const diffMs = dueDay.getTime() - currentDay.getTime();
+  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+}
+
+function getServiceDueDays(
   lastServiceDateIso: string | null | undefined,
   intervalYears: number,
   now: Date,
@@ -64,11 +74,11 @@ function isDueByTime(
   const lastServiceDate = parseDate(lastServiceDateIso);
 
   if (!lastServiceDate) {
-    return false;
+    return null;
   }
 
   const dueDate = addYears(lastServiceDate, intervalYears);
-  return getDayStart(dueDate).getTime() <= getDayStart(now).getTime();
+  return getDaysUntilDate(dueDate, now);
 }
 
 function toIntervalKm(
@@ -174,16 +184,24 @@ export function evaluateVehicleServiceDue(
 
   const isSmallServiceDueByKm = smallServiceDueKm <= 0;
   const isLargeServiceDueByKm = largeServiceDueKm <= 0;
-  const isSmallServiceDueByTime = isDueByTime(
+  const smallServiceDueDays = getServiceDueDays(
     input.lastSmallServiceDate,
     SMALL_SERVICE_INTERVAL_YEARS,
     now,
   );
-  const isLargeServiceDueByTime = isDueByTime(
+  const largeServiceDueDays = getServiceDueDays(
     input.lastLargeServiceDate,
     LARGE_SERVICE_INTERVAL_YEARS,
     now,
   );
+  const serviceDueDaysCandidates = [smallServiceDueDays, largeServiceDueDays].filter(
+    (value): value is number => value !== null,
+  );
+  const serviceDueDays =
+    serviceDueDaysCandidates.length > 0 ? Math.min(...serviceDueDaysCandidates) : null;
+
+  const isSmallServiceDueByTime = smallServiceDueDays !== null && smallServiceDueDays <= 0;
+  const isLargeServiceDueByTime = largeServiceDueDays !== null && largeServiceDueDays <= 0;
 
   const isSmallServiceDue = isSmallServiceDueByKm || isSmallServiceDueByTime;
   const isLargeServiceDue = isLargeServiceDueByKm || isLargeServiceDueByTime;
@@ -217,6 +235,9 @@ export function evaluateVehicleServiceDue(
     largeServiceIntervalKm,
     smallServiceDueKm,
     largeServiceDueKm,
+    smallServiceDueDays,
+    largeServiceDueDays,
+    serviceDueDays,
     isSmallServiceDue,
     isLargeServiceDue,
     isServiceDue: isSmallServiceDue || isLargeServiceDue,

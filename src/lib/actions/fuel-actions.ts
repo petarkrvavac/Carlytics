@@ -13,6 +13,8 @@ import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-
 interface DbErrorLike {
   code?: string | null;
   message?: string;
+  details?: string;
+  hint?: string;
 }
 
 const fuelFormSchema = z.object({
@@ -71,6 +73,10 @@ function mapFuelInsertError(error: DbErrorLike) {
 
   if (code === "22P02") {
     return "Uneseni podaci imaju neispravan format.";
+  }
+
+  if (code === "428C9" || (message.includes("non-default") && message.includes("ukupni_iznos"))) {
+    return "Unos goriva nije spremljen jer je ukupni iznos automatsko polje baze. Pokušaj ponovno.";
   }
 
   const compactReason = rawMessage.replace(/\s+/g, " ").trim();
@@ -138,23 +144,22 @@ export async function submitFuelEntryAction(
     };
   }
 
-  const ukupniIznos = Number(
-    (parsed.data.litraza * parsed.data.cijenaPoLitri).toFixed(2),
+  const { error: insertError } = await client.from("evidencija_goriva").insert(
+    {
+      datum: new Date().toISOString(),
+      km_tocenja: parsed.data.kmTocenja,
+      litraza: parsed.data.litraza,
+      cijena_po_litri: parsed.data.cijenaPoLitri,
+      zaduzenje_id: activeContext.assignmentId,
+    },
   );
-
-  const { error: insertError } = await client.from("evidencija_goriva").insert({
-    datum: new Date().toISOString(),
-    km_tocenja: parsed.data.kmTocenja,
-    litraza: parsed.data.litraza,
-    cijena_po_litri: parsed.data.cijenaPoLitri,
-    ukupni_iznos: ukupniIznos,
-    zaduzenje_id: activeContext.assignmentId,
-  });
 
   if (insertError) {
     console.error("[carlytics] Neuspjelo spremanje goriva:", {
       code: insertError.code,
       message: insertError.message,
+      details: insertError.details,
+      hint: insertError.hint,
     });
     return {
       status: "error",

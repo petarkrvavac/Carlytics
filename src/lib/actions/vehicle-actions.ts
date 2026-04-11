@@ -99,6 +99,20 @@ const addVehicleSchema = z.object({
 const extendVehicleRegistrationSchema = z.object({
   vehicleId: z.coerce.number().int().positive("Vozilo je obavezno."),
   datumIstekaRegistracije: z.string().min(1, "Novi datum isteka je obavezan."),
+  cijenaRegistracije: z.preprocess(
+    (value) => {
+      if (typeof value === "string") {
+        const normalized = value.replace(",", ".").trim();
+        return normalized === "" ? Number.NaN : Number(normalized);
+      }
+
+      return value;
+    },
+    z
+      .number()
+      .finite("Cijena registracije mora biti broj.")
+      .nonnegative("Cijena registracije ne može biti negativna."),
+  ),
 });
 
 const updateVehicleActivationSchema = z.object({
@@ -126,6 +140,27 @@ function isValidDateOnly(value: string) {
   return !Number.isNaN(parsed.getTime());
 }
 
+function getDaysUntilDateOnly(value: string) {
+  if (!isValidDateOnly(value)) {
+    return null;
+  }
+
+  const [yearRaw, monthRaw, dayRaw] = value.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  const now = new Date();
+  const todayUtcMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const targetUtcMs = Date.UTC(year, month - 1, day);
+
+  return Math.ceil((targetUtcMs - todayUtcMs) / (1000 * 60 * 60 * 24));
+}
+
 export async function extendVehicleRegistrationAction(
   _previousState: ActionState,
   formData: FormData,
@@ -133,6 +168,7 @@ export async function extendVehicleRegistrationAction(
   const parsed = extendVehicleRegistrationSchema.safeParse({
     vehicleId: formData.get("vehicleId"),
     datumIstekaRegistracije: formData.get("datumIstekaRegistracije"),
+    cijenaRegistracije: formData.get("cijenaRegistracije"),
   });
 
   if (!parsed.success) {
@@ -182,7 +218,7 @@ export async function extendVehicleRegistrationAction(
 
   const { data: registrationRow, error: registrationFetchError } = await client
     .from("registracije")
-    .select("id, datum_isteka")
+    .select("id, datum_isteka, registracijska_oznaka")
     .eq("vozilo_id", parsed.data.vehicleId)
     .order("datum_isteka", { ascending: false })
     .limit(1)
@@ -207,25 +243,42 @@ export async function extendVehicleRegistrationAction(
     };
   }
 
-  if (registrationRow.datum_isteka >= todayIso) {
+  const daysUntilExpiry = getDaysUntilDateOnly(registrationRow.datum_isteka);
+
+  if (daysUntilExpiry !== null && daysUntilExpiry > 30) {
     return {
       status: "error",
-      message: "Registraciju je moguće produžiti tek nakon isteka postojeće.",
+      message: "Registraciju je moguće produžiti unutar 30 dana do isteka.",
     };
   }
 
-  const { error: registrationUpdateError } = await client
+  if (parsed.data.datumIstekaRegistracije <= registrationRow.datum_isteka) {
+    return {
+      status: "error",
+      message: "Novi datum isteka mora biti nakon trenutnog datuma isteka registracije.",
+      fieldErrors: {
+        datumIstekaRegistracije: ["Odaberi datum nakon postojeće registracije."],
+      },
+    };
+  }
+
+  const registrationPrice = Number(parsed.data.cijenaRegistracije.toFixed(2));
+
+  const { error: registrationInsertError } = await client
     .from("registracije")
-    .update({
+    .insert({
       datum_registracije: todayIso,
       datum_isteka: parsed.data.datumIstekaRegistracije,
+      cijena: registrationPrice,
+      registracijska_oznaka: registrationRow.registracijska_oznaka,
+      vozilo_id: parsed.data.vehicleId,
     })
-    .eq("id", registrationRow.id);
+    ;
 
-  if (registrationUpdateError) {
+  if (registrationInsertError) {
     console.error(
       "[carlytics] Neuspješno produženje registracije:",
-      registrationUpdateError.message,
+      registrationInsertError.message,
     );
 
     return {
@@ -240,7 +293,7 @@ export async function extendVehicleRegistrationAction(
 
   return {
     status: "success",
-    message: `Registracija je produžena do ${parsed.data.datumIstekaRegistracije}.`,
+    message: `Registracija je produžena do ${parsed.data.datumIstekaRegistracije} (cijena ${registrationPrice.toLocaleString("hr-HR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR).`,
   };
 }
 

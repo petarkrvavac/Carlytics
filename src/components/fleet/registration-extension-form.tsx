@@ -65,6 +65,20 @@ export function RegistrationExtensionForm({ vehicleId }: RegistrationExtensionFo
         />
       </label>
 
+      <label className="text-[11px] uppercase tracking-[0.16em] text-muted">
+        Cijena (EUR)
+        <input
+          type="number"
+          name="cijenaRegistracije"
+          required
+          min="0"
+          step="0.01"
+          disabled={isPending}
+          placeholder="0.00"
+          className="mt-1 block w-28 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground disabled:opacity-70"
+        />
+      </label>
+
       <button
         type="submit"
         disabled={isPending}
@@ -75,6 +89,10 @@ export function RegistrationExtensionForm({ vehicleId }: RegistrationExtensionFo
 
       {state.fieldErrors?.datumIstekaRegistracije?.[0] ? (
         <p className="w-full text-xs text-rose-300">{state.fieldErrors.datumIstekaRegistracije[0]}</p>
+      ) : null}
+
+      {state.fieldErrors?.cijenaRegistracije?.[0] ? (
+        <p className="w-full text-xs text-rose-300">{state.fieldErrors.cijenaRegistracije[0]}</p>
       ) : null}
 
       {state.message ? <p className={`w-full ${getMessageClass(state.status)}`}>{state.message}</p> : null}

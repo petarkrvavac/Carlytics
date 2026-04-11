@@ -20,7 +20,7 @@ export async function GET() {
     );
   }
 
-  if (!hasRequiredRole(sessionUser.role, ["admin", "voditelj_flote"])) {
+  if (!hasRequiredRole(sessionUser.role, ["admin"])) {
     return NextResponse.json(
       {
         message: "Nemaš dozvolu za dohvat podataka forme zaposlenika.",

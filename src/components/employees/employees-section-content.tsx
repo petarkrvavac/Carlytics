@@ -27,6 +27,7 @@ type FormContextLoadStatus = "idle" | "loading" | "ready" | "error";
 
 interface EmployeesSectionContentProps {
   overviewData: EmployeesOverviewData;
+  canManageEmployees: boolean;
 }
 
 const employeeFormContextSchema = z.object({
@@ -126,6 +127,7 @@ function AddEmployeeFormSkeleton() {
 
 export function EmployeesSectionContent({
   overviewData,
+  canManageEmployees,
 }: EmployeesSectionContentProps) {
   const [activeFilter, setActiveFilter] =
     useState<EmployeeStatusFilter>("aktivni");
@@ -264,19 +266,21 @@ export function EmployeesSectionContent({
             <FallbackChip isUsingFallbackData={overviewData.isUsingFallbackData} />
             <Badge variant="success">Aktivni: {overviewData.metrics.active}</Badge>
             <Badge variant="danger">Deaktivirani: {overviewData.metrics.deactivated}</Badge>
-            <button
-              type="button"
-              onClick={openAddEmployeeModal}
-              disabled={isFormContextLoading}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
-            >
-              {isFormContextLoading ? (
-                <Loader2 size={15} className="animate-spin" />
-              ) : (
-                <Plus size={15} />
-              )}
-              Dodaj zaposlenika
-            </button>
+            {canManageEmployees ? (
+              <button
+                type="button"
+                onClick={openAddEmployeeModal}
+                disabled={isFormContextLoading}
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
+              >
+                {isFormContextLoading ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <Plus size={15} />
+                )}
+                Dodaj zaposlenika
+              </button>
+            ) : null}
           </>
         }
       />
@@ -329,9 +333,13 @@ export function EmployeesSectionContent({
       {visibleEmployees.length === 0 ? (
         <EmptyState
           title="Nema zaposlenika za odabrani filter"
-          description="Promijeni filter ili dodaj novog zaposlenika kroz invitation tok."
-          actionLabel="Dodaj zaposlenika"
-          onActionClick={openAddEmployeeModal}
+          description={
+            canManageEmployees
+              ? "Promijeni filter ili dodaj novog zaposlenika kroz invitation tok."
+              : "Promijeni filter za pregled zaposlenika."
+          }
+          actionLabel={canManageEmployees ? "Dodaj zaposlenika" : undefined}
+          onActionClick={canManageEmployees ? openAddEmployeeModal : undefined}
         />
       ) : (
         <Card className="p-0">
@@ -348,7 +356,7 @@ export function EmployeesSectionContent({
                   <th className="px-3 py-3">Država</th>
                   <th className="px-3 py-3">Status</th>
                   <th className="px-3 py-3">Detalji</th>
-                  <th className="px-3 py-3 text-right">Akcija</th>
+                  {canManageEmployees ? <th className="px-3 py-3 text-right">Akcija</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -374,33 +382,35 @@ export function EmployeesSectionContent({
                         Profil aktivnosti
                       </Link>
                     </td>
-                    <td className="px-3 py-3 text-right">
-                      {employee.isActive ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDeactivationTarget(employee);
-                            setDeactivationReason("");
-                            setDeactivationReasonError("");
-                          }}
-                          className="inline-flex h-8 items-center rounded-lg border border-rose-300 bg-rose-100 px-3 text-xs font-semibold text-rose-800 transition hover:bg-rose-200 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-200"
-                        >
-                          Deaktiviraj
-                        </button>
-                      ) : (
-                        <form action={updateEmployeeActivationAction}>
-                          <input type="hidden" name="employeeId" value={employee.id} />
-                          <input type="hidden" name="isAktivan" value="true" />
-                          <input type="hidden" name="razlogDeaktivacije" defaultValue="" />
+                    {canManageEmployees ? (
+                      <td className="px-3 py-3 text-right">
+                        {employee.isActive ? (
                           <button
-                            type="submit"
-                            className="inline-flex h-8 items-center rounded-lg border border-emerald-300 bg-emerald-100 px-3 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-200 dark:border-emerald-500/35 dark:bg-emerald-500/15 dark:text-emerald-200"
+                            type="button"
+                            onClick={() => {
+                              setDeactivationTarget(employee);
+                              setDeactivationReason("");
+                              setDeactivationReasonError("");
+                            }}
+                            className="inline-flex h-8 items-center rounded-lg border border-rose-300 bg-rose-100 px-3 text-xs font-semibold text-rose-800 transition hover:bg-rose-200 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-200"
                           >
-                            Aktiviraj
+                            Deaktiviraj
                           </button>
-                        </form>
-                      )}
-                    </td>
+                        ) : (
+                          <form action={updateEmployeeActivationAction}>
+                            <input type="hidden" name="employeeId" value={employee.id} />
+                            <input type="hidden" name="isAktivan" value="true" />
+                            <input type="hidden" name="razlogDeaktivacije" defaultValue="" />
+                            <button
+                              type="submit"
+                              className="inline-flex h-8 items-center rounded-lg border border-emerald-300 bg-emerald-100 px-3 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-200 dark:border-emerald-500/35 dark:bg-emerald-500/15 dark:text-emerald-200"
+                            >
+                              Aktiviraj
+                            </button>
+                          </form>
+                        )}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -416,13 +426,15 @@ export function EmployeesSectionContent({
         </Card>
       )}
 
-      <form ref={deactivationFormRef} action={updateEmployeeActivationAction}>
-        <input ref={deactivationEmployeeIdRef} type="hidden" name="employeeId" defaultValue="" />
-        <input type="hidden" name="isAktivan" value="false" />
-        <input ref={deactivationReasonRef} type="hidden" name="razlogDeaktivacije" defaultValue="" />
-      </form>
+      {canManageEmployees ? (
+        <form ref={deactivationFormRef} action={updateEmployeeActivationAction}>
+          <input ref={deactivationEmployeeIdRef} type="hidden" name="employeeId" defaultValue="" />
+          <input type="hidden" name="isAktivan" value="false" />
+          <input ref={deactivationReasonRef} type="hidden" name="razlogDeaktivacije" defaultValue="" />
+        </form>
+      ) : null}
 
-      {deactivationTarget ? (
+      {deactivationTarget && canManageEmployees ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-3 py-4 sm:p-6">
           <button
             type="button"
@@ -490,7 +502,7 @@ export function EmployeesSectionContent({
         </div>
       ) : null}
 
-      {isModalOpen ? (
+      {isModalOpen && canManageEmployees ? (
         <div className="fixed inset-0 z-50 px-3 py-4 sm:p-6">
           <button
             type="button"

@@ -3,6 +3,8 @@ import { Activity, CalendarClock, Fuel, TriangleAlert, UserCheck, Wrench } from 
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { ServerPagination } from "@/components/ui/server-pagination";
+import { formatDateTime } from "@/lib/utils/date-format";
 import { cn } from "@/lib/utils/cn";
 
 export type ActivityFeedType = "kvar" | "servis" | "gorivo" | "zaduzenje" | "registracija";
@@ -19,22 +21,10 @@ export interface DashboardActivityItem {
 
 interface OperationsActivityFeedProps {
   items: DashboardActivityItem[];
-}
-
-function formatDateTime(value: string) {
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "N/A";
-  }
-
-  return new Intl.DateTimeFormat("hr-HR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(parsed);
+  totalItems?: number;
+  currentPage: number;
+  totalPages: number;
+  hrefForPage: (page: number) => string;
 }
 
 function getTypeIcon(type: ActivityFeedType) {
@@ -109,9 +99,15 @@ function getItemTone(item: DashboardActivityItem) {
   return "border-border bg-slate-950/55";
 }
 
-export function OperationsActivityFeed({ items }: OperationsActivityFeedProps) {
+export function OperationsActivityFeed({
+  items,
+  totalItems,
+  currentPage,
+  totalPages,
+  hrefForPage,
+}: OperationsActivityFeedProps) {
   return (
-    <Card>
+    <Card className="flex h-full flex-col">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <CardTitle>Kritična upozorenja</CardTitle>
@@ -121,7 +117,7 @@ export function OperationsActivityFeed({ items }: OperationsActivityFeedProps) {
         </div>
         <Badge variant="info">
           <Activity size={12} className="mr-1" />
-          {items.length}
+          {totalItems ?? items.length}
         </Badge>
       </div>
 
@@ -130,39 +126,48 @@ export function OperationsActivityFeed({ items }: OperationsActivityFeedProps) {
           Trenutačno nema zabilježenih aktivnosti.
         </div>
       ) : (
-        <ul className="space-y-2.5">
-          {items.map((item) => {
-            const Icon = getTypeIcon(item.type);
+        <div className="flex min-h-0 flex-1 flex-col">
+          <ul className="flex flex-1 flex-col gap-2.5">
+            {items.map((item) => {
+              const Icon = getTypeIcon(item.type);
 
-            return (
-              <li key={item.id}>
-                <Link
-                  href={item.href}
-                  className={cn(
-                    "block rounded-xl border px-3 py-3 transition hover:border-cyan-500/45 hover:bg-slate-900/70",
-                    getItemTone(item),
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex gap-2">
-                      <Icon size={15} className="mt-0.5 text-cyan-200" />
-                      <div>
-                        <p className="text-sm font-medium text-slate-100">{item.title}</p>
-                        <p className="mt-1 text-xs leading-5 text-slate-300">{item.description}</p>
+              return (
+                <li key={item.id} className="min-h-20 flex-1">
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      "flex h-full flex-col justify-between rounded-xl border px-3 py-3 transition hover:border-cyan-500/45 hover:bg-slate-900/70",
+                      getItemTone(item),
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex gap-2">
+                        <Icon size={15} className="mt-0.5 text-cyan-200" />
+                        <div>
+                          <p className="text-sm font-medium text-slate-100">{item.title}</p>
+                          <p className="mt-1 text-xs leading-5 text-slate-300">{item.description}</p>
+                        </div>
                       </div>
+
+                      <Badge variant={getTypeBadgeVariant(item.type)}>{getTypeLabel(item.type)}</Badge>
                     </div>
 
-                    <Badge variant={getTypeBadgeVariant(item.type)}>{getTypeLabel(item.type)}</Badge>
-                  </div>
+                    <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                      {formatDateTime(item.occurredAtIso)}
+                    </p>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
 
-                  <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-slate-400">
-                    {formatDateTime(item.occurredAtIso)}
-                  </p>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+          <ServerPagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            hrefForPage={hrefForPage}
+            className="mt-auto pt-2"
+          />
+        </div>
       )}
     </Card>
   );

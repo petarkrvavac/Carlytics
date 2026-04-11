@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, X } from "lucide-react";
 
+import { AttachmentViewerButton } from "@/components/attachments/attachment-viewer-button";
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
 import { DesktopFaultReportForm } from "@/components/faults/desktop-fault-report-form";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { updateFaultStatusAction } from "@/lib/actions/fault-actions";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import type { FaultCategoryOption } from "@/lib/fleet/worker-context-service";
+import { formatDateTime } from "@/lib/utils/date-format";
 import type {
   FaultQueueItem,
   OperationsOverviewData,
@@ -22,22 +24,7 @@ interface FaultsSectionContentProps {
   operationsData: OperationsOverviewData;
   vehicles: VehicleListItem[];
   categories: FaultCategoryOption[];
-}
-
-function formatDateTime(value: string) {
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "N/A";
-  }
-
-  return new Intl.DateTimeFormat("hr-HR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(parsed);
+  selectedVehicleId: number | null;
 }
 
 function getPriorityVariant(priority: FaultQueueItem["priority"]) {
@@ -123,15 +110,39 @@ export function FaultsSectionContent({
   operationsData,
   vehicles,
   categories,
+  selectedVehicleId,
 }: FaultsSectionContentProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [closingFaultId, setClosingFaultId] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const openFaults = useMemo(
-    () => operationsData.faultQueue.filter((fault) => fault.isOpen),
-    [operationsData.faultQueue],
+  const openFaults = useMemo(() => {
+    return operationsData.faultQueue.filter((fault) => {
+      if (!fault.isOpen) {
+        return false;
+      }
+
+      if (!selectedVehicleId) {
+        return true;
+      }
+
+      return fault.vehicleId === selectedVehicleId;
+    });
+  }, [operationsData.faultQueue, selectedVehicleId]);
+
+  const selectedVehicle = useMemo(() => {
+    if (!selectedVehicleId) {
+      return null;
+    }
+
+    return vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
+  }, [selectedVehicleId, vehicles]);
+
+  const criticalOpenFaults = useMemo(
+    () => openFaults.filter((fault) => fault.priority === "kriticno").length,
+    [openFaults],
   );
+
   const totalPages = Math.max(1, Math.ceil(openFaults.length / ITEMS_PER_PAGE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const pagedOpenFaults = useMemo(
@@ -186,6 +197,21 @@ export function FaultsSectionContent({
 
       <section className="grid gap-5">
         <Card>
+          {selectedVehicleId ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted">
+              <Badge variant="info">
+                Aktivan filter: {selectedVehicle?.make ?? "Vozilo"} {selectedVehicle?.model ?? "#"}
+                {selectedVehicle?.plate ? ` (${selectedVehicle.plate})` : ""}
+              </Badge>
+              <Link
+                href="/prijava-kvara"
+                className="inline-flex h-7 items-center rounded-lg border border-border bg-surface px-2.5 text-[11px] font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+              >
+                Očisti filter
+              </Link>
+            </div>
+          ) : null}
+
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
               Red prijava
@@ -194,10 +220,8 @@ export function FaultsSectionContent({
               <Badge variant={openFaults.length > 0 ? "warning" : "success"}>
                 Otvoreno: {openFaults.length}
               </Badge>
-              <Badge
-                variant={operationsData.metrics.criticalFaults > 0 ? "danger" : "neutral"}
-              >
-                Kritične: {operationsData.metrics.criticalFaults}
+              <Badge variant={criticalOpenFaults > 0 ? "danger" : "neutral"}>
+                Kritične: {criticalOpenFaults}
               </Badge>
             </div>
           </div>
@@ -232,69 +256,76 @@ export function FaultsSectionContent({
                         </div>
                       </div>
 
-                      {fault.isOpen ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {STATUS_ACTIONS.map((statusAction) => (
-                            <form key={statusAction.value} action={updateFaultStatusAction}>
-                              <input type="hidden" name="faultId" value={fault.id} />
-                              <input type="hidden" name="statusPrijave" value={statusAction.value} />
-                              <button
-                                type="submit"
-                                disabled={currentStatus === statusAction.value}
-                                className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <AttachmentViewerButton
+                          attachmentSource={fault.attachmentUrl}
+                          title={`${fault.vehicleLabel} (${fault.plate})`}
+                        />
+
+                        {fault.isOpen ? (
+                          <>
+                            {STATUS_ACTIONS.map((statusAction) => (
+                              <form key={statusAction.value} action={updateFaultStatusAction}>
+                                <input type="hidden" name="faultId" value={fault.id} />
+                                <input type="hidden" name="statusPrijave" value={statusAction.value} />
+                                <button
+                                  type="submit"
+                                  disabled={currentStatus === statusAction.value}
+                                  className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {statusAction.label}
+                                </button>
+                              </form>
+                            ))}
+
+                            {closingFaultId === fault.id ? (
+                              <form
+                                action={updateFaultStatusAction}
+                                className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface px-2 py-1.5"
                               >
-                                {statusAction.label}
-                              </button>
-                            </form>
-                          ))}
+                                <input type="hidden" name="faultId" value={fault.id} />
+                                <input type="hidden" name="statusPrijave" value="zatvoreno" />
 
-                          {closingFaultId === fault.id ? (
-                            <form
-                              action={updateFaultStatusAction}
-                              className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface px-2 py-1.5"
-                            >
-                              <input type="hidden" name="faultId" value={fault.id} />
-                              <input type="hidden" name="statusPrijave" value="zatvoreno" />
+                                <label className="flex items-center gap-2 text-xs text-muted">
+                                  Cijena
+                                  <input
+                                    type="number"
+                                    name="cijena"
+                                    min="0"
+                                    step="0.01"
+                                    required
+                                    placeholder="0.00"
+                                    className="h-8 w-28 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                                  />
+                                </label>
 
-                              <label className="flex items-center gap-2 text-xs text-muted">
-                                Cijena
-                                <input
-                                  type="number"
-                                  name="cijena"
-                                  min="0"
-                                  step="0.01"
-                                  required
-                                  placeholder="0.00"
-                                  className="h-8 w-28 rounded-md border border-border bg-background px-2 text-xs text-foreground"
-                                />
-                              </label>
+                                <button
+                                  type="submit"
+                                  className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200"
+                                >
+                                  Potvrdi rješavanje
+                                </button>
 
-                              <button
-                                type="submit"
-                                className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200"
-                              >
-                                Potvrdi rješavanje
-                              </button>
-
+                                <button
+                                  type="button"
+                                  onClick={() => setClosingFaultId(null)}
+                                  className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+                                >
+                                  Odustani
+                                </button>
+                              </form>
+                            ) : (
                               <button
                                 type="button"
-                                onClick={() => setClosingFaultId(null)}
-                                className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+                                onClick={() => setClosingFaultId(fault.id)}
+                                className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200"
                               >
-                                Odustani
+                                Riješeno
                               </button>
-                            </form>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setClosingFaultId(fault.id)}
-                              className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200"
-                            >
-                              Riješeno
-                            </button>
-                          )}
-                        </div>
-                      ) : null}
+                            )}
+                          </>
+                        ) : null}
+                      </div>
                     </li>
                   );
                 })}
@@ -333,10 +364,10 @@ export function FaultsSectionContent({
 
               <div className="flex items-center gap-2">
                 <Link
-                  href="/servisni-centar"
+                  href="/povijest-servisa"
                   className="inline-flex h-10 items-center rounded-xl border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
                 >
-                  Servisni centar
+                  Povijest servisa
                 </Link>
 
                 <button

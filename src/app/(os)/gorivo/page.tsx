@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
+import { FuelSectionFilters } from "@/components/fuel/fuel-section-filters";
 import {
   FuelAnalyticsCharts,
   type FuelMonthlyPoint,
@@ -35,6 +36,18 @@ const HR_MONTH_LABELS = [
   "Pro",
 ] as const;
 
+function toMonthLabel(monthKey: string) {
+  const [yearPart, monthPart] = monthKey.split("-");
+  const monthIndex = Number(monthPart) - 1;
+
+  if (!Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+    return monthKey;
+  }
+
+  const shortYear = yearPart?.slice(-2) ?? "";
+  return `${HR_MONTH_LABELS[monthIndex]} '${shortYear}`;
+}
+
 function buildGorivoHref(params: { vozilo?: string; stranica?: number }) {
   const query = new URLSearchParams();
 
@@ -59,25 +72,12 @@ function toMonthKey(date: Date) {
 function buildFuelMonthlySeries(
   fuelLedger: Awaited<ReturnType<typeof getOperationsOverviewData>>["fuelLedger"],
 ): FuelMonthlyPoint[] {
-  const now = new Date();
-  const monthKeys: string[] = [];
-
-  for (let index = 5; index >= 0; index -= 1) {
-    const date = new Date(now.getFullYear(), now.getMonth() - index, 1);
-    monthKeys.push(toMonthKey(date));
+  if (fuelLedger.length === 0) {
+    return [];
   }
 
-  const seriesByMonth = new Map<string, FuelMonthlyPoint>();
-
-  for (const monthKey of monthKeys) {
-    const monthNumber = Number(monthKey.split("-")[1] ?? "1") - 1;
-
-    seriesByMonth.set(monthKey, {
-      monthLabel: HR_MONTH_LABELS[Math.max(0, Math.min(11, monthNumber))],
-      liters: 0,
-      totalCost: 0,
-    });
-  }
+  const totalsByMonth = new Map<string, { liters: number; totalCost: number }>();
+  let earliestDate: Date | null = null;
 
   for (const entry of fuelLedger) {
     const parsedDate = new Date(entry.dateIso);
@@ -87,21 +87,40 @@ function buildFuelMonthlySeries(
     }
 
     const key = toMonthKey(parsedDate);
-    const month = seriesByMonth.get(key);
+    const current = totalsByMonth.get(key) ?? { liters: 0, totalCost: 0 };
 
-    if (!month) {
-      continue;
+    current.liters += entry.liters;
+    current.totalCost += entry.totalAmount;
+    totalsByMonth.set(key, current);
+
+    if (!earliestDate || parsedDate.getTime() < earliestDate.getTime()) {
+      earliestDate = parsedDate;
     }
+  }
 
-    month.liters += entry.liters;
-    month.totalCost += entry.totalAmount;
+  if (!earliestDate) {
+    return [];
+  }
+
+  const startDate = new Date(earliestDate.getFullYear(), earliestDate.getMonth(), 1);
+  const now = new Date();
+  const endDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthKeys: string[] = [];
+
+  for (
+    const date = new Date(startDate);
+    date.getTime() <= endDate.getTime();
+    date.setMonth(date.getMonth() + 1)
+  ) {
+    monthKeys.push(toMonthKey(date));
   }
 
   return monthKeys.map((monthKey) => {
-    const month = seriesByMonth.get(monthKey);
+    const month = totalsByMonth.get(monthKey);
 
     return {
-      monthLabel: month?.monthLabel ?? monthKey,
+      monthKey,
+      monthLabel: toMonthLabel(monthKey),
       liters: Number((month?.liters ?? 0).toFixed(2)),
       totalCost: Number((month?.totalCost ?? 0).toFixed(2)),
     };
@@ -172,7 +191,7 @@ export default async function GorivoPage({ searchParams }: GorivoPageProps) {
 
   const pageHref = (page: number) =>
     buildGorivoHref({
-      vozilo: resolvedSearchParams?.vozilo,
+      vozilo: selectedVehicleId ? String(selectedVehicleId) : undefined,
       stranica: page,
     });
 
@@ -198,33 +217,10 @@ export default async function GorivoPage({ searchParams }: GorivoPageProps) {
         description="Kontrola troška i analiza potrošnje goriva po vozilu i tipu goriva."
         actions={
           <>
-            <form method="get" className="flex items-center gap-2 rounded-xl border border-border bg-surface px-2 py-1.5">
-              <input type="hidden" name="stranica" value="1" />
-              <select
-                name="vozilo"
-                defaultValue={selectedVehicleId ? String(selectedVehicleId) : ""}
-                className="carlytics-select h-8 rounded-lg px-2 text-xs"
-              >
-                <option value="">Sva vozila</option>
-                {vehicleOptions.map((vehicleOption) => (
-                  <option key={vehicleOption.id} value={vehicleOption.id}>
-                    {vehicleOption.label} ({vehicleOption.plate})
-                  </option>
-                ))}
-              </select>
-              <button
-                type="submit"
-                className="inline-flex h-8 items-center rounded-lg border border-cyan-300 bg-cyan-400 px-3 text-xs font-semibold text-slate-950 transition hover:bg-cyan-300"
-              >
-                Filtriraj
-              </button>
-              <Link
-                href="/gorivo"
-                className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
-              >
-                Očisti
-              </Link>
-            </form>
+            <FuelSectionFilters
+              selectedVehicleId={selectedVehicleId}
+              vehicleOptions={vehicleOptions}
+            />
             <FallbackChip isUsingFallbackData={operationsData.isUsingFallbackData} />
             <Link
               href="/m/gorivo"

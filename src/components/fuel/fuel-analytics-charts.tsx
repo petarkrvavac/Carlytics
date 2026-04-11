@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   BarElement,
   CategoryScale,
@@ -20,6 +20,7 @@ import { useIsLightTheme } from "@/lib/hooks/use-is-light-theme";
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
 export interface FuelMonthlyPoint {
+  monthKey?: string;
   monthLabel: string;
   liters: number;
   totalCost: number;
@@ -37,11 +38,45 @@ interface FuelAnalyticsChartsProps {
   showFuelTypeComparison: boolean;
 }
 
+type PeriodFilter = "3" | "6" | "12" | "all";
+
+function getPeriodLabel(period: PeriodFilter) {
+  if (period === "3") {
+    return "Zadnja 3 mj.";
+  }
+
+  if (period === "6") {
+    return "Zadnjih 6 mj.";
+  }
+
+  if (period === "12") {
+    return "Zadnjih 12 mj.";
+  }
+
+  return "Sve";
+}
+
 export function FuelAnalyticsCharts({
   monthlySeries,
   fuelTypeAverages,
   showFuelTypeComparison,
 }: FuelAnalyticsChartsProps) {
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodFilter>("6");
+
+  const filteredMonthlySeries = useMemo(() => {
+    if (selectedPeriod === "all") {
+      return monthlySeries;
+    }
+
+    const monthCount = Number(selectedPeriod);
+
+    if (!Number.isInteger(monthCount) || monthCount <= 0) {
+      return monthlySeries;
+    }
+
+    return monthlySeries.slice(Math.max(0, monthlySeries.length - monthCount));
+  }, [monthlySeries, selectedPeriod]);
+
   const isLightTheme = useIsLightTheme();
 
   const palette = useMemo(() => {
@@ -65,18 +100,18 @@ export function FuelAnalyticsCharts({
   }, [isLightTheme]);
 
   const litersAndCostData: ChartData<"bar"> = {
-    labels: monthlySeries.map((entry) => entry.monthLabel),
+    labels: filteredMonthlySeries.map((entry) => entry.monthLabel),
     datasets: [
       {
         label: "Litara",
-        data: monthlySeries.map((entry) => entry.liters),
+        data: filteredMonthlySeries.map((entry) => entry.liters),
         backgroundColor: palette.liters,
         yAxisID: "yLiters",
         borderRadius: 6,
       },
       {
         label: "Trošak (EUR)",
-        data: monthlySeries.map((entry) => entry.totalCost),
+        data: filteredMonthlySeries.map((entry) => entry.totalCost),
         backgroundColor: palette.cost,
         yAxisID: "yCost",
         borderRadius: 6,
@@ -204,10 +239,22 @@ export function FuelAnalyticsCharts({
           <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
             Litraža i trošak
           </h2>
-          <Badge variant="info">Zadnjih 6 mjeseci</Badge>
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedPeriod}
+              onChange={(event) => setSelectedPeriod(event.target.value as PeriodFilter)}
+              className="carlytics-select h-8 rounded-lg px-2 text-xs"
+            >
+              <option value="3">Zadnja 3 mj.</option>
+              <option value="6">Zadnjih 6 mj.</option>
+              <option value="12">Zadnjih 12 mj.</option>
+              <option value="all">Sve</option>
+            </select>
+            <Badge variant="info">{getPeriodLabel(selectedPeriod)}</Badge>
+          </div>
         </div>
 
-        {monthlySeries.length === 0 ? (
+        {filteredMonthlySeries.length === 0 ? (
           <p className="text-sm text-muted">Nema dovoljno unosa za prikaz trenda litraže i troška.</p>
         ) : (
           <div className="h-72 rounded-xl border border-border bg-surface-elevated p-2.5">

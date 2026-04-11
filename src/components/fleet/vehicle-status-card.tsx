@@ -76,11 +76,11 @@ export function VehicleStatusCard({ vehicle }: VehicleStatusCardProps) {
   return (
     <Link
       href={`/flota/${vehicle.id}`}
-      className="block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+      className="block h-full rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
     >
       <article
         className={cn(
-          "group rounded-2xl border bg-white p-5 transition-all duration-300 dark:bg-slate-900/92",
+          "group flex h-full flex-col rounded-2xl border bg-white p-5 transition-all duration-300 dark:bg-slate-900/92",
           isInactive
             ? "border-slate-300 bg-slate-100/80 opacity-90 dark:border-slate-700/80 dark:bg-slate-900/75"
             : hasOpenFault
@@ -89,7 +89,7 @@ export function VehicleStatusCard({ vehicle }: VehicleStatusCardProps) {
         )}
       >
         <div className="mb-6 flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0 flex-1">
             <h3 className="text-[11px] font-medium uppercase tracking-[0.24em] text-slate-400">
               {vehicle.make}
             </h3>
@@ -99,7 +99,7 @@ export function VehicleStatusCard({ vehicle }: VehicleStatusCardProps) {
             </span>
           </div>
 
-          <div className="flex flex-col items-end gap-2">
+          <div className="ml-2 flex shrink-0 flex-col items-end gap-2">
             <StatusBadge status={vehicle.status} />
             {isInactive ? (
               <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-rose-900 dark:border-rose-500/35 dark:bg-rose-500/14 dark:text-rose-200">
@@ -113,27 +113,24 @@ export function VehicleStatusCard({ vehicle }: VehicleStatusCardProps) {
             ) : null}
             {registrationState ? (
               <span
+                title={registrationState.label}
                 className={cn(
-                  "inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-wide",
+                  "inline-flex max-w-62 items-center self-end overflow-hidden whitespace-nowrap rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wide",
                   registrationState.className,
                 )}
               >
-                {registrationState.label}
+                <span className="truncate">{registrationState.label}</span>
               </span>
             ) : null}
           </div>
         </div>
 
-        <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">
+        <div className="mb-6 grid grid-cols-2 gap-4">
           <div className="space-y-1">
             <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Kilometraža</p>
             <p className="data-font text-sm text-slate-800 dark:text-slate-200">
               {vehicle.km.toLocaleString("hr-HR")} km
             </p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Rezervoar</p>
-            <p className="data-font text-sm text-slate-800 dark:text-slate-200">{vehicle.fuelCapacity} L</p>
           </div>
           <div className="space-y-1">
             <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Gorivo</p>
@@ -145,7 +142,7 @@ export function VehicleStatusCard({ vehicle }: VehicleStatusCardProps) {
 
         <div
           className={cn(
-            "flex items-center gap-3 rounded-xl border p-3",
+            "mt-auto flex items-center gap-3 rounded-xl border p-3",
             isServiceUrgent
               ? "border-rose-500/30 bg-rose-500/10"
               : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950/60",

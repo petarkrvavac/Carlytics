@@ -184,6 +184,48 @@ function getRegistrationBadge(registrationExpiryDays: number | null) {
   };
 }
 
+function getRegistrationHistoryStatus(expiryDateIso: string) {
+  const expiryDate = new Date(expiryDateIso);
+
+  if (Number.isNaN(expiryDate.getTime())) {
+    return {
+      label: "Status nepoznat",
+      variant: "neutral" as const,
+    };
+  }
+
+  const now = new Date();
+  const midnightNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const midnightExpiry = new Date(
+    expiryDate.getFullYear(),
+    expiryDate.getMonth(),
+    expiryDate.getDate(),
+  );
+
+  const daysUntilExpiry = Math.ceil(
+    (midnightExpiry.getTime() - midnightNow.getTime()) / (1000 * 60 * 60 * 24),
+  );
+
+  if (daysUntilExpiry < 0) {
+    return {
+      label: `Istekla prije ${Math.abs(daysUntilExpiry)} dana`,
+      variant: "danger" as const,
+    };
+  }
+
+  if (daysUntilExpiry <= 30) {
+    return {
+      label: `Ističe za ${daysUntilExpiry} dana`,
+      variant: "warning" as const,
+    };
+  }
+
+  return {
+    label: `Aktivna još ${daysUntilExpiry} dana`,
+    variant: "success" as const,
+  };
+}
+
 export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPageProps) {
   const { id } = await params;
   const vehicleId = parseVehicleId(id);
@@ -236,6 +278,7 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
   );
 
   const registrationState = getRegistrationBadge(vehicle.registrationExpiryDays);
+  const shouldShowRegistrationBadge = vehicle.isActive || registrationState.variant !== "success";
 
   return (
     <div className="space-y-5">
@@ -312,20 +355,24 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Badge variant={registrationState.variant}>{registrationState.label}</Badge>
+            {shouldShowRegistrationBadge ? (
+              <Badge variant={registrationState.variant}>{registrationState.label}</Badge>
+            ) : null}
             {digitalTwinData.activeAssignment ? (
               <Badge variant="info">
                 Aktivno zaduženje: {digitalTwinData.activeAssignment.employeeName}
               </Badge>
-            ) : (
+            ) : vehicle.isActive ? (
               <Badge variant="neutral">Nema aktivnog zaduženja</Badge>
-            )}
+            ) : null}
             {!vehicle.isActive && vehicle.deactivationReason ? (
               <Badge variant="danger">Razlog deaktivacije: {vehicle.deactivationReason}</Badge>
             ) : null}
           </div>
 
-          {vehicle.registrationExpiryDays !== null && vehicle.registrationExpiryDays < 0 ? (
+          {vehicle.isActive &&
+          vehicle.registrationExpiryDays !== null &&
+          vehicle.registrationExpiryDays <= 30 ? (
             <RegistrationExtensionForm vehicleId={vehicle.id} />
           ) : null}
         </Card>
@@ -534,6 +581,62 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
                   </p>
                 </li>
               ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
+              Povijest registracija
+            </h2>
+            <Badge variant="info">Zapisa: {digitalTwinData.registrationHistory.length}</Badge>
+          </div>
+
+          {digitalTwinData.registrationHistory.length === 0 ? (
+            <p className="text-sm text-muted">Nema evidentiranih registracija za ovo vozilo.</p>
+          ) : (
+            <ul className="space-y-3">
+              {digitalTwinData.registrationHistory.slice(0, MAX_DETAIL_ITEMS).map((registration) => {
+                const registrationStatus = getRegistrationHistoryStatus(registration.expiryDateIso);
+
+                return (
+                  <li
+                    key={registration.id}
+                    className="rounded-xl border border-border bg-surface px-3 py-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-slate-100">
+                        {registration.registrationPlate}
+                      </p>
+                      <Badge variant={registrationStatus.variant}>{registrationStatus.label}</Badge>
+                    </div>
+
+                    <div className="mt-2 grid gap-1 text-xs text-muted">
+                      <p>
+                        Datum registracije:{" "}
+                        <span className="text-slate-200">
+                          {formatDate(registration.registrationDateIso)}
+                        </span>
+                      </p>
+                      <p>
+                        Datum isteka:{" "}
+                        <span className="text-slate-200">
+                          {formatDate(registration.expiryDateIso)}
+                        </span>
+                      </p>
+                      <p>
+                        Cijena:{" "}
+                        <span className="data-font text-amber-200">
+                          {registration.cost === null
+                            ? "N/A"
+                            : `${formatAmount(registration.cost)} EUR`}
+                        </span>
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>

@@ -15,6 +15,9 @@ import type { Tables, TablesUpdate } from "@/types/database";
 
 type VehicleStatusRow = Tables<"statusi_vozila">;
 
+const FAULT_ATTACHMENTS_BUCKET = "kvarovi";
+const MAX_FAULT_ATTACHMENT_SIZE_BYTES = 8 * 1024 * 1024;
+
 const faultFormSchema = z.object({
   opisProblema: z
     .string()
@@ -117,11 +120,123 @@ function toIsoDateOnly(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function getFaultAttachmentFile(formData: FormData) {
+  const candidate = formData.get("fotografija");
+
+  if (!(candidate instanceof File)) {
+    return null;
+  }
+
+  if (!candidate.name || candidate.size <= 0) {
+    return null;
+  }
+
+  return candidate;
+}
+
+function sanitizeFileNameSegment(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+
+  return normalized || "privitak";
+}
+
+function resolveFileExtension(file: File) {
+  const extensionFromName = file.name.split(".").pop()?.toLowerCase();
+
+  if (extensionFromName && /^[a-z0-9]+$/.test(extensionFromName)) {
+    return extensionFromName;
+  }
+
+  if (file.type === "image/jpeg") {
+    return "jpg";
+  }
+
+  if (file.type === "image/png") {
+    return "png";
+  }
+
+  if (file.type === "image/webp") {
+    return "webp";
+  }
+
+  if (file.type === "image/gif") {
+    return "gif";
+  }
+
+  return "bin";
+}
+
+function validateFaultAttachment(file: File) {
+  if (!file.type.startsWith("image/")) {
+    return "Privitak mora biti slika (JPG, PNG, WEBP ili GIF).";
+  }
+
+  if (file.size > MAX_FAULT_ATTACHMENT_SIZE_BYTES) {
+    return "Privitak je prevelik. Maksimalna veličina je 8 MB.";
+  }
+
+  return null;
+}
+
+async function uploadFaultAttachment(params: {
+  client: NonNullable<ReturnType<typeof getDbClient>>;
+  file: File;
+  vehicleId: number;
+  employeeId: number;
+}) {
+  const fileBaseName = sanitizeFileNameSegment(params.file.name.replace(/\.[^.]+$/, ""));
+  const fileExtension = resolveFileExtension(params.file);
+  const randomSuffix =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+  const storagePath = [
+    "prijave-kvarova",
+    new Date().toISOString().slice(0, 10),
+    `vozilo-${params.vehicleId}`,
+    `zaposlenik-${params.employeeId}`,
+    `${fileBaseName}-${randomSuffix}.${fileExtension}`,
+  ].join("/");
+
+  const storage = params.client.storage.from(FAULT_ATTACHMENTS_BUCKET);
+  const { error: uploadError } = await storage.upload(storagePath, params.file, {
+    contentType: params.file.type,
+    upsert: false,
+  });
+
+  if (uploadError) {
+    console.error("[carlytics] Neuspješan upload privitka prijave kvara:", uploadError.message);
+    return {
+      attachmentUrl: null,
+      errorMessage: "Neuspješan upload fotografije kvara. Pokušaj ponovno.",
+    };
+  }
+
+  const { data: publicUrlData } = storage.getPublicUrl(storagePath);
+
+  if (!publicUrlData.publicUrl) {
+    return {
+      attachmentUrl: null,
+      errorMessage: "Privitak je učitan, ali URL nije dostupan. Pokušaj ponovno.",
+    };
+  }
+
+  return {
+    attachmentUrl: publicUrlData.publicUrl,
+    errorMessage: null,
+  };
+}
+
 function revalidateFaultPaths() {
   revalidatePath("/dashboard");
   revalidatePath("/flota");
   revalidatePath("/prijava-kvara");
-  revalidatePath("/servisni-centar");
+  revalidatePath("/povijest-servisa");
 }
 
 async function resolveVehicleCurrentKm(
@@ -188,6 +303,35 @@ export async function submitFaultReportAction(
   }
 
   const opisProblema = parsed.data.opisProblema.trim();
+  const attachmentFile = getFaultAttachmentFile(formData);
+  let attachmentUrl: string | null = null;
+
+  if (attachmentFile) {
+    const attachmentValidationMessage = validateFaultAttachment(attachmentFile);
+
+    if (attachmentValidationMessage) {
+      return {
+        status: "error",
+        message: attachmentValidationMessage,
+      };
+    }
+
+    const uploadResult = await uploadFaultAttachment({
+      client,
+      file: attachmentFile,
+      vehicleId: activeContext.vehicleId,
+      employeeId: sessionUser.employeeId,
+    });
+
+    if (uploadResult.errorMessage) {
+      return {
+        status: "error",
+        message: uploadResult.errorMessage,
+      };
+    }
+
+    attachmentUrl = uploadResult.attachmentUrl;
+  }
 
   const { error } = await client.from("servisne_intervencije").insert({
     opis: opisProblema,
@@ -199,6 +343,7 @@ export async function submitFaultReportAction(
     datum_pocetka: new Date().toISOString(),
     datum_zavrsetka: null,
     km_u_tom_trenutku: activeContext.currentKm,
+    attachment_url: attachmentUrl,
     cijena: null,
   });
 
@@ -252,6 +397,35 @@ export async function submitDesktopFaultReportAction(
   }
 
   const opisProblema = parsed.data.opisProblema.trim();
+  const attachmentFile = getFaultAttachmentFile(formData);
+  let attachmentUrl: string | null = null;
+
+  if (attachmentFile) {
+    const attachmentValidationMessage = validateFaultAttachment(attachmentFile);
+
+    if (attachmentValidationMessage) {
+      return {
+        status: "error",
+        message: attachmentValidationMessage,
+      };
+    }
+
+    const uploadResult = await uploadFaultAttachment({
+      client,
+      file: attachmentFile,
+      vehicleId: parsed.data.voziloId,
+      employeeId: sessionUser.employeeId,
+    });
+
+    if (uploadResult.errorMessage) {
+      return {
+        status: "error",
+        message: uploadResult.errorMessage,
+      };
+    }
+
+    attachmentUrl = uploadResult.attachmentUrl;
+  }
 
   const vehicleCurrentKm = await resolveVehicleCurrentKm(client, parsed.data.voziloId);
 
@@ -272,6 +446,7 @@ export async function submitDesktopFaultReportAction(
     datum_pocetka: new Date().toISOString(),
     datum_zavrsetka: null,
     km_u_tom_trenutku: vehicleCurrentKm,
+    attachment_url: attachmentUrl,
     cijena: null,
   });
 

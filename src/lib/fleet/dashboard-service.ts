@@ -19,7 +19,10 @@ import type {
 import type { Tables } from "@/types/database";
 
 const DAYS_FOR_REGISTRATION_ALERT = 30;
+const DAYS_FOR_SERVICE_ALERT = 30;
+const KM_FOR_SERVICE_ALERT = 2000;
 const MONTH_BUCKET_COUNT = 6;
+const NEW_OPEN_FAULT_STATUS_HINTS = ["novo", "new", "otvor", "open"] as const;
 
 const HR_MONTH_LABELS = [
   "Sij",
@@ -35,18 +38,6 @@ const HR_MONTH_LABELS = [
   "Stu",
   "Pro",
 ] as const;
-
-function getServiceRiskTier(serviceDueKm: number) {
-  if (serviceDueKm < 0) {
-    return 0;
-  }
-
-  if (serviceDueKm === 0) {
-    return 1;
-  }
-
-  return 2;
-}
 
 type VehicleRow = Pick<
   Tables<"vozila">,
@@ -166,6 +157,59 @@ function resolveVehicleStatus(params: {
   return normalizeStatus(params.statusLabel);
 }
 
+function isNewOpenFaultStatus(status: string | null) {
+  if (!status) {
+    return false;
+  }
+
+  const normalized = status.toLowerCase();
+  return NEW_OPEN_FAULT_STATUS_HINTS.some((hint) => normalized.includes(hint));
+}
+
+function isVehicleNearService(
+  vehicle: VehicleListItem,
+  serviceDueDays: number | null,
+) {
+  if (vehicle.serviceDueKm <= KM_FOR_SERVICE_ALERT) {
+    return true;
+  }
+
+  if (serviceDueDays !== null && serviceDueDays <= DAYS_FOR_SERVICE_ALERT) {
+    return true;
+  }
+
+  return vehicle.isServiceDue;
+}
+
+type VehiclePriorityBucket = 0 | 1 | 2 | 3 | 4;
+
+function resolveVehiclePriorityBucket(
+  vehicle: VehicleListItem,
+  newOpenFaultCount: number,
+  serviceDueDays: number | null,
+): VehiclePriorityBucket {
+  if (newOpenFaultCount > 0) {
+    return 0;
+  }
+
+  if (vehicle.registrationExpiryDays !== null && vehicle.registrationExpiryDays < 0) {
+    return 1;
+  }
+
+  if (
+    vehicle.registrationExpiryDays !== null &&
+    vehicle.registrationExpiryDays <= DAYS_FOR_REGISTRATION_ALERT
+  ) {
+    return 2;
+  }
+
+  if (isVehicleNearService(vehicle, serviceDueDays)) {
+    return 3;
+  }
+
+  return 4;
+}
+
 function normalizeFaultSeverity(hitnost: string | null): AlertSeverity {
   if (!hitnost) {
     return "upozorenje";
@@ -257,6 +301,7 @@ function mapVehicles(params: {
   places: PlaceRow[];
   registrations: RegistrationRow[];
   openInterventionCountByVehicle: Map<number, number>;
+  newOpenFaultCountByVehicle: Map<number, number>;
   inProgressInterventionVehicleIds: Set<number>;
   assignedVehicleIds: Set<number>;
 }) {
@@ -268,6 +313,7 @@ function mapVehicles(params: {
   const statusById = new Map(params.statuses.map((status) => [status.id, status]));
   const cityById = mapLocationByCity(params.places);
   const latestRegistrationByVehicle = getLatestRegistrations(params.registrations);
+  const serviceDueDaysByVehicle = new Map<number, number | null>();
 
   const mappedVehicles = params.vehicles.map<VehicleListItem>((vehicle) => {
     const model = vehicle.model_id ? modelById.get(vehicle.model_id) : null;
@@ -293,6 +339,7 @@ function mapVehicles(params: {
       lastSmallServiceDate: vehicle.zadnji_mali_servis_datum ?? vehicle.datum_kupovine,
       lastLargeServiceDate: vehicle.zadnji_veliki_servis_datum ?? vehicle.datum_kupovine,
     });
+    serviceDueDaysByVehicle.set(vehicle.id, serviceDue.serviceDueDays);
 
     return {
       id: vehicle.id,
@@ -336,21 +383,70 @@ function mapVehicles(params: {
       return left.isActive ? -1 : 1;
     }
 
-    const leftTier = getServiceRiskTier(left.serviceDueKm);
-    const rightTier = getServiceRiskTier(right.serviceDueKm);
+    const leftNewOpenFaultCount = params.newOpenFaultCountByVehicle.get(left.id) ?? 0;
+    const rightNewOpenFaultCount = params.newOpenFaultCountByVehicle.get(right.id) ?? 0;
+    const leftServiceDueDays = serviceDueDaysByVehicle.get(left.id) ?? null;
+    const rightServiceDueDays = serviceDueDaysByVehicle.get(right.id) ?? null;
 
-    if (leftTier !== rightTier) {
-      return leftTier - rightTier;
+    const leftPriority = resolveVehiclePriorityBucket(
+      left,
+      leftNewOpenFaultCount,
+      leftServiceDueDays,
+    );
+    const rightPriority = resolveVehiclePriorityBucket(
+      right,
+      rightNewOpenFaultCount,
+      rightServiceDueDays,
+    );
+
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    if (leftPriority === 0 && leftNewOpenFaultCount !== rightNewOpenFaultCount) {
+      return rightNewOpenFaultCount - leftNewOpenFaultCount;
+    }
+
+    const leftRegistrationDays = left.registrationExpiryDays ?? Number.MAX_SAFE_INTEGER;
+    const rightRegistrationDays = right.registrationExpiryDays ?? Number.MAX_SAFE_INTEGER;
+
+    if (
+      (leftPriority === 1 || leftPriority === 2) &&
+      leftRegistrationDays !== rightRegistrationDays
+    ) {
+      return leftRegistrationDays - rightRegistrationDays;
+    }
+
+    if (leftPriority === 3) {
+      if (left.isServiceDue !== right.isServiceDue) {
+        return left.isServiceDue ? -1 : 1;
+      }
+
+      const leftServiceDaysRank = leftServiceDueDays ?? Number.MAX_SAFE_INTEGER;
+      const rightServiceDaysRank = rightServiceDueDays ?? Number.MAX_SAFE_INTEGER;
+
+      if (leftServiceDaysRank !== rightServiceDaysRank) {
+        return leftServiceDaysRank - rightServiceDaysRank;
+      }
+
+      if (left.serviceDueKm !== right.serviceDueKm) {
+        return left.serviceDueKm - right.serviceDueKm;
+      }
+    }
+
+    if (left.openFaultCount !== right.openFaultCount) {
+      return right.openFaultCount - left.openFaultCount;
+    }
+
+    if (leftRegistrationDays !== rightRegistrationDays) {
+      return leftRegistrationDays - rightRegistrationDays;
     }
 
     if (left.serviceDueKm !== right.serviceDueKm) {
       return left.serviceDueKm - right.serviceDueKm;
     }
 
-    const leftReg = left.registrationExpiryDays ?? Number.MAX_SAFE_INTEGER;
-    const rightReg = right.registrationExpiryDays ?? Number.MAX_SAFE_INTEGER;
-
-    return leftReg - rightReg;
+    return left.plate.localeCompare(right.plate, "hr");
   });
 
   return mappedVehicles;
@@ -619,6 +715,7 @@ export async function getDashboardData(
 
     const faultRows = (faultsResult.data ?? []) as FaultRow[];
     const openInterventionCountByVehicle = new Map<number, number>();
+    const newOpenFaultCountByVehicle = new Map<number, number>();
     const inProgressInterventionVehicleIds = new Set<number>();
 
     for (const fault of faultRows) {
@@ -631,6 +728,12 @@ export async function getDashboardData(
 
       if (isInterventionInProgress(fault.status_prijave)) {
         inProgressInterventionVehicleIds.add(fault.vozilo_id);
+        continue;
+      }
+
+      if (isNewOpenFaultStatus(fault.status_prijave)) {
+        const currentNewCount = newOpenFaultCountByVehicle.get(fault.vozilo_id) ?? 0;
+        newOpenFaultCountByVehicle.set(fault.vozilo_id, currentNewCount + 1);
       }
     }
 
@@ -652,6 +755,7 @@ export async function getDashboardData(
       places: placesResult.data ?? [],
       registrations: registrationsResult.data ?? [],
       openInterventionCountByVehicle,
+      newOpenFaultCountByVehicle,
       inProgressInterventionVehicleIds,
       assignedVehicleIds,
     });
@@ -766,6 +870,7 @@ export async function getFleetVehiclesSnapshot() {
 
     const faultRows = (faultsResult.data ?? []) as FaultRow[];
     const openInterventionCountByVehicle = new Map<number, number>();
+    const newOpenFaultCountByVehicle = new Map<number, number>();
     const inProgressInterventionVehicleIds = new Set<number>();
 
     for (const fault of faultRows) {
@@ -778,6 +883,12 @@ export async function getFleetVehiclesSnapshot() {
 
       if (isInterventionInProgress(fault.status_prijave)) {
         inProgressInterventionVehicleIds.add(fault.vozilo_id);
+        continue;
+      }
+
+      if (isNewOpenFaultStatus(fault.status_prijave)) {
+        const currentNewCount = newOpenFaultCountByVehicle.get(fault.vozilo_id) ?? 0;
+        newOpenFaultCountByVehicle.set(fault.vozilo_id, currentNewCount + 1);
       }
     }
 
@@ -799,6 +910,7 @@ export async function getFleetVehiclesSnapshot() {
       places: (placesResult.data ?? []) as PlaceRow[],
       registrations: (registrationsResult.data ?? []) as RegistrationRow[],
       openInterventionCountByVehicle,
+      newOpenFaultCountByVehicle,
       inProgressInterventionVehicleIds,
       assignedVehicleIds,
     });

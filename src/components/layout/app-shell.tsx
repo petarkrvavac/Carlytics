@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { AppMobileNavigation } from "@/components/layout/app-mobile-navigation";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import type { SessionAppUser } from "@/lib/auth/session";
@@ -33,16 +34,29 @@ export function AppShell({
         <div className="flex min-h-screen flex-1 flex-col">
           <header className="sticky top-0 z-20 border-b border-border bg-background/85 px-4 py-3 backdrop-blur-lg sm:px-6 lg:hidden">
             <div className="flex items-center justify-between gap-3">
-              <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm font-semibold text-primary">
-                <Image
-                  src="/carlytics-logo.png"
-                  alt="Carlytics"
-                  width={28}
-                  height={28}
-                  className="h-7 w-7 rounded-md"
+              <div className="flex items-center gap-2">
+                <AppMobileNavigation
+                  activeFaultCount={activeFaultCount}
+                  hasCriticalAlerts={hasCriticalAlerts}
+                  currentUser={currentUser}
                 />
-                Carlytics Fleet OS
-              </Link>
+
+                <Link
+                  href="/dashboard"
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-primary"
+                >
+                  <Image
+                    src="/carlytics-logo.png"
+                    alt="Carlytics"
+                    width={28}
+                    height={28}
+                    className="h-7 w-7 rounded-md"
+                  />
+                  <span className="hidden sm:inline">Carlytics Fleet OS</span>
+                  <span className="sm:hidden">Carlytics</span>
+                </Link>
+              </div>
+
               <div className="flex items-center gap-2 text-xs text-muted">
                 <span className="hidden rounded-lg border border-border bg-surface px-2.5 py-1.5 sm:inline-flex">
                   {currentUser.fullName} • {currentUser.roleLabel}

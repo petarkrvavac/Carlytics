@@ -27,7 +27,7 @@ function buildFallbackProfile(sessionUser: SessionAppUser): EmployeeProfileDetai
 
 export default async function MobileProfilPage() {
   const sessionUser = await requireSessionUser({
-    allowedRoles: ["zaposlenik", "admin"],
+    allowedRoles: ["zaposlenik", "admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/dashboard",
   });

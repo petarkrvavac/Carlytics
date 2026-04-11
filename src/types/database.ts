@@ -295,6 +295,7 @@ export type Database = {
       }
       servisne_intervencije: {
         Row: {
+          attachment_url: string | null
           cijena: number | null
           datum_pocetka: string
           datum_zavrsetka: string | null
@@ -308,6 +309,7 @@ export type Database = {
           zaposlenik_id: number | null
         }
         Insert: {
+          attachment_url?: string | null
           cijena?: number | null
           datum_pocetka?: string
           datum_zavrsetka?: string | null
@@ -321,6 +323,7 @@ export type Database = {
           zaposlenik_id?: number | null
         }
         Update: {
+          attachment_url?: string | null
           cijena?: number | null
           datum_pocetka?: string
           datum_zavrsetka?: string | null

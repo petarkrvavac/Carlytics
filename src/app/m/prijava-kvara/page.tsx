@@ -8,7 +8,7 @@ import {
 
 export default async function MobilePrijavaKvaraPage() {
   const sessionUser = await requireSessionUser({
-    allowedRoles: ["zaposlenik", "admin"],
+    allowedRoles: ["zaposlenik", "admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/dashboard",
   });

@@ -130,6 +130,17 @@ export function DesktopFaultReportForm({
             </span>
           ) : null}
         </label>
+
+        <label className="text-xs uppercase tracking-[0.2em] text-muted lg:col-span-2">
+          Fotografija kvara (opcionalno)
+          <input
+            type="file"
+            name="fotografija"
+            accept="image/*"
+            disabled={isDisabled}
+            className="mt-2 block w-full rounded-xl border border-dashed border-border bg-surface px-3 py-2 text-xs text-muted disabled:opacity-60"
+          />
+        </label>
       </div>
 
       {state.message ? (

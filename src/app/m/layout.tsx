@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function MobileLayout({ children }: MobileLayoutProps) {
   const currentUser = await requireSessionUser({
-    allowedRoles: ["zaposlenik", "admin"],
+    allowedRoles: ["zaposlenik", "admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/dashboard",
   });
@@ -51,7 +51,7 @@ export default async function MobileLayout({ children }: MobileLayoutProps) {
               ) : null}
             </div>
           </div>
-          <p className="mt-2 text-xs text-muted">Brze akcije za zaposlenike na terenu.</p>
+          <p className="mt-2 text-xs text-muted">Brze akcije za operativni unos na terenu.</p>
           <p className="mt-1 text-xs text-muted">
             {currentUser.fullName} • {currentUser.roleLabel}
           </p>

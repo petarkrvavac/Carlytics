@@ -203,8 +203,8 @@ function compareByLabel(left: string, right: string) {
   return left.localeCompare(right, "hr-HR");
 }
 
-function resolveRoleLabel(rawRoleName: string | null | undefined) {
-  return getRoleLabelFromName(normalizeLabel(rawRoleName));
+function resolveRoleLabel(rawRoleName: string | null | undefined, roleId?: number | null) {
+  return getRoleLabelFromName(normalizeLabel(rawRoleName), roleId);
 }
 
 const HR_MONTH_LABELS = ["Sij", "Velj", "Ožu", "Tra", "Svi", "Lip", "Srp", "Kol", "Ruj", "Lis", "Stu", "Pro"] as const;
@@ -304,15 +304,12 @@ function toMonthKey(date: Date) {
 }
 
 function buildMonthlyKmSeries(assignments: EmployeeRecentAssignmentItem[]) {
-  const now = new Date();
-  const monthKeys: string[] = [];
-
-  for (let index = 5; index >= 0; index -= 1) {
-    const date = new Date(now.getFullYear(), now.getMonth() - index, 1);
-    monthKeys.push(toMonthKey(date));
+  if (assignments.length === 0) {
+    return [];
   }
 
-  const kmByMonth = new Map<string, number>(monthKeys.map((key) => [key, 0]));
+  let earliestDate: Date | null = null;
+  const kmByMonth = new Map<string, number>();
 
   for (const assignment of assignments) {
     const referenceDate = parseDate(assignment.endedAtIso ?? assignment.startedAtIso);
@@ -323,12 +320,29 @@ function buildMonthlyKmSeries(assignments: EmployeeRecentAssignmentItem[]) {
 
     const monthKey = toMonthKey(referenceDate);
 
-    if (!kmByMonth.has(monthKey)) {
-      continue;
-    }
-
     const current = kmByMonth.get(monthKey) ?? 0;
     kmByMonth.set(monthKey, current + assignment.distanceKm);
+
+    if (!earliestDate || referenceDate.getTime() < earliestDate.getTime()) {
+      earliestDate = referenceDate;
+    }
+  }
+
+  if (!earliestDate) {
+    return [];
+  }
+
+  const now = new Date();
+  const startDate = new Date(earliestDate.getFullYear(), earliestDate.getMonth(), 1);
+  const endDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthKeys: string[] = [];
+
+  for (
+    const date = new Date(startDate);
+    date.getTime() <= endDate.getTime();
+    date.setMonth(date.getMonth() + 1)
+  ) {
+    monthKeys.push(toMonthKey(date));
   }
 
   return monthKeys.map((monthKey) => {
@@ -400,7 +414,7 @@ export async function getEmployeesOverviewData(): Promise<EmployeesOverviewData>
           lastName: normalizeLabel(employee.prezime),
           username: normalizeLabel(employee.korisnicko_ime),
           email: employee.email,
-          role: resolveRoleLabel(roleData?.naziv),
+          role: resolveRoleLabel(roleData?.naziv, roleData?.id ?? employee.uloga_id ?? null),
           city: locationData?.city ?? null,
           county: locationData?.county ?? null,
           country: locationData?.country ?? null,
@@ -475,17 +489,19 @@ export async function getEmployeeProfileDetails(
   }
 
   let roleName: string | null = null;
+  let roleId: number | null = employee.uloga_id;
 
   if (employee.uloga_id) {
     const { data: roleData, error: roleError } = await client
       .from("uloge")
-      .select("naziv")
+      .select("id, naziv")
       .eq("id", employee.uloga_id)
       .maybeSingle();
 
     if (roleError) {
       console.error("[carlytics] Neuspjelo čitanje uloge za profil:", roleError.message);
     } else {
+      roleId = roleData?.id ?? roleId;
       roleName = roleData?.naziv ?? null;
     }
   }
@@ -544,7 +560,7 @@ export async function getEmployeeProfileDetails(
     firstName: normalizeLabel(employee.ime),
     lastName: normalizeLabel(employee.prezime),
     username: normalizeLabel(employee.korisnicko_ime),
-    role: resolveRoleLabel(roleName),
+    role: resolveRoleLabel(roleName, roleId),
     email: employee.email,
     city: cityName,
     county: countyName,
@@ -809,7 +825,7 @@ export async function getEmployeeFormContext(): Promise<EmployeeFormContext> {
   const roleOptions = (rolesResult.data ?? [])
     .map<EmployeeRoleOption>((role) => ({
       id: role.id,
-      label: resolveRoleLabel(role.naziv),
+      label: resolveRoleLabel(role.naziv, role.id),
     }))
     .sort((left, right) => compareByLabel(left.label, right.label));
 

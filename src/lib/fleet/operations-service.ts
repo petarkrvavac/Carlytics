@@ -2,6 +2,7 @@ import { createOptionalServerSupabaseClient } from "@/lib/supabase/server";
 import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import {
   applyInterventionVisibilityFilter,
+  isInterventionInProgress,
   isInterventionOpen,
 } from "@/lib/fleet/intervention-utils";
 import type { Tables } from "@/types/database";
@@ -22,6 +23,7 @@ type InterventionRow = Pick<
   | "id"
   | "datum_pocetka"
   | "datum_zavrsetka"
+  | "attachment_url"
   | "vozilo_id"
   | "zaposlenik_id"
   | "km_u_tom_trenutku"
@@ -98,6 +100,7 @@ export interface AssignmentHistoryItem {
 export interface FaultQueueItem {
   id: number;
   reportedAtIso: string;
+  attachmentUrl: string | null;
   vehicleId: number | null;
   vehicleLabel: string;
   plate: string;
@@ -113,6 +116,7 @@ export interface ServiceTimelineItem {
   id: number;
   startedAtIso: string;
   endedAtIso: string | null;
+  attachmentUrl: string | null;
   vehicleId: number | null;
   vehicleLabel: string;
   plate: string;
@@ -369,6 +373,22 @@ function compareDatesDesc(leftIso: string | null | undefined, rightIso: string |
 
 interface ServiceCenterHeaderOptions {
   vehicleId?: number | null;
+  period?: "3" | "6" | "12" | "all";
+}
+
+function getPeriodStartDate(period: "3" | "6" | "12" | "all") {
+  if (period === "all") {
+    return null;
+  }
+
+  const monthCount = Number(period);
+
+  if (!Number.isInteger(monthCount) || monthCount <= 0) {
+    return null;
+  }
+
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() - (monthCount - 1), 1);
 }
 
 export async function getServiceCenterHeaderData(
@@ -385,7 +405,7 @@ export async function getServiceCenterHeaderData(
     let interventionsQuery = applyInterventionVisibilityFilter(
       client
         .from("servisne_intervencije")
-        .select("datum_zavrsetka, status_prijave, vozilo_id"),
+        .select("datum_pocetka, datum_zavrsetka, status_prijave, vozilo_id"),
     );
 
     if (options.vehicleId) {
@@ -397,10 +417,27 @@ export async function getServiceCenterHeaderData(
     if (interventionsError) {
       throw interventionsError;
     }
-    const interventionRows = interventionsData ?? [];
+
+    const periodStartDate = getPeriodStartDate(options.period ?? "all");
+    const interventionRows = (interventionsData ?? []).filter((service) => {
+      if (!periodStartDate) {
+        return true;
+      }
+
+      const referenceDate = parseDate(service.datum_zavrsetka ?? service.datum_pocetka);
+
+      if (!referenceDate) {
+        return false;
+      }
+
+      return referenceDate.getTime() >= periodStartDate.getTime();
+    });
 
     return {
-      openServices: interventionRows.filter((service) => !service.datum_zavrsetka).length,
+      openServices: interventionRows.filter((service) => (
+        isInterventionOpen(service.status_prijave, service.datum_zavrsetka) &&
+        isInterventionInProgress(service.status_prijave)
+      )).length,
       completedServices: interventionRows.filter((service) => Boolean(service.datum_zavrsetka)).length,
       openFaults: interventionRows.filter((row) => isInterventionOpen(row.status_prijave, row.datum_zavrsetka)).length,
       isUsingFallbackData: false,
@@ -445,7 +482,7 @@ export async function getServiceCenterTimelineData(): Promise<ServiceCenterTimel
       applyInterventionVisibilityFilter(
         client
           .from("servisne_intervencije")
-          .select("id, datum_pocetka, datum_zavrsetka, vozilo_id, km_u_tom_trenutku, opis, cijena, kategorija_id"),
+          .select("id, datum_pocetka, datum_zavrsetka, attachment_url, vozilo_id, km_u_tom_trenutku, opis, cijena, kategorija_id"),
       ),
     ] as const);
 
@@ -480,6 +517,7 @@ export async function getServiceCenterTimelineData(): Promise<ServiceCenterTimel
           id: service.id,
           startedAtIso: service.datum_pocetka,
           endedAtIso: service.datum_zavrsetka,
+          attachmentUrl: service.attachment_url,
           vehicleId: service.vozilo_id ?? null,
           vehicleLabel: vehicle?.label ?? "Nepoznato vozilo",
           plate: vehicle?.plate ?? "N/A",
@@ -546,7 +584,7 @@ export async function getServiceCenterPriorityData(): Promise<ServiceCenterPrior
       applyInterventionVisibilityFilter(
         client
           .from("servisne_intervencije")
-          .select("id, datum_pocetka, datum_zavrsetka, vozilo_id, opis, hitnost, status_prijave"),
+          .select("id, datum_pocetka, datum_zavrsetka, attachment_url, vozilo_id, opis, hitnost, status_prijave"),
       ),
     ] as const);
 
@@ -577,6 +615,7 @@ export async function getServiceCenterPriorityData(): Promise<ServiceCenterPrior
         return {
           id: intervention.id,
           reportedAtIso: intervention.datum_pocetka,
+          attachmentUrl: intervention.attachment_url,
           vehicleId: intervention.vozilo_id ?? null,
           vehicleLabel: vehicle?.label ?? "Nepoznato vozilo",
           plate: vehicle?.plate ?? "N/A",
@@ -655,7 +694,7 @@ export async function getOperationsOverviewData(): Promise<OperationsOverviewDat
         client
           .from("servisne_intervencije")
           .select(
-            "id, datum_pocetka, datum_zavrsetka, vozilo_id, zaposlenik_id, km_u_tom_trenutku, opis, cijena, kategorija_id, hitnost, status_prijave",
+            "id, datum_pocetka, datum_zavrsetka, attachment_url, vozilo_id, zaposlenik_id, km_u_tom_trenutku, opis, cijena, kategorija_id, hitnost, status_prijave",
           ),
       ),
       client.from("kategorije_kvarova").select("id, naziv"),
@@ -818,6 +857,7 @@ export async function getOperationsOverviewData(): Promise<OperationsOverviewDat
         return {
           id: intervention.id,
           reportedAtIso: intervention.datum_pocetka,
+          attachmentUrl: intervention.attachment_url,
           vehicleId: intervention.vozilo_id ?? null,
           vehicleLabel: vehicle?.label ?? "Nepoznato vozilo",
           plate: vehicle?.plate ?? "N/A",
@@ -851,6 +891,7 @@ export async function getOperationsOverviewData(): Promise<OperationsOverviewDat
           id: service.id,
           startedAtIso: service.datum_pocetka,
           endedAtIso: service.datum_zavrsetka,
+          attachmentUrl: service.attachment_url,
           vehicleId: service.vozilo_id ?? null,
           vehicleLabel: vehicle?.label ?? "Nepoznato vozilo",
           plate: vehicle?.plate ?? "N/A",

@@ -149,7 +149,7 @@ export async function createEmployeeInviteAction(
   }
 
   await requireSessionUser({
-    allowedRoles: ["admin", "voditelj_flote"],
+    allowedRoles: ["admin"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/m",
   });
@@ -268,7 +268,7 @@ export async function updateEmployeeActivationAction(formData: FormData) {
   }
 
   await requireSessionUser({
-    allowedRoles: ["admin", "voditelj_flote"],
+    allowedRoles: ["admin"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/m",
   });

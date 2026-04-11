@@ -44,8 +44,8 @@ export const APP_NAVIGATION_ITEMS: AppNavigationItem[] = [
     section: "glavno",
   },
   {
-    href: "/servisni-centar",
-    label: "Servisni centar",
+    href: "/povijest-servisa",
+    label: "Povijest servisa",
     icon: Wrench,
     section: "glavno",
   },

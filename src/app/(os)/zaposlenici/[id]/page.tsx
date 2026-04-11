@@ -123,7 +123,6 @@ export default async function ZaposlenikDetaljiPage({ params }: ZaposlenikDetalj
           <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
             Prijeđeni kilometri
           </h2>
-          <Badge variant="neutral">Zadnjih 6 mjeseci</Badge>
         </div>
         <EmployeeKmChart series={insights.monthlyKmSeries} />
       </Card>
@@ -132,7 +131,7 @@ export default async function ZaposlenikDetaljiPage({ params }: ZaposlenikDetalj
         <Card>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
-              Zadnja 3 kvara
+              Zadnje prijavljeni kvarovi
             </h2>
             <Badge variant="warning">{insights.recentFaults.length}</Badge>
           </div>
@@ -161,7 +160,7 @@ export default async function ZaposlenikDetaljiPage({ params }: ZaposlenikDetalj
         <Card>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
-              Zadnja 3 točenja
+              Zadnja točenja
             </h2>
             <Badge variant="info">{insights.recentFuelEntries.length}</Badge>
           </div>
@@ -199,7 +198,7 @@ export default async function ZaposlenikDetaljiPage({ params }: ZaposlenikDetalj
         <Card>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
-              Zadnja 3 zaduženja
+              Zadnja zaduženja
             </h2>
             <Badge variant="neutral">{insights.recentAssignments.length}</Badge>
           </div>
