@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Search, SlidersHorizontal, X } from "lucide-react";
 
-import { AddVehicleForm } from "@/components/fleet/add-vehicle-form";
+import {
+  AddVehicleForm,
+  type AddVehicleFormSuccessPayload,
+} from "@/components/fleet/add-vehicle-form";
 import { VehicleStatusCard } from "@/components/fleet/vehicle-status-card";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -11,9 +14,17 @@ import { PaginationControls } from "@/components/ui/pagination-controls";
 import { PageHeader } from "@/components/ui/page-header";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import type { VehicleFormContext } from "@/lib/fleet/vehicle-form-context-service";
+import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
 import { cn } from "@/lib/utils/cn";
 
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE = 12;
+const LIVE_FLEET_SOURCE_TABLES = [
+  "evidencija_goriva",
+  "servisne_intervencije",
+  "zaduzenja",
+  "vozila",
+  "registracije",
+];
 
 export type FleetStatusFilter = "sve" | "slobodno" | "zauzeto" | "servis" | "neaktivna";
 
@@ -91,14 +102,42 @@ export function FleetSectionContent({
   formContext,
   initialFilter,
 }: FleetSectionContentProps) {
+  const [fleetVehicles, setFleetVehicles] = useState(vehicles);
   const [activeFilter, setActiveFilter] = useState<FleetStatusFilter>(initialFilter);
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
+  const refreshFleetSnapshot = useCallback(async () => {
+    const response = await fetch("/api/live/fleet", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as { vehicles?: VehicleListItem[] };
+
+    if (!Array.isArray(payload.vehicles)) {
+      return;
+    }
+
+    setFleetVehicles(payload.vehicles);
+  }, []);
+
+  useLiveSourceRefresh({
+    sourceTables: LIVE_FLEET_SOURCE_TABLES,
+    onRefresh: refreshFleetSnapshot,
+  });
+
+  useEffect(() => {
+    setFleetVehicles(vehicles);
+  }, [vehicles]);
+
   const visibleVehicles = useMemo(
-    () => getFilteredVehicles(vehicles, activeFilter, searchQuery),
-    [activeFilter, searchQuery, vehicles],
+    () => getFilteredVehicles(fleetVehicles, activeFilter, searchQuery),
+    [activeFilter, fleetVehicles, searchQuery],
   );
 
   const totalPages = Math.max(1, Math.ceil(visibleVehicles.length / ITEMS_PER_PAGE));
@@ -133,7 +172,17 @@ export function FleetSectionContent({
     setIsModalOpen(false);
   }, []);
 
-  const handleFormSuccess = useCallback(() => {
+  const handleFormSuccess = useCallback((payload: AddVehicleFormSuccessPayload | null) => {
+    if (payload?.vehicle) {
+      const createdVehicle = payload.vehicle;
+
+      setFleetVehicles((current) => [
+        createdVehicle,
+        ...current.filter((vehicle) => vehicle.id !== createdVehicle.id),
+      ]);
+      setCurrentPage(1);
+    }
+
     setIsModalOpen(false);
   }, []);
 

@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import type { ActionState } from "@/lib/actions/action-state";
@@ -12,6 +11,7 @@ import { createOptionalServerSupabaseClient } from "@/lib/supabase/server";
 import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { getActiveWorkerVehicleContext } from "@/lib/fleet/worker-context-service";
 import type { Tables, TablesUpdate } from "@/types/database";
+import { getCurrentIsoTimestamp, toDateOnlyInZagreb } from "@/lib/utils/date-format";
 
 type VehicleStatusRow = Tables<"statusi_vozila">;
 
@@ -117,7 +117,7 @@ function normalizeFaultDescription(description: string) {
 }
 
 function toIsoDateOnly(date: Date) {
-  return date.toISOString().slice(0, 10);
+  return toDateOnlyInZagreb(date);
 }
 
 function getFaultAttachmentFile(formData: FormData) {
@@ -197,7 +197,7 @@ async function uploadFaultAttachment(params: {
 
   const storagePath = [
     "prijave-kvarova",
-    new Date().toISOString().slice(0, 10),
+    toDateOnlyInZagreb(),
     `vozilo-${params.vehicleId}`,
     `zaposlenik-${params.employeeId}`,
     `${fileBaseName}-${randomSuffix}.${fileExtension}`,
@@ -333,19 +333,23 @@ export async function submitFaultReportAction(
     attachmentUrl = uploadResult.attachmentUrl;
   }
 
-  const { error } = await client.from("servisne_intervencije").insert({
-    opis: opisProblema,
-    status_prijave: "novo",
-    hitnost: parsed.data.hitnost,
-    vozilo_id: activeContext.vehicleId,
-    zaposlenik_id: sessionUser.employeeId,
-    kategorija_id: parsed.data.kategorijaId ?? null,
-    datum_pocetka: new Date().toISOString(),
-    datum_zavrsetka: null,
-    km_u_tom_trenutku: activeContext.currentKm,
-    attachment_url: attachmentUrl,
-    cijena: null,
-  });
+  const { data: insertedFault, error } = await client
+    .from("servisne_intervencije")
+    .insert({
+      opis: opisProblema,
+      status_prijave: "novo",
+      hitnost: parsed.data.hitnost,
+      vozilo_id: activeContext.vehicleId,
+      zaposlenik_id: sessionUser.employeeId,
+      kategorija_id: parsed.data.kategorijaId ?? null,
+      datum_pocetka: getCurrentIsoTimestamp(),
+      datum_zavrsetka: null,
+      km_u_tom_trenutku: activeContext.currentKm,
+      attachment_url: attachmentUrl,
+      cijena: null,
+    })
+    .select("id, datum_pocetka, vozilo_id, opis, hitnost, status_prijave, attachment_url")
+    .single();
 
   if (error) {
     console.error("[carlytics] Neuspjelo spremanje prijave kvara:", error.message);
@@ -359,7 +363,21 @@ export async function submitFaultReportAction(
   revalidatePath("/m");
   revalidatePath("/m/prijava-kvara");
 
-  redirect("/m");
+  return {
+    status: "success",
+    message: "Prijava kvara je uspješno poslana.",
+    payload: {
+      faultId: insertedFault?.id ?? null,
+      reportedAtIso: insertedFault?.datum_pocetka ?? getCurrentIsoTimestamp(),
+      vehicleId: insertedFault?.vozilo_id ?? activeContext.vehicleId,
+      description: insertedFault?.opis ?? opisProblema,
+      categoryId: parsed.data.kategorijaId ?? null,
+      priority: insertedFault?.hitnost ?? parsed.data.hitnost,
+      statusRaw: insertedFault?.status_prijave ?? "novo",
+      attachmentUrl: insertedFault?.attachment_url ?? attachmentUrl,
+      reporterName: sessionUser.fullName,
+    },
+  };
 }
 
 export async function submitDesktopFaultReportAction(
@@ -436,19 +454,23 @@ export async function submitDesktopFaultReportAction(
     };
   }
 
-  const { error } = await client.from("servisne_intervencije").insert({
-    opis: opisProblema,
-    status_prijave: "novo",
-    hitnost: parsed.data.hitnost,
-    vozilo_id: parsed.data.voziloId,
-    zaposlenik_id: sessionUser.employeeId,
-    kategorija_id: parsed.data.kategorijaId ?? null,
-    datum_pocetka: new Date().toISOString(),
-    datum_zavrsetka: null,
-    km_u_tom_trenutku: vehicleCurrentKm,
-    attachment_url: attachmentUrl,
-    cijena: null,
-  });
+  const { data: insertedFault, error } = await client
+    .from("servisne_intervencije")
+    .insert({
+      opis: opisProblema,
+      status_prijave: "novo",
+      hitnost: parsed.data.hitnost,
+      vozilo_id: parsed.data.voziloId,
+      zaposlenik_id: sessionUser.employeeId,
+      kategorija_id: parsed.data.kategorijaId ?? null,
+      datum_pocetka: getCurrentIsoTimestamp(),
+      datum_zavrsetka: null,
+      km_u_tom_trenutku: vehicleCurrentKm,
+      attachment_url: attachmentUrl,
+      cijena: null,
+    })
+    .select("id, datum_pocetka, vozilo_id, opis, hitnost, status_prijave, attachment_url")
+    .single();
 
   if (error) {
     console.error(
@@ -466,6 +488,17 @@ export async function submitDesktopFaultReportAction(
   return {
     status: "success",
     message: "Prijava kvara je uspješno poslana s desktopa.",
+    payload: {
+      faultId: insertedFault?.id ?? null,
+      reportedAtIso: insertedFault?.datum_pocetka ?? getCurrentIsoTimestamp(),
+      vehicleId: insertedFault?.vozilo_id ?? parsed.data.voziloId,
+      description: insertedFault?.opis ?? opisProblema,
+      categoryId: parsed.data.kategorijaId ?? null,
+      priority: insertedFault?.hitnost ?? parsed.data.hitnost,
+      statusRaw: insertedFault?.status_prijave ?? "novo",
+      attachmentUrl: insertedFault?.attachment_url ?? attachmentUrl,
+      reporterName: sessionUser.fullName,
+    },
   };
 }
 
@@ -521,7 +554,7 @@ export async function updateFaultStatusAction(formData: FormData) {
 
   const serviceCost = Number(parsedCloseCost.data.toFixed(2));
   const now = new Date();
-  const nowIso = now.toISOString();
+  const nowIso = getCurrentIsoTimestamp(now);
   const nowDate = toIsoDateOnly(now);
 
   const { data: faultRow, error: faultFetchError } = await applyInterventionVisibilityFilter(

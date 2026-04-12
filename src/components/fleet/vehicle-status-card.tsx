@@ -88,7 +88,7 @@ export function VehicleStatusCard({ vehicle }: VehicleStatusCardProps) {
             : "border-slate-200 hover:border-cyan-500/45 hover:shadow-[0_0_0_1px_rgba(6,182,212,0.22),0_12px_28px_rgba(2,132,199,0.14)] dark:border-slate-800/80 dark:hover:shadow-[0_0_0_1px_rgba(6,182,212,0.25),0_14px_34px_rgba(2,6,23,0.45)]",
         )}
       >
-        <div className="mb-6 flex items-start justify-between gap-3">
+        <div className="mb-4 flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
           <div className="min-w-0 flex-1">
             <h3 className="text-[11px] font-medium uppercase tracking-[0.24em] text-slate-400">
               {vehicle.make}
@@ -99,7 +99,7 @@ export function VehicleStatusCard({ vehicle }: VehicleStatusCardProps) {
             </span>
           </div>
 
-          <div className="ml-2 flex shrink-0 flex-col items-end gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 2xl:ml-2 2xl:w-auto 2xl:flex-col 2xl:items-end">
             <StatusBadge status={vehicle.status} />
             {isInactive ? (
               <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-rose-900 dark:border-rose-500/35 dark:bg-rose-500/14 dark:text-rose-200">
@@ -111,19 +111,22 @@ export function VehicleStatusCard({ vehicle }: VehicleStatusCardProps) {
                 Aktivan kvar ({vehicle.openFaultCount})
               </span>
             ) : null}
-            {registrationState ? (
-              <span
-                title={registrationState.label}
-                className={cn(
-                  "inline-flex max-w-62 items-center self-end overflow-hidden whitespace-nowrap rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wide",
-                  registrationState.className,
-                )}
-              >
-                <span className="truncate">{registrationState.label}</span>
-              </span>
-            ) : null}
           </div>
         </div>
+
+        {registrationState ? (
+          <div className="mb-4">
+            <span
+              title={registrationState.label}
+              className={cn(
+                "inline-flex w-full items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide leading-4 whitespace-normal wrap-break-word",
+                registrationState.className,
+              )}
+            >
+              {registrationState.label}
+            </span>
+          </div>
+        ) : null}
 
         <div className="mb-6 grid grid-cols-2 gap-4">
           <div className="space-y-1">

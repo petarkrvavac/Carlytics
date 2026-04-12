@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useActionState, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { INITIAL_ACTION_STATE } from "@/lib/actions/action-state";
 import { submitNewVehicleAction } from "@/lib/actions/vehicle-actions";
+import type { VehicleListItem } from "@/lib/fleet/types";
 import { cn } from "@/lib/utils/cn";
 import type {
   VehicleFuelTypeOption,
@@ -21,8 +21,27 @@ interface AddVehicleFormProps {
   fuelTypeOptions: VehicleFuelTypeOption[];
   cancelHref?: string;
   onCancel?: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (payload: AddVehicleFormSuccessPayload | null) => void;
   mode?: "page" | "modal";
+}
+
+export interface AddVehicleFormSuccessPayload {
+  vehicle: VehicleListItem | null;
+}
+
+function parseAddVehicleSuccessPayload(
+  payload: Record<string, unknown> | undefined,
+): AddVehicleFormSuccessPayload | null {
+  if (!payload) {
+    return null;
+  }
+
+  return {
+    vehicle:
+      payload.vehicle && typeof payload.vehicle === "object"
+        ? (payload.vehicle as VehicleListItem)
+        : null,
+  };
 }
 
 export function AddVehicleForm({
@@ -35,7 +54,6 @@ export function AddVehicleForm({
   onSuccess,
   mode = "page",
 }: AddVehicleFormProps) {
-  const router = useRouter();
   const [state, formAction, isPending] = useActionState(
     submitNewVehicleAction,
     INITIAL_ACTION_STATE,
@@ -61,9 +79,8 @@ export function AddVehicleForm({
       return;
     }
 
-    router.refresh();
-    onSuccess?.();
-  }, [onSuccess, router, state.status]);
+    onSuccess?.(parseAddVehicleSuccessPayload(state.payload));
+  }, [onSuccess, state.payload, state.status]);
 
   const inputClassName =
     "mt-1.5 w-full rounded-xl border border-border bg-surface-elevated px-3 py-1.5 text-xs text-foreground placeholder:text-muted xl:py-2 xl:text-sm";

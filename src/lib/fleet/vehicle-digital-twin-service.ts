@@ -573,6 +573,8 @@ async function getVehicleSnapshotById(vehicleId: number) {
         fuelTypeLabel: model?.tip_goriva_id
           ? (fuelTypeById.get(model.tip_goriva_id)?.naziv ?? null)
           : null,
+        smallServiceDueKm: serviceDue.smallServiceDueKm,
+        largeServiceDueKm: serviceDue.largeServiceDueKm,
         serviceDueKm: serviceDue.serviceDueKm,
         serviceDueType: serviceDue.serviceDueType,
         serviceDueLabel: serviceDue.serviceDueLabel,
@@ -742,6 +744,11 @@ async function getVehicleOperationalHistory(
             ? (employeeLookup.get(intervention.zaposlenik_id)?.fullName ?? "Nepoznati zaposlenik")
             : "Nepoznati zaposlenik",
           description: intervention.opis?.trim() || "Bez opisa",
+          categoryId: intervention.kategorija_id,
+          categoryLabel:
+            intervention.kategorija_id === SERVICE_FAULT_CATEGORY_ID
+              ? "Redovni servis"
+              : "Izvanredni servis",
           priority,
           statusRaw: intervention.status_prijave,
           statusLabel: normalizeFaultStatusLabel(intervention.status_prijave, open),

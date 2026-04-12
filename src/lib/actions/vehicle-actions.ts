@@ -5,8 +5,10 @@ import { z } from "zod";
 
 import type { ActionState } from "@/lib/actions/action-state";
 import { requireSessionUser } from "@/lib/auth/session";
+import { getFleetVehiclesSnapshot } from "@/lib/fleet/dashboard-service";
 import { createOptionalServerSupabaseClient } from "@/lib/supabase/server";
 import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
+import { toDateOnlyInZagreb } from "@/lib/utils/date-format";
 
 function basicValidacija(vin: string) {
   if (vin.length !== 17) {
@@ -204,7 +206,7 @@ export async function extendVehicleRegistrationAction(
     };
   }
 
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = toDateOnlyInZagreb();
 
   if (parsed.data.datumIstekaRegistracije < todayIso) {
     return {
@@ -294,6 +296,11 @@ export async function extendVehicleRegistrationAction(
   return {
     status: "success",
     message: `Registracija je produžena do ${parsed.data.datumIstekaRegistracije} (cijena ${registrationPrice.toLocaleString("hr-HR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR).`,
+    payload: {
+      vehicleId: parsed.data.vehicleId,
+      expiryDateIso: parsed.data.datumIstekaRegistracije,
+      price: registrationPrice,
+    },
   };
 }
 
@@ -595,7 +602,7 @@ export async function submitNewVehicleAction(
     };
   }
 
-  const initialServiceDate = parsed.data.datumKupovine ?? new Date().toISOString().slice(0, 10);
+  const initialServiceDate = parsed.data.datumKupovine ?? toDateOnlyInZagreb();
 
   const { data: insertedVehicle, error: vehicleInsertError } = await client
     .from("vozila")
@@ -622,7 +629,7 @@ export async function submitNewVehicleAction(
     };
   }
 
-  const registrationStart = parsed.data.datumKupovine ?? new Date().toISOString().slice(0, 10);
+  const registrationStart = parsed.data.datumKupovine ?? toDateOnlyInZagreb();
 
   const { error: registrationInsertError } = await client.from("registracije").insert({
     vozilo_id: insertedVehicle.id,
@@ -653,8 +660,15 @@ export async function submitNewVehicleAction(
   revalidatePath("/dashboard");
   revalidatePath("/flota");
 
+  const fleetSnapshot = await getFleetVehiclesSnapshot();
+  const insertedVehicleSnapshot =
+    fleetSnapshot.find((vehicle) => vehicle.id === insertedVehicle.id) ?? null;
+
   return {
     status: "success",
     message: `Vozilo je uspješno dodano (ID: ${insertedVehicle.id}).`,
+    payload: {
+      vehicle: insertedVehicleSnapshot,
+    },
   };
 }

@@ -1,25 +1,16 @@
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
 import { RefreshCcw } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { Database } from "@/types/database";
+import { useLiveUpdates } from "@/components/layout/live-updates-provider";
 
-const ALLOWED_SOURCE_TABLES = new Set([
-  "evidencija_goriva",
-  "servisne_intervencije",
-  "zaduzenja",
-]);
+const LIVE_UPDATE_PULSE_MS = 1000;
 
 interface DataFreshnessIndicatorProps {
   updatedAtIso: string;
   isUsingFallbackData: boolean;
-  refreshCooldownMs?: number;
 }
-
-const DEFAULT_REFRESH_COOLDOWN_MS = 1200;
 
 function formatRelativeAge(secondsOld: number) {
   if (secondsOld < 2) {
@@ -48,35 +39,24 @@ function formatRelativeAge(secondsOld: number) {
 export function DataFreshnessIndicator({
   updatedAtIso,
   isUsingFallbackData,
-  refreshCooldownMs = DEFAULT_REFRESH_COOLDOWN_MS,
 }: DataFreshnessIndicatorProps) {
-  const router = useRouter();
+  const { latestEventAtIso, eventVersion } = useLiveUpdates();
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
-  const lastRefreshMsRef = useRef(0);
-  const [isPending, startTransition] = useTransition();
+  const [isLivePulseActive, setIsLivePulseActive] = useState(false);
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  const updatedAtMs = useMemo(() => {
+  const dashboardUpdatedAtMs = useMemo(() => {
     const parsed = new Date(updatedAtIso).getTime();
     return Number.isNaN(parsed) ? 0 : parsed;
   }, [updatedAtIso]);
 
-  const triggerRefresh = useCallback(() => {
-    const now = Date.now();
-
-    // U istom valu događaja može stići više promjena; ograniči broj refresh poziva.
-    if (now - lastRefreshMsRef.current < refreshCooldownMs) {
-      return;
+  const liveUpdatedAtMs = useMemo(() => {
+    if (!latestEventAtIso) {
+      return 0;
     }
 
-    lastRefreshMsRef.current = now;
-
-    startTransition(() => {
-      router.refresh();
-    });
-  }, [refreshCooldownMs, router]);
+    const parsed = new Date(latestEventAtIso).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }, [latestEventAtIso]);
 
   useEffect(() => {
     const ticker = window.setInterval(() => {
@@ -89,53 +69,24 @@ export function DataFreshnessIndicator({
   }, []);
 
   useEffect(() => {
-    if (isUsingFallbackData || !supabaseUrl || !supabaseAnonKey) {
+    if (isUsingFallbackData || eventVersion <= 0) {
       return;
     }
 
-    const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-    });
+    const activatePulseTimeout = window.setTimeout(() => {
+      setNowMs(Date.now());
+      setIsLivePulseActive(true);
+    }, 0);
 
-    const channel = supabase
-      .channel("dashboard-live-updates")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "app_events",
-          filter: "izvorna_tablica=in.(evidencija_goriva,servisne_intervencije,zaduzenja)",
-        },
-        (payload) => {
-          const eventData = payload.new as Database["public"]["Tables"]["app_events"]["Row"] | null;
-
-          if (!eventData) {
-            return;
-          }
-
-          if (!ALLOWED_SOURCE_TABLES.has(eventData.izvorna_tablica)) {
-            return;
-          }
-
-          triggerRefresh();
-        },
-      );
-
-    channel.subscribe((status) => {
-      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-        console.warn("[carlytics] Dashboard realtime kanal:", status);
-      }
-    });
+    const deactivatePulseTimeout = window.setTimeout(() => {
+      setIsLivePulseActive(false);
+    }, LIVE_UPDATE_PULSE_MS);
 
     return () => {
-      void supabase.removeChannel(channel);
+      window.clearTimeout(activatePulseTimeout);
+      window.clearTimeout(deactivatePulseTimeout);
     };
-  }, [isUsingFallbackData, supabaseAnonKey, supabaseUrl, triggerRefresh]);
+  }, [eventVersion, isUsingFallbackData]);
 
   if (isUsingFallbackData) {
     return (
@@ -146,7 +97,8 @@ export function DataFreshnessIndicator({
   }
 
   const referenceNowMs = nowMs;
-  const effectiveUpdatedAtMs = updatedAtMs > 0 ? updatedAtMs : referenceNowMs;
+  const bestKnownUpdatedAtMs = Math.max(dashboardUpdatedAtMs, liveUpdatedAtMs);
+  const effectiveUpdatedAtMs = bestKnownUpdatedAtMs > 0 ? bestKnownUpdatedAtMs : referenceNowMs;
   const secondsOld = Math.max(0, Math.floor((referenceNowMs - effectiveUpdatedAtMs) / 1000));
   const relative = formatRelativeAge(secondsOld);
 
@@ -154,9 +106,9 @@ export function DataFreshnessIndicator({
     <div className="inline-flex h-8 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs text-muted">
       <RefreshCcw
         size={12}
-        className={isPending ? "animate-spin text-cyan-300" : "text-cyan-300"}
+        className={isLivePulseActive ? "animate-spin text-cyan-300" : "text-cyan-300"}
       />
-      <span>{isPending ? "Ažuriranje..." : `Ažurirano ${relative}`}</span>
+      <span>{isLivePulseActive ? "Primljen novi događaj" : `Ažurirano ${relative}`}</span>
     </div>
   );
 }

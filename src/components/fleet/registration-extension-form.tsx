@@ -1,13 +1,45 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState, useEffect } from "react";
 
 import { INITIAL_ACTION_STATE } from "@/lib/actions/action-state";
 import { extendVehicleRegistrationAction } from "@/lib/actions/vehicle-actions";
 
 interface RegistrationExtensionFormProps {
   vehicleId: number;
+  onExtended?: (payload: RegistrationExtensionSuccessPayload | null) => void;
+}
+
+export interface RegistrationExtensionSuccessPayload {
+  vehicleId: number;
+  expiryDateIso: string;
+  price: number;
+}
+
+function parseRegistrationPayload(
+  payload: Record<string, unknown> | undefined,
+): RegistrationExtensionSuccessPayload | null {
+  if (!payload) {
+    return null;
+  }
+
+  const vehicleId = payload.vehicleId;
+  const expiryDateIso = payload.expiryDateIso;
+  const price = payload.price;
+
+  if (
+    typeof vehicleId !== "number" ||
+    typeof expiryDateIso !== "string" ||
+    typeof price !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    vehicleId,
+    expiryDateIso,
+    price,
+  };
 }
 
 function getTodayIsoDate() {
@@ -26,9 +58,7 @@ function getMessageClass(status: "idle" | "success" | "error") {
   return "rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground";
 }
 
-export function RegistrationExtensionForm({ vehicleId }: RegistrationExtensionFormProps) {
-  const router = useRouter();
-  const lastRefreshKeyRef = useRef("");
+export function RegistrationExtensionForm({ vehicleId, onExtended }: RegistrationExtensionFormProps) {
   const [state, action, isPending] = useActionState(
     extendVehicleRegistrationAction,
     INITIAL_ACTION_STATE,
@@ -39,15 +69,8 @@ export function RegistrationExtensionForm({ vehicleId }: RegistrationExtensionFo
       return;
     }
 
-    const refreshKey = `registration-extended:${state.message}`;
-
-    if (lastRefreshKeyRef.current === refreshKey) {
-      return;
-    }
-
-    lastRefreshKeyRef.current = refreshKey;
-    router.refresh();
-  }, [router, state.message, state.status]);
+    onExtended?.(parseRegistrationPayload(state.payload));
+  }, [onExtended, state.message, state.payload, state.status]);
 
   return (
     <form action={action} className="mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-border bg-surface px-3 py-2">

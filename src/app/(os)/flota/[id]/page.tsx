@@ -16,15 +16,21 @@ import { RegistrationExtensionForm } from "@/components/fleet/registration-exten
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { ServerPagination } from "@/components/ui/server-pagination";
 import type { FaultQueueItem } from "@/lib/fleet/operations-service";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import { getVehicleDigitalTwinData } from "@/lib/fleet/vehicle-digital-twin-service";
+import { formatDate, formatDateTime } from "@/lib/utils/date-format";
+import { parsePageParam } from "@/lib/utils/page-params";
 
 interface VehicleDetailPageProps {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ gume?: string; registracije?: string }>;
 }
 
 const MAX_DETAIL_ITEMS = 3;
+const TIRE_ITEMS_PER_PAGE = 5;
+const REGISTRATION_ITEMS_PER_PAGE = 5;
 
 function parseVehicleId(rawId: string) {
   const parsed = Number(rawId);
@@ -34,36 +40,6 @@ function parseVehicleId(rawId: string) {
   }
 
   return parsed;
-}
-
-function formatDate(value: string) {
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "N/A";
-  }
-
-  return new Intl.DateTimeFormat("hr-HR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(parsed);
-}
-
-function formatDateTime(value: string) {
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "N/A";
-  }
-
-  return new Intl.DateTimeFormat("hr-HR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(parsed);
 }
 
 function formatAmount(value: number) {
@@ -90,6 +66,34 @@ function formatServiceSnapshot(dateIso: string | null, km: number | null) {
   const kmPart = km !== null ? `${km.toLocaleString("hr-HR")} km` : "N/A";
 
   return `${datePart} • ${kmPart}`;
+}
+
+function formatServiceDueKm(value: number) {
+  if (value < 0) {
+    return `Kasni ${Math.abs(value).toLocaleString("hr-HR")} km`;
+  }
+
+  return `${value.toLocaleString("hr-HR")} km`;
+}
+
+function getServiceProgressPercent(params: {
+  currentKm: number;
+  lastServiceKm: number | null;
+  dueKm: number;
+  fallbackIntervalKm: number;
+}) {
+  const traveledSinceService = params.lastServiceKm === null
+    ? null
+    : Math.max(0, params.currentKm - params.lastServiceKm);
+
+  const resolvedIntervalKm = traveledSinceService === null
+    ? params.fallbackIntervalKm
+    : traveledSinceService + params.dueKm;
+
+  const safeIntervalKm = Math.max(1, resolvedIntervalKm);
+  const safeDueKm = Math.max(0, params.dueKm);
+
+  return Math.max(0, Math.min(100, (safeDueKm / safeIntervalKm) * 100));
 }
 
 function getVehicleStatusVariant(status: VehicleListItem["status"]) {
@@ -184,7 +188,13 @@ function getRegistrationBadge(registrationExpiryDays: number | null) {
   };
 }
 
-function getRegistrationHistoryStatus(expiryDateIso: string) {
+function getRegistrationHistoryStatus(expiryDateIso: string, isLatestRecord: boolean) {
+  // Status prikazujemo samo za najnoviji zapis registracije.
+  // Ako je registracija obnovljena, stariji zapisi ostaju bez statusnih pilula.
+  if (!isLatestRecord) {
+    return null;
+  }
+
   const expiryDate = new Date(expiryDateIso);
 
   if (Number.isNaN(expiryDate.getTime())) {
@@ -226,8 +236,30 @@ function getRegistrationHistoryStatus(expiryDateIso: string) {
   };
 }
 
-export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPageProps) {
+function buildVehicleDetailHref(params: {
+  vehicleId: number;
+  tirePage: number;
+  registrationPage: number;
+}) {
+  const query = new URLSearchParams();
+
+  if (params.tirePage > 1) {
+    query.set("gume", String(params.tirePage));
+  }
+
+  if (params.registrationPage > 1) {
+    query.set("registracije", String(params.registrationPage));
+  }
+
+  const queryString = query.toString();
+  return queryString ? `/flota/${params.vehicleId}?${queryString}` : `/flota/${params.vehicleId}`;
+}
+
+export default async function FlotaVehicleDetailPage({ params, searchParams }: VehicleDetailPageProps) {
   const { id } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const requestedTirePage = parsePageParam(resolvedSearchParams?.gume);
+  const requestedRegistrationPage = parsePageParam(resolvedSearchParams?.registracije);
   const vehicleId = parseVehicleId(id);
 
   if (!vehicleId) {
@@ -267,18 +299,50 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
   });
   const openUnifiedServiceCount = unifiedServiceHistory.filter((item) => item.isOpen).length;
   const isServiceUrgent = vehicle.serviceDueKm <= 2000;
-  const serviceProgress = Math.max(
-    0,
-    Math.min(
-      100,
-      ((vehicle.serviceDueKm > 0 ? vehicle.serviceDueKm : 0) /
-        Math.max(1, vehicle.serviceProgressIntervalKm)) *
-        100,
-    ),
-  );
+  const smallServiceProgress = getServiceProgressPercent({
+    currentKm: vehicle.km,
+    lastServiceKm: vehicle.lastSmallServiceKm,
+    dueKm: vehicle.smallServiceDueKm,
+    fallbackIntervalKm: vehicle.serviceProgressIntervalKm,
+  });
+  const largeServiceProgress = getServiceProgressPercent({
+    currentKm: vehicle.km,
+    lastServiceKm: vehicle.lastLargeServiceKm,
+    dueKm: vehicle.largeServiceDueKm,
+    fallbackIntervalKm: vehicle.serviceProgressIntervalKm,
+  });
 
   const registrationState = getRegistrationBadge(vehicle.registrationExpiryDays);
   const shouldShowRegistrationBadge = vehicle.isActive || registrationState.variant !== "success";
+
+  const totalTirePages = Math.max(
+    1,
+    Math.ceil(digitalTwinData.tireHistory.length / TIRE_ITEMS_PER_PAGE),
+  );
+  const safeTirePage = Math.min(requestedTirePage, totalTirePages);
+  const pagedTireHistory = digitalTwinData.tireHistory.slice(
+    (safeTirePage - 1) * TIRE_ITEMS_PER_PAGE,
+    safeTirePage * TIRE_ITEMS_PER_PAGE,
+  );
+
+  const sortedRegistrationHistory = [...digitalTwinData.registrationHistory].sort((left, right) => {
+    const leftTime = new Date(left.registrationDateIso).getTime();
+    const rightTime = new Date(right.registrationDateIso).getTime();
+    const safeLeftTime = Number.isNaN(leftTime) ? 0 : leftTime;
+    const safeRightTime = Number.isNaN(rightTime) ? 0 : rightTime;
+
+    return safeRightTime - safeLeftTime;
+  });
+
+  const totalRegistrationPages = Math.max(
+    1,
+    Math.ceil(sortedRegistrationHistory.length / REGISTRATION_ITEMS_PER_PAGE),
+  );
+  const safeRegistrationPage = Math.min(requestedRegistrationPage, totalRegistrationPages);
+  const pagedRegistrationHistory = sortedRegistrationHistory.slice(
+    (safeRegistrationPage - 1) * REGISTRATION_ITEMS_PER_PAGE,
+    safeRegistrationPage * REGISTRATION_ITEMS_PER_PAGE,
+  );
 
   return (
     <div className="space-y-5">
@@ -312,12 +376,16 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
               </p>
             </div>
 
-            <div className="flex flex-col items-end gap-2">
-              <Badge variant={getVehicleStatusVariant(vehicle.status)}>{vehicle.status}</Badge>
-              <Badge variant={vehicle.isActive ? "success" : "danger"}>
-                {vehicle.isActive ? "Aktivno vozilo" : "Deaktivirano vozilo"}
-              </Badge>
-              <VehicleActivationControls vehicleId={vehicle.id} isActive={vehicle.isActive} />
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <Badge variant={getVehicleStatusVariant(vehicle.status)}>{vehicle.status}</Badge>
+                <Badge variant={vehicle.isActive ? "success" : "danger"}>
+                  {vehicle.isActive ? "Aktivno vozilo" : "Deaktivirano vozilo"}
+                </Badge>
+              </div>
+              <div className="w-full sm:w-auto">
+                <VehicleActivationControls vehicleId={vehicle.id} isActive={vehicle.isActive} />
+              </div>
             </div>
           </div>
 
@@ -334,7 +402,7 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
             </div>
             <div className="rounded-xl border border-border bg-surface p-3">
               <p className="text-xs uppercase tracking-[0.18em] text-muted">Tip goriva</p>
-              <p className="mt-2 text-lg text-slate-100">{vehicle.fuelTypeLabel ?? "Nije definirano"}</p>
+              <p className="data-font mt-2 text-lg text-slate-100">{vehicle.fuelTypeLabel ?? "Nije definirano"}</p>
             </div>
             <div className="rounded-xl border border-border bg-surface p-3">
               <p className="text-xs uppercase tracking-[0.18em] text-muted">Broj šasije</p>
@@ -350,7 +418,7 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
             </div>
             <div className="rounded-xl border border-border bg-surface p-3">
               <p className="text-xs uppercase tracking-[0.18em] text-muted">Grad registracije</p>
-              <p className="mt-2 text-sm text-slate-100">{vehicle.registrationCity ?? "N/A"}</p>
+              <p className="data-font mt-2 text-sm text-slate-100">{vehicle.registrationCity ?? "N/A"}</p>
             </div>
           </div>
 
@@ -390,18 +458,35 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
             <Wrench className={isServiceUrgent ? "text-rose-300" : "text-cyan-300"} size={18} />
           </div>
 
-          <div className="mt-6 rounded-xl border border-border bg-surface p-4">
-            <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.18em]">
-              <span className="text-muted">Servis za</span>
-              <span className={isServiceUrgent ? "text-rose-300" : "text-slate-200"}>
-                {vehicle.serviceDueLabel}
-              </span>
+          <div className="mt-6 space-y-3">
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.18em]">
+                <span className="text-muted">Mali servis</span>
+                <span className={vehicle.smallServiceDueKm <= 2000 ? "text-amber-300" : "text-slate-200"}>
+                  {formatServiceDueKm(vehicle.smallServiceDueKm)}
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                <div
+                  className={vehicle.smallServiceDueKm <= 2000 ? "h-full bg-amber-500" : "h-full bg-cyan-500"}
+                  style={{ width: `${smallServiceProgress}%` }}
+                />
+              </div>
             </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-              <div
-                className={isServiceUrgent ? "h-full bg-rose-500" : "h-full bg-cyan-500"}
-                style={{ width: `${serviceProgress}%` }}
-              />
+
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.18em]">
+                <span className="text-muted">Veliki servis</span>
+                <span className={vehicle.largeServiceDueKm <= 5000 ? "text-amber-300" : "text-slate-200"}>
+                  {formatServiceDueKm(vehicle.largeServiceDueKm)}
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                <div
+                  className={vehicle.largeServiceDueKm <= 5000 ? "h-full bg-amber-500" : "h-full bg-cyan-500"}
+                  style={{ width: `${largeServiceProgress}%` }}
+                />
+              </div>
             </div>
           </div>
 
@@ -562,8 +647,9 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
           {digitalTwinData.tireHistory.length === 0 ? (
             <p className="text-sm text-muted">Nema evidentiranih kupovina guma za ovo vozilo.</p>
           ) : (
-            <ul className="space-y-3">
-              {digitalTwinData.tireHistory.slice(0, MAX_DETAIL_ITEMS).map((tireEntry) => (
+            <>
+              <ul className="space-y-3">
+                {pagedTireHistory.map((tireEntry) => (
                 <li key={tireEntry.id} className="rounded-xl border border-border bg-surface px-3 py-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-medium text-slate-100">
@@ -580,8 +666,21 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
                     Datum kupovine: {tireEntry.purchaseDateIso ? formatDate(tireEntry.purchaseDateIso) : "N/A"}
                   </p>
                 </li>
-              ))}
-            </ul>
+                ))}
+              </ul>
+
+              <ServerPagination
+                currentPage={safeTirePage}
+                totalPages={totalTirePages}
+                hrefForPage={(page) =>
+                  buildVehicleDetailHref({
+                    vehicleId: vehicle.id,
+                    tirePage: page,
+                    registrationPage: safeRegistrationPage,
+                  })
+                }
+              />
+            </>
           )}
         </Card>
 
@@ -596,9 +695,14 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
           {digitalTwinData.registrationHistory.length === 0 ? (
             <p className="text-sm text-muted">Nema evidentiranih registracija za ovo vozilo.</p>
           ) : (
-            <ul className="space-y-3">
-              {digitalTwinData.registrationHistory.slice(0, MAX_DETAIL_ITEMS).map((registration) => {
-                const registrationStatus = getRegistrationHistoryStatus(registration.expiryDateIso);
+            <>
+              <ul className="space-y-3">
+                {pagedRegistrationHistory.map((registration, index) => {
+                const absoluteIndex = (safeRegistrationPage - 1) * REGISTRATION_ITEMS_PER_PAGE + index;
+                const registrationStatus = getRegistrationHistoryStatus(
+                  registration.expiryDateIso,
+                  absoluteIndex === 0,
+                );
 
                 return (
                   <li
@@ -609,7 +713,9 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
                       <p className="text-sm font-medium text-slate-100">
                         {registration.registrationPlate}
                       </p>
-                      <Badge variant={registrationStatus.variant}>{registrationStatus.label}</Badge>
+                      {registrationStatus ? (
+                        <Badge variant={registrationStatus.variant}>{registrationStatus.label}</Badge>
+                      ) : null}
                     </div>
 
                     <div className="mt-2 grid gap-1 text-xs text-muted">
@@ -637,7 +743,20 @@ export default async function FlotaVehicleDetailPage({ params }: VehicleDetailPa
                   </li>
                 );
               })}
-            </ul>
+              </ul>
+
+              <ServerPagination
+                currentPage={safeRegistrationPage}
+                totalPages={totalRegistrationPages}
+                hrefForPage={(page) =>
+                  buildVehicleDetailHref({
+                    vehicleId: vehicle.id,
+                    tirePage: safeTirePage,
+                    registrationPage: page,
+                  })
+                }
+              />
+            </>
           )}
         </Card>
       </section>

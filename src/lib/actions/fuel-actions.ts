@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import type { ActionState } from "@/lib/actions/action-state";
@@ -9,6 +8,7 @@ import { requireSessionUser } from "@/lib/auth/session";
 import { getActiveWorkerVehicleContext } from "@/lib/fleet/worker-context-service";
 import { createOptionalServerSupabaseClient } from "@/lib/supabase/server";
 import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
+import { getCurrentIsoTimestamp } from "@/lib/utils/date-format";
 
 interface DbErrorLike {
   code?: string | null;
@@ -146,7 +146,7 @@ export async function submitFuelEntryAction(
 
   const { error: insertError } = await client.from("evidencija_goriva").insert(
     {
-      datum: new Date().toISOString(),
+      datum: getCurrentIsoTimestamp(),
       km_tocenja: parsed.data.kmTocenja,
       litraza: parsed.data.litraza,
       cijena_po_litri: parsed.data.cijenaPoLitri,
@@ -204,5 +204,19 @@ export async function submitFuelEntryAction(
     };
   }
 
-  redirect("/m");
+  const totalAmount = Number((parsed.data.litraza * parsed.data.cijenaPoLitri).toFixed(2));
+
+  return {
+    status: "success",
+    message: "Unos goriva je uspješno spremljen.",
+    payload: {
+      vehicleId: activeContext.vehicleId,
+      assignmentId: activeContext.assignmentId,
+      kmTocenja: parsed.data.kmTocenja,
+      litraza: parsed.data.litraza,
+      cijenaPoLitri: parsed.data.cijenaPoLitri,
+      totalAmount,
+      createdAtIso: getCurrentIsoTimestamp(),
+    },
+  };
 }

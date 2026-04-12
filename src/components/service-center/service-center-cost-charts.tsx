@@ -1,6 +1,5 @@
 "use client";
 
-import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
   ArcElement,
@@ -18,6 +17,7 @@ import { Line, Pie } from "react-chartjs-2";
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { isRegularServiceCategoryLabel } from "@/lib/fleet/intervention-category";
 import type { ServiceTimelineItem } from "@/lib/fleet/operations-service";
 import { useIsLightTheme } from "@/lib/hooks/use-is-light-theme";
 
@@ -54,9 +54,6 @@ interface TopVehicleLeaderboardItem {
   regularSharePercent: number;
   extraordinarySharePercent: number;
   extraordinaryServiceSharePercent: number;
-  previousCost: number | null;
-  deltaCost: number | null;
-  deltaPercent: number | null;
 }
 
 const HR_MONTH_LABELS = [
@@ -133,32 +130,6 @@ function getPeriodLabel(period: PeriodFilter) {
   return "Sve vrijeme";
 }
 
-function normalizeCategoryLabel(value: string | null | undefined) {
-  if (!value) {
-    return "";
-  }
-
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .trim();
-}
-
-function isRegularServiceCategory(categoryLabel: string | null | undefined) {
-  const normalized = normalizeCategoryLabel(categoryLabel);
-
-  if (!normalized) {
-    return false;
-  }
-
-  return (
-    normalized.includes("redovni") ||
-    normalized.includes("odrzavanje") ||
-    normalized.includes("preventiv")
-  );
-}
-
 function formatCurrency(value: number) {
   return value.toLocaleString("hr-HR", {
     minimumFractionDigits: 2,
@@ -197,10 +168,6 @@ export function ServiceCenterCostCharts({
   }, [serviceTimeline]);
 
   const currentPeriodMonthKeys = useMemo(() => getMonthsForPeriod(selectedPeriod), [selectedPeriod]);
-  const previousPeriodMonthKeys = useMemo(
-    () => getMonthsForPeriod(selectedPeriod, 1),
-    [selectedPeriod],
-  );
 
   const categoryOptions = useMemo(() => {
     const labels = new Set<string>();
@@ -272,7 +239,6 @@ export function ServiceCenterCostCharts({
 
   const topVehicleLeaderboard = useMemo<TopVehicleLeaderboardItem[]>(() => {
     const periodMonthSet = new Set(currentPeriodMonthKeys);
-    const previousPeriodMonthSet = new Set(previousPeriodMonthKeys);
     const isAllPeriod = selectedPeriod === "all";
     const aggregatesByVehicle = new Map<
       string,
@@ -289,7 +255,6 @@ export function ServiceCenterCostCharts({
         extraordinaryCost: number;
       }
     >();
-    const previousCostByVehicle = new Map<string, number>();
 
     for (const service of completedServices) {
       const date = parseDate(service.endedAtIso ?? service.startedAtIso);
@@ -303,16 +268,11 @@ export function ServiceCenterCostCharts({
         ? `v-${service.vehicleId}`
         : `${service.vehicleLabel}|${service.plate}`;
 
-      if (!isAllPeriod && previousPeriodMonthSet.has(monthKey)) {
-        const previous = previousCostByVehicle.get(aggregationKey) ?? 0;
-        previousCostByVehicle.set(aggregationKey, previous + service.cost);
-      }
-
       if (!isAllPeriod && !periodMonthSet.has(monthKey)) {
         continue;
       }
 
-      const isRegular = isRegularServiceCategory(service.categoryLabel);
+      const isRegular = isRegularServiceCategoryLabel(service.categoryLabel);
 
       const previous = aggregatesByVehicle.get(aggregationKey) ?? {
         key: aggregationKey,
@@ -346,22 +306,6 @@ export function ServiceCenterCostCharts({
         const totalCost = Number(item.totalCost.toFixed(2));
         const regularCost = Number(item.regularCost.toFixed(2));
         const extraordinaryCost = Number(item.extraordinaryCost.toFixed(2));
-        const previousCostRaw = isAllPeriod
-          ? null
-          : Number((previousCostByVehicle.get(item.key) ?? 0).toFixed(2));
-        const deltaCost = previousCostRaw === null
-          ? null
-          : Number((totalCost - previousCostRaw).toFixed(2));
-
-        let deltaPercent: number | null = null;
-
-        if (deltaCost !== null && previousCostRaw !== null) {
-          if (previousCostRaw > 0) {
-            deltaPercent = Number(((deltaCost / previousCostRaw) * 100).toFixed(1));
-          } else if (totalCost === 0) {
-            deltaPercent = 0;
-          }
-        }
 
         return {
           key: item.key,
@@ -385,17 +329,11 @@ export function ServiceCenterCostCharts({
             item.serviceCount > 0
               ? Number(((item.extraordinaryCount / item.serviceCount) * 100).toFixed(1))
               : 0,
-          previousCost: previousCostRaw,
-          deltaCost,
-          deltaPercent,
         };
       })
       .sort((left, right) => right.totalCost - left.totalCost)
-      .slice(0, 5)
-      .map((item) => ({
-        ...item,
-      }));
-  }, [completedServices, currentPeriodMonthKeys, previousPeriodMonthKeys, selectedPeriod]);
+      .slice(0, 5);
+  }, [completedServices, currentPeriodMonthKeys, selectedPeriod]);
 
   const palette = useMemo(() => {
     if (isLightTheme) {
@@ -602,33 +540,6 @@ export function ServiceCenterCostCharts({
               {topVehicleLeaderboard.map((vehicleCost, index) => {
                 const regularWidth = Math.max(0, Math.min(100, vehicleCost.regularSharePercent));
                 const extraordinaryWidth = Math.max(0, Math.min(100, vehicleCost.extraordinarySharePercent));
-                const deltaCostValue = vehicleCost.deltaCost ?? 0;
-
-                const isTrendNotAvailable = vehicleCost.deltaCost === null;
-                const isTrendFlat = !isTrendNotAvailable && Math.abs(deltaCostValue) < 0.01;
-                const isTrendUp = !isTrendNotAvailable && !isTrendFlat && deltaCostValue > 0;
-
-                const TrendIcon = isTrendNotAvailable
-                  ? Minus
-                  : isTrendFlat
-                    ? Minus
-                    : isTrendUp
-                      ? TrendingUp
-                      : TrendingDown;
-
-                const trendClassName = isTrendNotAvailable
-                  ? "text-slate-400"
-                  : isTrendFlat
-                    ? "text-slate-300"
-                    : isTrendUp
-                      ? "text-amber-300"
-                      : "text-emerald-300";
-
-                const trendLabel = isTrendNotAvailable
-                  ? "N/A"
-                  : vehicleCost.deltaPercent === null
-                    ? "Novi trošak"
-                    : `${vehicleCost.deltaPercent > 0 ? "+" : ""}${vehicleCost.deltaPercent.toFixed(1)}%`;
 
                 return (
                 <li
@@ -670,20 +581,9 @@ export function ServiceCenterCostCharts({
                     </div>
 
                     <div className="ml-auto flex min-w-36 flex-col items-end gap-1 text-right">
-                      <div className={`inline-flex items-center gap-1 text-xs font-semibold ${trendClassName}`}>
-                        <TrendIcon size={13} />
-                        {trendLabel}
-                      </div>
-
                       <p className="data-font text-sm font-semibold text-amber-200">
                         {formatCurrency(vehicleCost.totalCost)}
                         <span className="ml-1 text-xs text-amber-300">EUR</span>
-                      </p>
-
-                      <p className="text-[11px] text-muted">
-                        {vehicleCost.previousCost === null
-                          ? "Prethodni period: N/A"
-                          : `Prethodni period: ${formatCurrency(vehicleCost.previousCost)} EUR`}
                       </p>
                     </div>
                   </div>

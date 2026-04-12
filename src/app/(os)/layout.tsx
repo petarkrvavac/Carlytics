@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { AppShell } from "@/components/layout/app-shell";
+import { LiveUpdatesProvider } from "@/components/layout/live-updates-provider";
 import { requireSessionUser } from "@/lib/auth/session";
 import { getAppShellMetrics } from "@/lib/fleet/dashboard-service";
 
@@ -20,12 +21,14 @@ export default async function OsLayout({ children }: OsLayoutProps) {
   const metrics = await getAppShellMetrics();
 
   return (
-    <AppShell
-      activeFaultCount={metrics.activeFaultCount}
-      hasCriticalAlerts={metrics.hasCriticalAlerts}
-      currentUser={currentUser}
-    >
-      {children}
-    </AppShell>
+    <LiveUpdatesProvider>
+      <AppShell
+        activeFaultCount={metrics.activeFaultCount}
+        hasCriticalAlerts={metrics.hasCriticalAlerts}
+        currentUser={currentUser}
+      >
+        {children}
+      </AppShell>
+    </LiveUpdatesProvider>
   );
 }

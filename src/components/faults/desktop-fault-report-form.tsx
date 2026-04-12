@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 import { INITIAL_ACTION_STATE } from "@/lib/actions/action-state";
 import { submitDesktopFaultReportAction } from "@/lib/actions/fault-actions";
@@ -14,7 +13,19 @@ interface DesktopFaultReportFormProps {
   categories: FaultCategoryOption[];
   mode?: "page" | "modal";
   onCancel?: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (payload: DesktopFaultReportSuccessPayload | null) => void;
+}
+
+export interface DesktopFaultReportSuccessPayload {
+  faultId: number | null;
+  reportedAtIso: string;
+  vehicleId: number;
+  description: string;
+  categoryId: number | null;
+  priority: "nisko" | "srednje" | "visoko" | "kriticno";
+  statusRaw: string;
+  attachmentUrl: string | null;
+  reporterName: string;
 }
 
 const PRIORITY_OPTIONS = [
@@ -24,6 +35,53 @@ const PRIORITY_OPTIONS = [
   { value: "kriticno", label: "Kritično" },
 ] as const;
 
+function parseFaultSuccessPayload(
+  payload: Record<string, unknown> | undefined,
+): DesktopFaultReportSuccessPayload | null {
+  if (!payload) {
+    return null;
+  }
+
+  const vehicleId = payload.vehicleId;
+  const reportedAtIso = payload.reportedAtIso;
+  const description = payload.description;
+  const categoryId = payload.categoryId;
+  const priority = payload.priority;
+  const statusRaw = payload.statusRaw;
+  const reporterName = payload.reporterName;
+
+  if (
+    typeof vehicleId !== "number" ||
+    typeof reportedAtIso !== "string" ||
+    typeof description !== "string" ||
+    typeof statusRaw !== "string" ||
+    typeof reporterName !== "string"
+  ) {
+    return null;
+  }
+
+  if (
+    priority !== "nisko" &&
+    priority !== "srednje" &&
+    priority !== "visoko" &&
+    priority !== "kriticno"
+  ) {
+    return null;
+  }
+
+  return {
+    faultId: typeof payload.faultId === "number" ? payload.faultId : null,
+    reportedAtIso,
+    vehicleId,
+    description,
+    categoryId: typeof categoryId === "number" ? categoryId : null,
+    priority,
+    statusRaw,
+    attachmentUrl: typeof payload.attachmentUrl === "string" ? payload.attachmentUrl : null,
+    reporterName,
+  };
+}
+
 export function DesktopFaultReportForm({
   vehicles,
   categories,
@@ -31,7 +89,6 @@ export function DesktopFaultReportForm({
   onCancel,
   onSuccess,
 }: DesktopFaultReportFormProps) {
-  const router = useRouter();
   const [state, formAction, isPending] = useActionState(
     submitDesktopFaultReportAction,
     INITIAL_ACTION_STATE,
@@ -45,9 +102,8 @@ export function DesktopFaultReportForm({
       return;
     }
 
-    router.refresh();
-    onSuccess?.();
-  }, [onSuccess, router, state.status]);
+    onSuccess?.(parseFaultSuccessPayload(state.payload));
+  }, [onSuccess, state.payload, state.status]);
 
   return (
     <form

@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireSessionUser } from "@/lib/auth/session";
 import { getEmployeeOperationalInsights } from "@/lib/employees/employee-service";
+import { formatDate, formatDateTime } from "@/lib/utils/date-format";
 
 interface ZaposlenikDetaljiPageProps {
   params: Promise<{ id: string }>;
@@ -22,40 +23,6 @@ function parseEmployeeId(rawId: string) {
   }
 
   return parsed;
-}
-
-function formatDateTime(value: string) {
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "N/A";
-  }
-
-  return new Intl.DateTimeFormat("hr-HR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(parsed);
-}
-
-function formatDate(value: string | null) {
-  if (!value) {
-    return "N/A";
-  }
-
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "N/A";
-  }
-
-  return new Intl.DateTimeFormat("hr-HR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(parsed);
 }
 
 function getFaultStatusVariant(statusLabel: string) {

@@ -12,6 +12,8 @@ export interface VehicleListItem {
   km: number;
   fuelCapacity: number;
   fuelTypeLabel: string | null;
+  smallServiceDueKm: number;
+  largeServiceDueKm: number;
   serviceDueKm: number;
   serviceDueType: ServiceDueType;
   serviceDueLabel: string;

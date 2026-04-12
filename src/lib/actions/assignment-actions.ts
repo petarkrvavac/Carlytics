@@ -9,6 +9,7 @@ import { evaluateVehicleServiceDue } from "@/lib/fleet/service-due";
 import { getActiveWorkerVehicleContext } from "@/lib/fleet/worker-context-service";
 import { createOptionalServerSupabaseClient } from "@/lib/supabase/server";
 import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
+import { formatDateTime, getCurrentIsoTimestamp } from "@/lib/utils/date-format";
 import type { Tables } from "@/types/database";
 
 type VehicleStatusRow = Tables<"statusi_vozila">;
@@ -91,7 +92,7 @@ async function finalizeVehicleRelease(params: {
   kmZavrsna: number;
   enforceEmployeeId?: number;
 }): Promise<ActionState> {
-  const finishedAtIso = new Date().toISOString();
+  const finishedAtIso = getCurrentIsoTimestamp();
 
   let releaseQuery = params.client
     .from("zaduzenja")
@@ -199,7 +200,7 @@ async function finalizeVehicleRelease(params: {
     message:
       targetStatus === "servis"
         ? `Vozilo je razduženo i prebačeno u servisnu zonu (${serviceDue.serviceDueLabel}).`
-        : `Vozilo je razduženo. Datum razduženja je spremljen (${new Date(finishedAtIso).toLocaleString("hr-HR")}).`,
+        : `Vozilo je razduženo. Datum razduženja je spremljen (${formatDateTime(finishedAtIso)}).`,
   };
 }
 
@@ -269,7 +270,14 @@ export async function releaseWorkerVehicleAction(
   }
 
   revalidateAssignmentPaths();
-  return releaseResult;
+  return {
+    ...releaseResult,
+    payload: {
+      assignmentId: activeContext.assignmentId,
+      vehicleId: activeContext.vehicleId,
+      kmZavrsna: parsed.data.kmZavrsna,
+    },
+  };
 }
 
 export async function releaseDesktopAssignmentAction(
@@ -372,7 +380,14 @@ export async function releaseDesktopAssignmentAction(
   }
 
   revalidateAssignmentPaths();
-  return releaseResult;
+  return {
+    ...releaseResult,
+    payload: {
+      assignmentId: assignmentRow.id,
+      vehicleId: assignmentRow.vozilo_id,
+      kmZavrsna: parsed.data.kmZavrsna,
+    },
+  };
 }
 
 export async function assignWorkerVehicleAction(
@@ -471,19 +486,23 @@ export async function assignWorkerVehicleAction(
     }
   }
 
-  const startedAtIso = new Date().toISOString();
+  const startedAtIso = getCurrentIsoTimestamp();
 
   const kmStart = vehicleRow.trenutna_km ?? 0;
 
-  const { error: assignError } = await client.from("zaduzenja").insert({
-    vozilo_id: parsed.data.vehicleId,
-    zaposlenik_id: sessionUser.employeeId,
-    datum_od: startedAtIso,
-    datum_do: null,
-    is_aktivno: true,
-    km_pocetna: kmStart,
-    km_zavrsna: kmStart,
-  });
+  const { data: insertedAssignment, error: assignError } = await client
+    .from("zaduzenja")
+    .insert({
+      vozilo_id: parsed.data.vehicleId,
+      zaposlenik_id: sessionUser.employeeId,
+      datum_od: startedAtIso,
+      datum_do: null,
+      is_aktivno: true,
+      km_pocetna: kmStart,
+      km_zavrsna: kmStart,
+    })
+    .select("id")
+    .single();
 
   if (assignError) {
     console.error("[carlytics] Neuspješno spremanje novog zaduženja:", assignError.message);
@@ -514,5 +533,11 @@ export async function assignWorkerVehicleAction(
   return {
     status: "success",
     message: "Novo zaduženje vozila je uspješno spremljeno.",
+    payload: {
+      assignmentId: insertedAssignment?.id ?? null,
+      vehicleId: parsed.data.vehicleId,
+      kmStart,
+      startedAtIso,
+    },
   };
 }

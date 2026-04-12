@@ -6,7 +6,10 @@ import { Plus, X } from "lucide-react";
 
 import { AttachmentViewerButton } from "@/components/attachments/attachment-viewer-button";
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
-import { DesktopFaultReportForm } from "@/components/faults/desktop-fault-report-form";
+import {
+  DesktopFaultReportForm,
+  type DesktopFaultReportSuccessPayload,
+} from "@/components/faults/desktop-fault-report-form";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PaginationControls } from "@/components/ui/pagination-controls";
@@ -14,6 +17,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { updateFaultStatusAction } from "@/lib/actions/fault-actions";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import type { FaultCategoryOption } from "@/lib/fleet/worker-context-service";
+import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
 import { formatDateTime } from "@/lib/utils/date-format";
 import type {
   FaultQueueItem,
@@ -99,12 +103,16 @@ function getStatusValue(statusRaw: string | null) {
   return "novo" as const;
 }
 
-const STATUS_ACTIONS = [
-  { value: "novo", label: "Postavi: novo" },
-  { value: "u_obradi", label: "Postavi: u obradi" },
-] as const;
+type FaultStatusValue = ReturnType<typeof getStatusValue>;
+
+const STATUS_OPTIONS: Array<{ value: FaultStatusValue; label: string }> = [
+  { value: "novo", label: "Novo" },
+  { value: "u_obradi", label: "U obradi" },
+  { value: "zatvoreno", label: "Riješeno" },
+];
 
 const ITEMS_PER_PAGE = 10;
+const LIVE_FAULT_SOURCE_TABLES = ["servisne_intervencije"];
 
 export function FaultsSectionContent({
   operationsData,
@@ -113,11 +121,53 @@ export function FaultsSectionContent({
   selectedVehicleId,
 }: FaultsSectionContentProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [closingFaultId, setClosingFaultId] = useState<number | null>(null);
+  const [statusDraftByFault, setStatusDraftByFault] = useState<Record<number, FaultStatusValue>>({});
   const [currentPage, setCurrentPage] = useState(1);
+  const [serverFaultQueue, setServerFaultQueue] = useState(operationsData.faultQueue);
+  const [isUsingFallbackData, setIsUsingFallbackData] = useState(operationsData.isUsingFallbackData);
+  const [insertedFaults, setInsertedFaults] = useState<FaultQueueItem[]>([]);
+
+  const refreshFaultQueue = useCallback(async () => {
+    const response = await fetch("/api/live/operations", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      operationsData?: OperationsOverviewData;
+    };
+
+    if (!payload.operationsData) {
+      return;
+    }
+
+    setServerFaultQueue(payload.operationsData.faultQueue);
+    setIsUsingFallbackData(payload.operationsData.isUsingFallbackData);
+  }, []);
+
+  useLiveSourceRefresh({
+    sourceTables: LIVE_FAULT_SOURCE_TABLES,
+    onRefresh: refreshFaultQueue,
+  });
+
+  const combinedFaultQueue = useMemo(() => {
+    if (insertedFaults.length === 0) {
+      return serverFaultQueue;
+    }
+
+    const insertedIds = new Set(insertedFaults.map((fault) => fault.id));
+
+    return [
+      ...insertedFaults,
+      ...serverFaultQueue.filter((fault) => !insertedIds.has(fault.id)),
+    ];
+  }, [insertedFaults, serverFaultQueue]);
 
   const openFaults = useMemo(() => {
-    return operationsData.faultQueue.filter((fault) => {
+    return combinedFaultQueue.filter((fault) => {
       if (!fault.isOpen) {
         return false;
       }
@@ -128,7 +178,7 @@ export function FaultsSectionContent({
 
       return fault.vehicleId === selectedVehicleId;
     });
-  }, [operationsData.faultQueue, selectedVehicleId]);
+  }, [combinedFaultQueue, selectedVehicleId]);
 
   const selectedVehicle = useMemo(() => {
     if (!selectedVehicleId) {
@@ -175,6 +225,45 @@ export function FaultsSectionContent({
     setIsModalOpen(false);
   }, []);
 
+  const handleFaultReportSuccess = useCallback(
+    (payload: DesktopFaultReportSuccessPayload | null) => {
+      if (payload) {
+        const vehicle = vehicles.find((vehicleItem) => vehicleItem.id === payload.vehicleId) ?? null;
+        const category =
+          payload.categoryId !== null
+            ? (categories.find((categoryOption) => categoryOption.id === payload.categoryId) ?? null)
+            : null;
+        const fallbackFaultTimestamp = new Date(payload.reportedAtIso).getTime();
+        const fallbackFaultId = Number.isNaN(fallbackFaultTimestamp)
+          ? Date.now()
+          : fallbackFaultTimestamp;
+
+        const nextFault: FaultQueueItem = {
+          id: payload.faultId ?? fallbackFaultId,
+          reportedAtIso: payload.reportedAtIso,
+          attachmentUrl: payload.attachmentUrl,
+          vehicleId: payload.vehicleId,
+          vehicleLabel: vehicle ? `${vehicle.make} ${vehicle.model}` : "Nepoznato vozilo",
+          plate: vehicle?.plate ?? "N/A",
+          reporterName: payload.reporterName,
+          description: payload.description,
+          categoryId: payload.categoryId,
+          categoryLabel: category?.naziv ?? null,
+          priority: payload.priority,
+          statusRaw: payload.statusRaw,
+          statusLabel: "Novo",
+          isOpen: true,
+        };
+
+        setInsertedFaults((current) => [nextFault, ...current.filter((fault) => fault.id !== nextFault.id)]);
+        setCurrentPage(1);
+      }
+
+      setIsModalOpen(false);
+    },
+    [categories, vehicles],
+  );
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -190,7 +279,7 @@ export function FaultsSectionContent({
               <Plus size={15} />
               Nova prijava
             </button>
-            <FallbackChip isUsingFallbackData={operationsData.isUsingFallbackData} />
+            <FallbackChip isUsingFallbackData={isUsingFallbackData} />
           </>
         }
       />
@@ -264,21 +353,32 @@ export function FaultsSectionContent({
 
                         {fault.isOpen ? (
                           <>
-                            {STATUS_ACTIONS.map((statusAction) => (
-                              <form key={statusAction.value} action={updateFaultStatusAction}>
-                                <input type="hidden" name="faultId" value={fault.id} />
-                                <input type="hidden" name="statusPrijave" value={statusAction.value} />
-                                <button
-                                  type="submit"
-                                  disabled={currentStatus === statusAction.value}
-                                  className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {statusAction.label}
-                                </button>
-                              </form>
-                            ))}
+                            <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-2 py-1.5">
+                              <label className="text-xs text-muted" htmlFor={`status-${fault.id}`}>
+                                Status
+                              </label>
+                              <select
+                                id={`status-${fault.id}`}
+                                value={statusDraftByFault[fault.id] ?? currentStatus}
+                                onChange={(event) => {
+                                  const nextStatus = event.target.value as FaultStatusValue;
+                                  setStatusDraftByFault((current) => ({
+                                    ...current,
+                                    [fault.id]: nextStatus,
+                                  }));
+                                }}
+                                className="carlytics-select h-8 rounded-lg px-2 text-xs"
+                              >
+                                {STATUS_OPTIONS.map((statusOption) => (
+                                  <option key={statusOption.value} value={statusOption.value}>
+                                    {statusOption.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
 
-                            {closingFaultId === fault.id ? (
+                            {(statusDraftByFault[fault.id] ?? currentStatus) === "zatvoreno" &&
+                            (statusDraftByFault[fault.id] ?? currentStatus) !== currentStatus ? (
                               <form
                                 action={updateFaultStatusAction}
                                 className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface px-2 py-1.5"
@@ -308,21 +408,36 @@ export function FaultsSectionContent({
 
                                 <button
                                   type="button"
-                                  onClick={() => setClosingFaultId(null)}
+                                  onClick={() => {
+                                    setStatusDraftByFault((current) => ({
+                                      ...current,
+                                      [fault.id]: currentStatus,
+                                    }));
+                                  }}
                                   className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
                                 >
                                   Odustani
                                 </button>
                               </form>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setClosingFaultId(fault.id)}
-                                className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200"
-                              >
-                                Riješeno
-                              </button>
-                            )}
+                            ) : null}
+
+                            {(statusDraftByFault[fault.id] ?? currentStatus) !== currentStatus &&
+                            (statusDraftByFault[fault.id] ?? currentStatus) !== "zatvoreno" ? (
+                              <form action={updateFaultStatusAction}>
+                                <input type="hidden" name="faultId" value={fault.id} />
+                                <input
+                                  type="hidden"
+                                  name="statusPrijave"
+                                  value={statusDraftByFault[fault.id] ?? currentStatus}
+                                />
+                                <button
+                                  type="submit"
+                                  className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/50 hover:text-cyan-700 dark:hover:text-cyan-200"
+                                >
+                                  Spremi status
+                                </button>
+                              </form>
+                            ) : null}
                           </>
                         ) : null}
                       </div>
@@ -387,7 +502,7 @@ export function FaultsSectionContent({
                 categories={categories}
                 mode="modal"
                 onCancel={closeModal}
-                onSuccess={closeModal}
+                onSuccess={handleFaultReportSuccess}
               />
             </div>
           </div>

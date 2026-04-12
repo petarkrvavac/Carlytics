@@ -106,6 +106,8 @@ export interface FaultQueueItem {
   plate: string;
   reporterName: string;
   description: string;
+  categoryId: number | null;
+  categoryLabel: string | null;
   priority: FaultPriority;
   statusRaw: string | null;
   statusLabel: string;
@@ -621,6 +623,8 @@ export async function getServiceCenterPriorityData(): Promise<ServiceCenterPrior
           plate: vehicle?.plate ?? "N/A",
           reporterName: "N/A",
           description: intervention.opis?.trim() || "Bez opisa",
+          categoryId: null,
+          categoryLabel: null,
           priority: normalizeFaultPriority(intervention.hitnost),
           statusRaw: intervention.status_prijave,
           statusLabel: normalizeFaultStatusLabel(intervention.status_prijave, open),
@@ -863,6 +867,10 @@ export async function getOperationsOverviewData(): Promise<OperationsOverviewDat
           plate: vehicle?.plate ?? "N/A",
           reporterName: reporter?.fullName ?? "Nepoznati zaposlenik",
           description: intervention.opis?.trim() || "Bez opisa",
+          categoryId: intervention.kategorija_id,
+          categoryLabel: intervention.kategorija_id
+            ? (categoryById.get(intervention.kategorija_id)?.naziv ?? null)
+            : null,
           priority: normalizeFaultPriority(intervention.hitnost),
           statusRaw: intervention.status_prijave,
           statusLabel: normalizeFaultStatusLabel(intervention.status_prijave, open),

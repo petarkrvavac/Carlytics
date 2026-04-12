@@ -1,7 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 
 import { INITIAL_ACTION_STATE } from "@/lib/actions/action-state";
 import {
@@ -12,6 +11,15 @@ import type {
   ActiveWorkerVehicleContext,
   AssignableWorkerVehicleOption,
 } from "@/lib/fleet/worker-context-service";
+import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
+
+const LIVE_WORKER_CONTEXT_SOURCE_TABLES = [
+  "evidencija_goriva",
+  "servisne_intervencije",
+  "zaduzenja",
+  "vozila",
+  "registracije",
+];
 
 interface WorkerAssignmentControlsProps {
   activeContext: ActiveWorkerVehicleContext | null;
@@ -56,8 +64,38 @@ export function WorkerAssignmentControls({
   activeContext,
   availableVehicles,
 }: WorkerAssignmentControlsProps) {
-  const router = useRouter();
-  const lastRefreshKeyRef = useRef("");
+  const lastHandledSuccessKeyRef = useRef("");
+  const pendingAssignedVehicleIdRef = useRef<number | null>(null);
+  const releaseSnapshotRef = useRef<ActiveWorkerVehicleContext | null>(null);
+  const [localActiveContext, setLocalActiveContext] = useState(activeContext);
+  const [localAvailableVehicles, setLocalAvailableVehicles] = useState(availableVehicles);
+  const [selectedVehicleId, setSelectedVehicleId] = useState("");
+
+  const refreshWorkerContext = useCallback(async () => {
+    const response = await fetch("/api/live/worker-context", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      activeContext?: ActiveWorkerVehicleContext | null;
+      availableVehicles?: AssignableWorkerVehicleOption[];
+    };
+
+    setLocalActiveContext(payload.activeContext ?? null);
+
+    if (Array.isArray(payload.availableVehicles)) {
+      setLocalAvailableVehicles(payload.availableVehicles);
+    }
+  }, []);
+
+  useLiveSourceRefresh({
+    sourceTables: LIVE_WORKER_CONTEXT_SOURCE_TABLES,
+    onRefresh: refreshWorkerContext,
+  });
 
   const [releaseState, releaseAction, isReleasing] = useActionState(
     releaseWorkerVehicleAction,
@@ -69,48 +107,121 @@ export function WorkerAssignmentControls({
   );
 
   useEffect(() => {
-    const releaseKey =
-      releaseState.status === "success" && releaseState.message
-        ? `release:${releaseState.message}`
-        : "";
-    const assignKey =
-      assignState.status === "success" && assignState.message
-        ? `assign:${assignState.message}`
-        : "";
+    setLocalActiveContext(activeContext);
+  }, [activeContext]);
 
-    const refreshKey = releaseKey || assignKey;
+  useEffect(() => {
+    setLocalAvailableVehicles(availableVehicles);
+  }, [availableVehicles]);
 
-    if (!refreshKey) {
+  useEffect(() => {
+    if (releaseState.status !== "success" || !releaseState.message) {
       return;
     }
 
-    if (lastRefreshKeyRef.current === refreshKey) {
+    const successKey = `release:${releaseState.message}`;
+
+    if (lastHandledSuccessKeyRef.current === successKey) {
       return;
     }
 
-    lastRefreshKeyRef.current = refreshKey;
-    router.refresh();
-  }, [
-    assignState.message,
-    assignState.status,
-    releaseState.message,
-    releaseState.status,
-    router,
-  ]);
+    lastHandledSuccessKeyRef.current = successKey;
 
-  if (activeContext) {
+    const releasedContext = releaseSnapshotRef.current ?? localActiveContext;
+
+    if (releasedContext) {
+      setLocalAvailableVehicles((current) => {
+        if (current.some((vehicle) => vehicle.vehicleId === releasedContext.vehicleId)) {
+          return current;
+        }
+
+        const next = [
+          ...current,
+          {
+            vehicleId: releasedContext.vehicleId,
+            vehicleLabel: releasedContext.vehicleLabel,
+            plate: releasedContext.plate,
+            currentKm: releasedContext.currentKm,
+            fuelCapacity: releasedContext.fuelCapacity,
+          },
+        ];
+
+        next.sort((left, right) => left.vehicleLabel.localeCompare(right.vehicleLabel, "hr-HR"));
+        return next;
+      });
+    }
+
+    setLocalActiveContext(null);
+    releaseSnapshotRef.current = null;
+  }, [localActiveContext, releaseState.message, releaseState.status]);
+
+  useEffect(() => {
+    if (assignState.status !== "success" || !assignState.message) {
+      return;
+    }
+
+    const successKey = `assign:${assignState.message}`;
+
+    if (lastHandledSuccessKeyRef.current === successKey) {
+      return;
+    }
+
+    lastHandledSuccessKeyRef.current = successKey;
+
+    const payload = assignState.payload;
+    const assignedVehicleIdFromPayload =
+      typeof payload?.vehicleId === "number" ? payload.vehicleId : null;
+    const assignmentIdFromPayload =
+      typeof payload?.assignmentId === "number" ? payload.assignmentId : null;
+    const kmStartFromPayload = typeof payload?.kmStart === "number" ? payload.kmStart : null;
+
+    const assignedVehicleId = assignedVehicleIdFromPayload ?? pendingAssignedVehicleIdRef.current;
+
+    if (!assignedVehicleId || !assignmentIdFromPayload) {
+      return;
+    }
+
+    const selectedVehicle = localAvailableVehicles.find(
+      (vehicle) => vehicle.vehicleId === assignedVehicleId,
+    );
+
+    if (!selectedVehicle) {
+      return;
+    }
+
+    setLocalAvailableVehicles((current) =>
+      current.filter((vehicle) => vehicle.vehicleId !== assignedVehicleId),
+    );
+
+    setLocalActiveContext({
+      assignmentId: assignmentIdFromPayload,
+      vehicleId: selectedVehicle.vehicleId,
+      vehicleLabel: selectedVehicle.vehicleLabel,
+      plate: selectedVehicle.plate,
+      currentKm: kmStartFromPayload ?? selectedVehicle.currentKm,
+      fuelCapacity: selectedVehicle.fuelCapacity,
+    });
+
+    setSelectedVehicleId("");
+    pendingAssignedVehicleIdRef.current = null;
+  }, [assignState.message, assignState.payload, assignState.status, localAvailableVehicles]);
+
+  if (localActiveContext) {
     return (
       <div className="space-y-3">
         <p className="mt-2 text-sm leading-6 text-muted">
           Trenutačno zaduženje:
-          <span className="ml-1 font-semibold text-foreground">{activeContext.vehicleLabel}</span>
-          <span className="text-muted"> ({activeContext.plate})</span>
-          <span className="data-font"> - {activeContext.currentKm.toLocaleString("hr-HR")} km</span>
+          <span className="ml-1 font-semibold text-foreground">{localActiveContext.vehicleLabel}</span>
+          <span className="text-muted"> ({localActiveContext.plate})</span>
+          <span className="data-font"> - {localActiveContext.currentKm.toLocaleString("hr-HR")} km</span>
         </p>
 
         <form
-          key={activeContext.assignmentId}
+          key={localActiveContext.assignmentId}
           action={releaseAction}
+          onSubmit={() => {
+            releaseSnapshotRef.current = localActiveContext;
+          }}
           className="space-y-2 rounded-xl border border-border bg-surface/90 p-3"
         >
           <label className="block text-xs uppercase tracking-[0.2em] text-muted">
@@ -120,12 +231,12 @@ export function WorkerAssignmentControls({
               name="kmZavrsna"
               disabled={isReleasing}
               required
-              min={activeContext.currentKm}
+              min={localActiveContext.currentKm}
               step={1}
               inputMode="numeric"
-              defaultValue={activeContext.currentKm}
+              defaultValue={localActiveContext.currentKm}
               className="mt-2 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted disabled:opacity-70"
-              placeholder={`Upiši minimalno ${activeContext.currentKm.toLocaleString("hr-HR")} km`}
+              placeholder={`Upiši minimalno ${localActiveContext.currentKm.toLocaleString("hr-HR")} km`}
             />
           </label>
 
@@ -157,21 +268,32 @@ export function WorkerAssignmentControls({
         Nemate aktivno zaduženje. Odaberite slobodno vozilo i zadužite ga.
       </p>
 
-      {availableVehicles.length === 0 ? (
+      {localAvailableVehicles.length === 0 ? (
         <div className="rounded-xl border border-border bg-surface-elevated px-3 py-2 text-sm text-muted">
           Trenutačno nema slobodnih vozila za zaduženje.
         </div>
       ) : (
-        <form action={assignAction} className="space-y-3 rounded-xl border border-border bg-surface/90 p-3">
+        <form
+          action={assignAction}
+          onSubmit={() => {
+            const parsedVehicleId = Number(selectedVehicleId);
+            pendingAssignedVehicleIdRef.current = Number.isInteger(parsedVehicleId)
+              ? parsedVehicleId
+              : null;
+          }}
+          className="space-y-3 rounded-xl border border-border bg-surface/90 p-3"
+        >
           <label className="block text-xs uppercase tracking-[0.2em] text-muted">
             Slobodna vozila
             <select
               name="vehicleId"
-              defaultValue=""
+              value={selectedVehicleId}
+              onChange={(event) => setSelectedVehicleId(event.target.value)}
+              disabled={isAssigning}
               className="carlytics-select mt-2 w-full px-3 py-2.5 text-sm"
             >
               <option value="">Odaberi vozilo</option>
-              {availableVehicles.map((vehicle) => (
+              {localAvailableVehicles.map((vehicle) => (
                 <option key={vehicle.vehicleId} value={vehicle.vehicleId}>
                   {vehicle.vehicleLabel} ({vehicle.plate}) - {vehicle.currentKm.toLocaleString("hr-HR")} km
                 </option>

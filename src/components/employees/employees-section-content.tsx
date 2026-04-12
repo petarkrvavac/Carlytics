@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Loader2, Plus, RefreshCcw, Search, SlidersHorizontal, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import { updateEmployeeActivationAction } from "@/lib/actions/employee-actions";
@@ -18,9 +18,17 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { PageHeader } from "@/components/ui/page-header";
+import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
 import { cn } from "@/lib/utils/cn";
 
 const ITEMS_PER_PAGE = 10;
+const LIVE_EMPLOYEE_SOURCE_TABLES = [
+  "zaposlenici",
+  "uloge",
+  "mjesta",
+  "zupanije",
+  "drzave",
+];
 
 type EmployeeStatusFilter = "aktivni" | "deaktivirani" | "svi";
 type FormContextLoadStatus = "idle" | "loading" | "ready" | "error";
@@ -129,6 +137,7 @@ export function EmployeesSectionContent({
   overviewData,
   canManageEmployees,
 }: EmployeesSectionContentProps) {
+  const [liveOverviewData, setLiveOverviewData] = useState(overviewData);
   const [activeFilter, setActiveFilter] =
     useState<EmployeeStatusFilter>("aktivni");
   const [searchQuery, setSearchQuery] = useState("");
@@ -144,9 +153,38 @@ export function EmployeesSectionContent({
   const deactivationEmployeeIdRef = useRef<HTMLInputElement>(null);
   const deactivationReasonRef = useRef<HTMLInputElement>(null);
 
+  const refreshEmployeesData = useCallback(async () => {
+    const response = await fetch("/api/live/employees", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      overviewData?: EmployeesOverviewData;
+    };
+
+    if (!payload.overviewData) {
+      return;
+    }
+
+    setLiveOverviewData(payload.overviewData);
+  }, []);
+
+  useLiveSourceRefresh({
+    sourceTables: LIVE_EMPLOYEE_SOURCE_TABLES,
+    onRefresh: refreshEmployeesData,
+  });
+
+  useEffect(() => {
+    setLiveOverviewData(overviewData);
+  }, [overviewData]);
+
   const visibleEmployees = useMemo(
-    () => getVisibleEmployees(overviewData.employees, activeFilter, searchQuery),
-    [activeFilter, overviewData.employees, searchQuery],
+    () => getVisibleEmployees(liveOverviewData.employees, activeFilter, searchQuery),
+    [activeFilter, liveOverviewData.employees, searchQuery],
   );
   const totalPages = Math.max(1, Math.ceil(visibleEmployees.length / ITEMS_PER_PAGE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -263,9 +301,9 @@ export function EmployeesSectionContent({
         description="Pregled korisnika aplikacije s upravljanjem statusom i invitation tokom za postavu lozinke."
         actions={
           <>
-            <FallbackChip isUsingFallbackData={overviewData.isUsingFallbackData} />
-            <Badge variant="success">Aktivni: {overviewData.metrics.active}</Badge>
-            <Badge variant="danger">Deaktivirani: {overviewData.metrics.deactivated}</Badge>
+            <FallbackChip isUsingFallbackData={liveOverviewData.isUsingFallbackData} />
+            <Badge variant="success">Aktivni: {liveOverviewData.metrics.active}</Badge>
+            <Badge variant="danger">Deaktivirani: {liveOverviewData.metrics.deactivated}</Badge>
             {canManageEmployees ? (
               <button
                 type="button"
@@ -343,7 +381,70 @@ export function EmployeesSectionContent({
         />
       ) : (
         <Card className="p-0">
-          <div className="overflow-x-auto">
+          <div className="space-y-2 p-3 lg:hidden">
+            {pagedEmployees.map((employee) => (
+              <article key={`employee-card-${employee.id}`} className="rounded-xl border border-border bg-surface p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-100">
+                      {employee.firstName} {employee.lastName}
+                    </p>
+                    <p className="text-xs text-muted">@{employee.username}</p>
+                  </div>
+
+                  <Badge variant={employee.isActive ? "success" : "danger"}>
+                    {employee.isActive ? "Aktiviran" : "Deaktiviran"}
+                  </Badge>
+                </div>
+
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted">
+                  <p>Uloga: <span className="text-slate-200">{employee.role}</span></p>
+                  <p>Mjesto: <span className="text-slate-200">{employee.city ?? "-"}</span></p>
+                  <p>Županija: <span className="text-slate-200">{employee.county ?? "-"}</span></p>
+                  <p>Država: <span className="text-slate-200">{employee.country ?? "-"}</span></p>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Link
+                    href={`/zaposlenici/${employee.id}`}
+                    className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+                  >
+                    Profil aktivnosti
+                  </Link>
+
+                  {canManageEmployees ? (
+                    employee.isActive ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeactivationTarget(employee);
+                          setDeactivationReason("");
+                          setDeactivationReasonError("");
+                        }}
+                        className="inline-flex h-8 items-center rounded-lg border border-rose-300 bg-rose-100 px-3 text-xs font-semibold text-rose-800 transition hover:bg-rose-200 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-200"
+                      >
+                        Deaktiviraj
+                      </button>
+                    ) : (
+                      <form action={updateEmployeeActivationAction}>
+                        <input type="hidden" name="employeeId" value={employee.id} />
+                        <input type="hidden" name="isAktivan" value="true" />
+                        <input type="hidden" name="razlogDeaktivacije" defaultValue="" />
+                        <button
+                          type="submit"
+                          className="inline-flex h-8 items-center rounded-lg border border-emerald-300 bg-emerald-100 px-3 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-200 dark:border-emerald-500/35 dark:bg-emerald-500/15 dark:text-emerald-200"
+                        >
+                          Aktiviraj
+                        </button>
+                      </form>
+                    )
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="hidden overflow-x-auto lg:block">
             <table className="min-w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-border text-xs uppercase tracking-[0.2em] text-muted">

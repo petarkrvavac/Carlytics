@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 
 import { INITIAL_ACTION_STATE } from "@/lib/actions/action-state";
 import { submitFaultReportAction } from "@/lib/actions/fault-actions";
@@ -8,6 +8,15 @@ import type {
   ActiveWorkerVehicleContext,
   FaultCategoryOption,
 } from "@/lib/fleet/worker-context-service";
+import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
+
+const LIVE_WORKER_CONTEXT_SOURCE_TABLES = [
+  "evidencija_goriva",
+  "servisne_intervencije",
+  "zaduzenja",
+  "vozila",
+  "registracije",
+];
 
 interface FaultReportFormProps {
   categories: FaultCategoryOption[];
@@ -15,15 +24,47 @@ interface FaultReportFormProps {
 }
 
 export function FaultReportForm({ categories, activeContext }: FaultReportFormProps) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [localActiveContext, setLocalActiveContext] = useState(activeContext);
   const [state, formAction, isPending] = useActionState(
     submitFaultReportAction,
     INITIAL_ACTION_STATE,
   );
 
-  const isDisabled = !activeContext;
+  const refreshWorkerContext = useCallback(async () => {
+    const response = await fetch("/api/live/worker-context", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      activeContext?: ActiveWorkerVehicleContext | null;
+    };
+
+    setLocalActiveContext(payload.activeContext ?? null);
+  }, []);
+
+  useLiveSourceRefresh({
+    sourceTables: LIVE_WORKER_CONTEXT_SOURCE_TABLES,
+    onRefresh: refreshWorkerContext,
+  });
+
+  useEffect(() => {
+    if (state.status !== "success") {
+      return;
+    }
+
+    formRef.current?.reset();
+  }, [state.status]);
+
+  const isDisabled = !localActiveContext;
 
   return (
     <form
+      ref={formRef}
       action={formAction}
       className="space-y-3 rounded-2xl border border-border bg-surface/90 p-4"
     >

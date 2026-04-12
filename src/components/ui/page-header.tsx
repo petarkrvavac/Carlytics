@@ -31,7 +31,7 @@ export function PageHeader({
           {showMobileViewButton ? (
             <Link
               href="/m"
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-cyan-500/35 bg-cyan-100 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-800 transition hover:border-cyan-500/55 hover:bg-cyan-200 dark:bg-cyan-500/12 dark:text-cyan-200 dark:hover:bg-cyan-500/20"
+              className="hidden h-10 items-center gap-2 rounded-xl border border-cyan-500/35 bg-cyan-100 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-800 transition hover:border-cyan-500/55 hover:bg-cyan-200 dark:bg-cyan-500/12 dark:text-cyan-200 dark:hover:bg-cyan-500/20 xl:inline-flex"
             >
               <Smartphone size={14} />
               Mobilni prikaz
