@@ -8,6 +8,7 @@ interface ServerPaginationProps {
   totalPages: number;
   hrefForPage: (page: number) => string;
   className?: string;
+  showWhenSinglePage?: boolean;
 }
 
 export function ServerPagination({
@@ -15,8 +16,9 @@ export function ServerPagination({
   totalPages,
   hrefForPage,
   className,
+  showWhenSinglePage = false,
 }: ServerPaginationProps) {
-  if (totalPages <= 1) {
+  if (totalPages <= 1 && !showWhenSinglePage) {
     return null;
   }
 

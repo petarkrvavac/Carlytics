@@ -30,7 +30,7 @@ interface VehicleDetailPageProps {
 
 const MAX_DETAIL_ITEMS = 3;
 const TIRE_ITEMS_PER_PAGE = 5;
-const REGISTRATION_ITEMS_PER_PAGE = 5;
+const REGISTRATION_ITEMS_PER_PAGE = 3;
 
 function parseVehicleId(rawId: string) {
   const parsed = Number(rawId);
@@ -672,6 +672,7 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
               <ServerPagination
                 currentPage={safeTirePage}
                 totalPages={totalTirePages}
+                showWhenSinglePage
                 hrefForPage={(page) =>
                   buildVehicleDetailHref({
                     vehicleId: vehicle.id,
@@ -748,6 +749,7 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
               <ServerPagination
                 currentPage={safeRegistrationPage}
                 totalPages={totalRegistrationPages}
+                showWhenSinglePage
                 hrefForPage={(page) =>
                   buildVehicleDetailHref({
                     vehicleId: vehicle.id,

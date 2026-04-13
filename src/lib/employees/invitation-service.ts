@@ -4,7 +4,7 @@ import type { Tables } from "@/types/database";
 
 const INVITATION_EXPIRY_HOURS = 24;
 const INVITATION_EXPIRY_MS = INVITATION_EXPIRY_HOURS * 60 * 60 * 1000;
-const INVITE_BASE_URL = "http://localhost:3000";
+const INVITE_BASE_URL = "https://carlytics-zeta.vercel.app";
 
 type InviteRow = Pick<Tables<"zaposlenici">, "id" | "pozivnica_token" | "pozivnica_vrijedi_do">;
 

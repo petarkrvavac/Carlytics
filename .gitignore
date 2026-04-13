@@ -78,3 +78,6 @@ next-env.d.ts
 zavrsni.txt
 
 /memories
+
+/scripts/seed-massive-test-data.sql
+/scripts/update-seed-massive-dates.sql

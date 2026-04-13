@@ -163,19 +163,16 @@ export type Database = {
         Row: {
           id: number
           naziv: string
-          postanski_broj: string | null
           zupanija_id: number | null
         }
         Insert: {
           id?: never
           naziv: string
-          postanski_broj?: string | null
           zupanija_id?: number | null
         }
         Update: {
           id?: never
           naziv?: string
-          postanski_broj?: string | null
           zupanija_id?: number | null
         }
         Relationships: [
