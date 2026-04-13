@@ -10,13 +10,13 @@ import {
 import { notFound } from "next/navigation";
 
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
+import { VehicleHistoryPaginationSections } from "@/components/fleet/vehicle-history-pagination-sections";
 import { VehicleCostBreakdownChart } from "@/components/fleet/vehicle-cost-breakdown-chart";
 import { VehicleActivationControls } from "@/components/fleet/vehicle-activation-controls";
 import { RegistrationExtensionForm } from "@/components/fleet/registration-extension-form";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
-import { ServerPagination } from "@/components/ui/server-pagination";
 import type { FaultQueueItem } from "@/lib/fleet/operations-service";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import { getVehicleDigitalTwinData } from "@/lib/fleet/vehicle-digital-twin-service";
@@ -188,73 +188,6 @@ function getRegistrationBadge(registrationExpiryDays: number | null) {
   };
 }
 
-function getRegistrationHistoryStatus(expiryDateIso: string, isLatestRecord: boolean) {
-  // Status prikazujemo samo za najnoviji zapis registracije.
-  // Ako je registracija obnovljena, stariji zapisi ostaju bez statusnih pilula.
-  if (!isLatestRecord) {
-    return null;
-  }
-
-  const expiryDate = new Date(expiryDateIso);
-
-  if (Number.isNaN(expiryDate.getTime())) {
-    return {
-      label: "Status nepoznat",
-      variant: "neutral" as const,
-    };
-  }
-
-  const now = new Date();
-  const midnightNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const midnightExpiry = new Date(
-    expiryDate.getFullYear(),
-    expiryDate.getMonth(),
-    expiryDate.getDate(),
-  );
-
-  const daysUntilExpiry = Math.ceil(
-    (midnightExpiry.getTime() - midnightNow.getTime()) / (1000 * 60 * 60 * 24),
-  );
-
-  if (daysUntilExpiry < 0) {
-    return {
-      label: `Istekla prije ${Math.abs(daysUntilExpiry)} dana`,
-      variant: "danger" as const,
-    };
-  }
-
-  if (daysUntilExpiry <= 30) {
-    return {
-      label: `Ističe za ${daysUntilExpiry} dana`,
-      variant: "warning" as const,
-    };
-  }
-
-  return {
-    label: `Aktivna još ${daysUntilExpiry} dana`,
-    variant: "success" as const,
-  };
-}
-
-function buildVehicleDetailHref(params: {
-  vehicleId: number;
-  tirePage: number;
-  registrationPage: number;
-}) {
-  const query = new URLSearchParams();
-
-  if (params.tirePage > 1) {
-    query.set("gume", String(params.tirePage));
-  }
-
-  if (params.registrationPage > 1) {
-    query.set("registracije", String(params.registrationPage));
-  }
-
-  const queryString = query.toString();
-  return queryString ? `/flota/${params.vehicleId}?${queryString}` : `/flota/${params.vehicleId}`;
-}
-
 export default async function FlotaVehicleDetailPage({ params, searchParams }: VehicleDetailPageProps) {
   const { id } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
@@ -314,35 +247,6 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
 
   const registrationState = getRegistrationBadge(vehicle.registrationExpiryDays);
   const shouldShowRegistrationBadge = vehicle.isActive || registrationState.variant !== "success";
-
-  const totalTirePages = Math.max(
-    1,
-    Math.ceil(digitalTwinData.tireHistory.length / TIRE_ITEMS_PER_PAGE),
-  );
-  const safeTirePage = Math.min(requestedTirePage, totalTirePages);
-  const pagedTireHistory = digitalTwinData.tireHistory.slice(
-    (safeTirePage - 1) * TIRE_ITEMS_PER_PAGE,
-    safeTirePage * TIRE_ITEMS_PER_PAGE,
-  );
-
-  const sortedRegistrationHistory = [...digitalTwinData.registrationHistory].sort((left, right) => {
-    const leftTime = new Date(left.registrationDateIso).getTime();
-    const rightTime = new Date(right.registrationDateIso).getTime();
-    const safeLeftTime = Number.isNaN(leftTime) ? 0 : leftTime;
-    const safeRightTime = Number.isNaN(rightTime) ? 0 : rightTime;
-
-    return safeRightTime - safeLeftTime;
-  });
-
-  const totalRegistrationPages = Math.max(
-    1,
-    Math.ceil(sortedRegistrationHistory.length / REGISTRATION_ITEMS_PER_PAGE),
-  );
-  const safeRegistrationPage = Math.min(requestedRegistrationPage, totalRegistrationPages);
-  const pagedRegistrationHistory = sortedRegistrationHistory.slice(
-    (safeRegistrationPage - 1) * REGISTRATION_ITEMS_PER_PAGE,
-    safeRegistrationPage * REGISTRATION_ITEMS_PER_PAGE,
-  );
 
   return (
     <div className="space-y-5">
@@ -636,131 +540,15 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
           )}
         </Card>
 
-        <Card>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
-              Evidencija guma
-            </h2>
-            <Badge variant="info">Zapisa: {digitalTwinData.tireHistory.length}</Badge>
-          </div>
-
-          {digitalTwinData.tireHistory.length === 0 ? (
-            <p className="text-sm text-muted">Nema evidentiranih kupovina guma za ovo vozilo.</p>
-          ) : (
-            <>
-              <ul className="space-y-3">
-                {pagedTireHistory.map((tireEntry) => (
-                <li key={tireEntry.id} className="rounded-xl border border-border bg-surface px-3 py-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-slate-100">
-                      {tireEntry.manufacturer ?? "Nepoznat proizvođač"}
-                    </p>
-                    <div className="flex gap-2">
-                      <Badge variant="neutral">{tireEntry.season ?? "Sezona N/A"}</Badge>
-                      {tireEntry.cost !== null ? (
-                        <Badge variant="warning">{formatAmount(tireEntry.cost)} EUR</Badge>
-                      ) : null}
-                    </div>
-                  </div>
-                  <p className="mt-2 text-xs text-muted">
-                    Datum kupovine: {tireEntry.purchaseDateIso ? formatDate(tireEntry.purchaseDateIso) : "N/A"}
-                  </p>
-                </li>
-                ))}
-              </ul>
-
-              <ServerPagination
-                currentPage={safeTirePage}
-                totalPages={totalTirePages}
-                showWhenSinglePage
-                hrefForPage={(page) =>
-                  buildVehicleDetailHref({
-                    vehicleId: vehicle.id,
-                    tirePage: page,
-                    registrationPage: safeRegistrationPage,
-                  })
-                }
-              />
-            </>
-          )}
-        </Card>
-
-        <Card>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
-              Povijest registracija
-            </h2>
-            <Badge variant="info">Zapisa: {digitalTwinData.registrationHistory.length}</Badge>
-          </div>
-
-          {digitalTwinData.registrationHistory.length === 0 ? (
-            <p className="text-sm text-muted">Nema evidentiranih registracija za ovo vozilo.</p>
-          ) : (
-            <>
-              <ul className="space-y-3">
-                {pagedRegistrationHistory.map((registration, index) => {
-                const absoluteIndex = (safeRegistrationPage - 1) * REGISTRATION_ITEMS_PER_PAGE + index;
-                const registrationStatus = getRegistrationHistoryStatus(
-                  registration.expiryDateIso,
-                  absoluteIndex === 0,
-                );
-
-                return (
-                  <li
-                    key={registration.id}
-                    className="rounded-xl border border-border bg-surface px-3 py-3"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-slate-100">
-                        {registration.registrationPlate}
-                      </p>
-                      {registrationStatus ? (
-                        <Badge variant={registrationStatus.variant}>{registrationStatus.label}</Badge>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-2 grid gap-1 text-xs text-muted">
-                      <p>
-                        Datum registracije:{" "}
-                        <span className="text-slate-200">
-                          {formatDate(registration.registrationDateIso)}
-                        </span>
-                      </p>
-                      <p>
-                        Datum isteka:{" "}
-                        <span className="text-slate-200">
-                          {formatDate(registration.expiryDateIso)}
-                        </span>
-                      </p>
-                      <p>
-                        Cijena:{" "}
-                        <span className="data-font text-amber-200">
-                          {registration.cost === null
-                            ? "N/A"
-                            : `${formatAmount(registration.cost)} EUR`}
-                        </span>
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-              </ul>
-
-              <ServerPagination
-                currentPage={safeRegistrationPage}
-                totalPages={totalRegistrationPages}
-                showWhenSinglePage
-                hrefForPage={(page) =>
-                  buildVehicleDetailHref({
-                    vehicleId: vehicle.id,
-                    tirePage: safeTirePage,
-                    registrationPage: page,
-                  })
-                }
-              />
-            </>
-          )}
-        </Card>
+        <VehicleHistoryPaginationSections
+          key={`${vehicle.id}-${requestedTirePage}-${requestedRegistrationPage}`}
+          tireHistory={digitalTwinData.tireHistory}
+          registrationHistory={digitalTwinData.registrationHistory}
+          initialTirePage={requestedTirePage}
+          initialRegistrationPage={requestedRegistrationPage}
+          tireItemsPerPage={TIRE_ITEMS_PER_PAGE}
+          registrationItemsPerPage={REGISTRATION_ITEMS_PER_PAGE}
+        />
       </section>
     </div>
   );

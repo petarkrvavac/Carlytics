@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { CostAnalyticsCard } from "@/components/dashboard/cost-analytics-card";
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
@@ -17,6 +17,7 @@ import type { DashboardData } from "@/lib/fleet/types";
 import type { OperationsOverviewData } from "@/lib/fleet/operations-service";
 import { resolveInterventionAlertType } from "@/lib/fleet/intervention-category";
 import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
+import { replaceCurrentUrlQueryParams } from "@/lib/utils/url-query";
 
 interface DashboardLivePageContentProps {
   initialDashboardData: DashboardData;
@@ -145,24 +146,6 @@ function buildDashboardActivityItems(
   });
 }
 
-function buildDashboardHref(params: {
-  alertsPage?: number;
-  vehiclesPage?: number;
-}) {
-  const query = new URLSearchParams();
-
-  if (params.alertsPage && params.alertsPage > 1) {
-    query.set("upozorenja", String(params.alertsPage));
-  }
-
-  if (params.vehiclesPage && params.vehiclesPage > 1) {
-    query.set("nadzor", String(params.vehiclesPage));
-  }
-
-  const queryString = query.toString();
-  return queryString ? `/dashboard?${queryString}` : "/dashboard";
-}
-
 export function DashboardLivePageContent({
   initialDashboardData,
   initialOperationsData,
@@ -171,6 +154,8 @@ export function DashboardLivePageContent({
 }: DashboardLivePageContentProps) {
   const [dashboardData, setDashboardData] = useState(initialDashboardData);
   const [operationsData, setOperationsData] = useState(initialOperationsData);
+  const [alertsPage, setAlertsPage] = useState(initialAlertsPage);
+  const [vehiclesPage, setVehiclesPage] = useState(initialVehiclesPage);
 
   const refreshDashboardData = useCallback(async () => {
     const response = await fetch("/api/live/dashboard", {
@@ -205,18 +190,25 @@ export function DashboardLivePageContent({
     [dashboardData, operationsData],
   );
   const totalAlertPages = Math.max(1, Math.ceil(activityItems.length / ALERTS_PER_PAGE));
-  const safeAlertsPage = Math.min(initialAlertsPage, totalAlertPages);
+  const safeAlertsPage = Math.min(Math.max(alertsPage, 1), totalAlertPages);
   const pagedActivityItems = activityItems.slice(
     (safeAlertsPage - 1) * ALERTS_PER_PAGE,
     safeAlertsPage * ALERTS_PER_PAGE,
   );
 
   const totalVehiclePages = Math.max(1, Math.ceil(dashboardData.vehicles.length / VEHICLES_PER_PAGE));
-  const safeVehiclesPage = Math.min(initialVehiclesPage, totalVehiclePages);
+  const safeVehiclesPage = Math.min(Math.max(vehiclesPage, 1), totalVehiclePages);
   const pagedVehicles = dashboardData.vehicles.slice(
     (safeVehiclesPage - 1) * VEHICLES_PER_PAGE,
     safeVehiclesPage * VEHICLES_PER_PAGE,
   );
+
+  useEffect(() => {
+    replaceCurrentUrlQueryParams({
+      upozorenja: safeAlertsPage > 1 ? String(safeAlertsPage) : null,
+      nadzor: safeVehiclesPage > 1 ? String(safeVehiclesPage) : null,
+    });
+  }, [safeAlertsPage, safeVehiclesPage]);
 
   return (
     <div className="space-y-6">
@@ -266,12 +258,7 @@ export function DashboardLivePageContent({
             currentPage={safeVehiclesPage}
             totalPages={totalVehiclePages}
             className="mt-4 pt-2"
-            hrefForPage={(page) =>
-              buildDashboardHref({
-                alertsPage: safeAlertsPage,
-                vehiclesPage: page,
-              })
-            }
+            onPageChange={setVehiclesPage}
           />
         </div>
 
@@ -281,12 +268,7 @@ export function DashboardLivePageContent({
             totalItems={activityItems.length}
             currentPage={safeAlertsPage}
             totalPages={totalAlertPages}
-            hrefForPage={(page) =>
-              buildDashboardHref({
-                alertsPage: page,
-                vehiclesPage: safeVehiclesPage,
-              })
-            }
+            onPageChange={setAlertsPage}
           />
         </div>
       </section>

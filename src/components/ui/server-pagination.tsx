@@ -6,7 +6,8 @@ import { getVisiblePages } from "@/lib/utils/pagination";
 interface ServerPaginationProps {
   currentPage: number;
   totalPages: number;
-  hrefForPage: (page: number) => string;
+  hrefForPage?: (page: number) => string;
+  onPageChange?: (page: number) => void;
   className?: string;
   showWhenSinglePage?: boolean;
 }
@@ -15,6 +16,7 @@ export function ServerPagination({
   currentPage,
   totalPages,
   hrefForPage,
+  onPageChange,
   className,
   showWhenSinglePage = false,
 }: ServerPaginationProps) {
@@ -27,12 +29,26 @@ export function ServerPagination({
   return (
     <div className={cn("mt-4 flex flex-wrap items-center justify-center gap-1.5", className)}>
       {currentPage > 1 ? (
-        <Link
-          href={hrefForPage(currentPage - 1)}
-          className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
-        >
-          Prethodna
-        </Link>
+        onPageChange ? (
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+          >
+            Prethodna
+          </button>
+        ) : hrefForPage ? (
+          <Link
+            href={hrefForPage(currentPage - 1)}
+            className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+          >
+            Prethodna
+          </Link>
+        ) : (
+          <span className="inline-flex h-8 cursor-not-allowed items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground opacity-55">
+            Prethodna
+          </span>
+        )
       ) : (
         <span className="inline-flex h-8 cursor-not-allowed items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground opacity-55">
           Prethodna
@@ -47,7 +63,16 @@ export function ServerPagination({
           >
             {page}
           </span>
-        ) : (
+        ) : onPageChange ? (
+          <button
+            key={page}
+            type="button"
+            onClick={() => onPageChange(page)}
+            className="inline-flex h-8 min-w-8 items-center justify-center rounded-lg border border-border bg-surface px-2 text-xs font-semibold text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+          >
+            {page}
+          </button>
+        ) : hrefForPage ? (
           <Link
             key={page}
             href={hrefForPage(page)}
@@ -55,16 +80,37 @@ export function ServerPagination({
           >
             {page}
           </Link>
+        ) : (
+          <span
+            key={page}
+            className="inline-flex h-8 min-w-8 cursor-not-allowed items-center justify-center rounded-lg border border-border bg-surface px-2 text-xs font-semibold text-foreground opacity-55"
+          >
+            {page}
+          </span>
         ),
       )}
 
       {currentPage < totalPages ? (
-        <Link
-          href={hrefForPage(currentPage + 1)}
-          className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
-        >
-          Sljedeća
-        </Link>
+        onPageChange ? (
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+          >
+            Sljedeća
+          </button>
+        ) : hrefForPage ? (
+          <Link
+            href={hrefForPage(currentPage + 1)}
+            className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+          >
+            Sljedeća
+          </Link>
+        ) : (
+          <span className="inline-flex h-8 cursor-not-allowed items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground opacity-55">
+            Sljedeća
+          </span>
+        )
       ) : (
         <span className="inline-flex h-8 cursor-not-allowed items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground opacity-55">
           Sljedeća

@@ -14,6 +14,7 @@ export default async function GorivoPage({ searchParams }: GorivoPageProps) {
 
   return (
     <GorivoLivePageContent
+      key={`${selectedVehicleId ?? "all"}-${currentPage}`}
       initialOperationsData={operationsData}
       selectedVehicleId={selectedVehicleId}
       currentPage={currentPage}

@@ -102,6 +102,48 @@ function getVisibleEmployees(
   return employees.filter(matchesSearch);
 }
 
+function getEmployeesEmptyStateContent(
+  filter: EmployeeStatusFilter,
+  searchQuery: string,
+  canManageEmployees: boolean,
+) {
+  const normalizedSearchQuery = searchQuery.trim();
+
+  if (normalizedSearchQuery.length > 0) {
+    return {
+      title: "Nema rezultata pretrage",
+      description: `Nema zaposlenika koji odgovara pojmu \"${normalizedSearchQuery}\" za odabrani filter.`,
+      showAddAction: false,
+    };
+  }
+
+  if (filter === "deaktivirani") {
+    return {
+      title: "Nema deaktiviranih zaposlenika",
+      description: "Svi zaposlenici su trenutno aktivni.",
+      showAddAction: false,
+    };
+  }
+
+  if (filter === "aktivni") {
+    return {
+      title: "Nema aktivnih zaposlenika",
+      description: canManageEmployees
+        ? "Dodaj novog zaposlenika kroz invitation tok."
+        : "Trenutno nema aktivnih zaposlenika.",
+      showAddAction: canManageEmployees,
+    };
+  }
+
+  return {
+    title: "Nema zaposlenika u sustavu",
+    description: canManageEmployees
+      ? "Dodaj prvog zaposlenika kroz invitation tok."
+      : "Trenutno nema zaposlenika za prikaz.",
+    showAddAction: canManageEmployees,
+  };
+}
+
 function hasErrorMessage(value: unknown): value is { message: string } {
   if (!value || typeof value !== "object") {
     return false;
@@ -195,6 +237,10 @@ export function EmployeesSectionContent({
         safeCurrentPage * ITEMS_PER_PAGE,
       ),
     [safeCurrentPage, visibleEmployees],
+  );
+  const emptyStateContent = useMemo(
+    () => getEmployeesEmptyStateContent(activeFilter, searchQuery, canManageEmployees),
+    [activeFilter, canManageEmployees, searchQuery],
   );
 
   const isFormContextLoading = formContextStatus === "loading";
@@ -370,14 +416,10 @@ export function EmployeesSectionContent({
 
       {visibleEmployees.length === 0 ? (
         <EmptyState
-          title="Nema zaposlenika za odabrani filter"
-          description={
-            canManageEmployees
-              ? "Promijeni filter ili dodaj novog zaposlenika kroz invitation tok."
-              : "Promijeni filter za pregled zaposlenika."
-          }
-          actionLabel={canManageEmployees ? "Dodaj zaposlenika" : undefined}
-          onActionClick={canManageEmployees ? openAddEmployeeModal : undefined}
+          title={emptyStateContent.title}
+          description={emptyStateContent.description}
+          actionLabel={emptyStateContent.showAddAction ? "Dodaj zaposlenika" : undefined}
+          onActionClick={emptyStateContent.showAddAction ? openAddEmployeeModal : undefined}
         />
       ) : (
         <Card className="p-0">

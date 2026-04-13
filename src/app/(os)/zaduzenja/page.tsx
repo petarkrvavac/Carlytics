@@ -17,6 +17,7 @@ export default async function ZaduzenjaPage({ searchParams }: ZaduzenjaPageProps
 
   return (
     <ZaduzenjaLivePageContent
+      key={`${resolvedSearchParams?.prikaz ?? "aktivna"}-${resolvedSearchParams?.aktivna ?? "1"}-${resolvedSearchParams?.povijest ?? "1"}-${resolvedSearchParams?.od ?? ""}-${resolvedSearchParams?.do ?? ""}`}
       initialOperationsData={operationsData}
       initialSearchParams={resolvedSearchParams}
     />

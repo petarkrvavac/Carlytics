@@ -19,6 +19,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
   return (
     <DashboardLivePageContent
+      key={`${currentAlertsPage}-${currentVehiclesPage}`}
       initialDashboardData={dashboardData}
       initialOperationsData={operationsData}
       initialAlertsPage={currentAlertsPage}

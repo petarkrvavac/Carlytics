@@ -484,7 +484,7 @@ export function ServiceCenterCostCharts({
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-[1.1fr_0.9fr]">
       <Card>
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
@@ -493,7 +493,7 @@ export function ServiceCenterCostCharts({
           <Badge variant="info">Završenih servisa: {completedServices.length}</Badge>
         </div>
 
-        <div className="h-80 rounded-xl border border-border bg-surface-elevated p-3">
+        <div className="h-64 rounded-xl border border-border bg-surface-elevated p-3 sm:h-80">
           <Pie data={pieData} options={pieOptions} />
         </div>
       </Card>
@@ -519,13 +519,13 @@ export function ServiceCenterCostCharts({
           </div>
         </div>
 
-        <div className="h-80 rounded-xl border border-border bg-surface-elevated p-3">
+        <div className="h-64 rounded-xl border border-border bg-surface-elevated p-3 sm:h-80">
           <Line data={lineData} options={lineOptions} />
         </div>
       </Card>
 
       {showTopVehicles ? (
-        <Card className="xl:col-span-2">
+        <Card className="md:col-span-2 xl:col-span-2">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
               Top 5 najskupljih vozila

@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ChevronRight, Menu, TriangleAlert, X } from "lucide-react";
+import { ChevronRight, LogOut, Menu, TriangleAlert, UserRound, X } from "lucide-react";
+import { signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -28,6 +29,7 @@ export function AppMobileNavigation({
 }: AppMobileNavigationProps) {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
+  const showAdminQuickActions = currentUser.role === "admin";
 
   const primaryItems = useMemo(
     () => APP_NAVIGATION_ITEMS.filter((item) => item.section === "glavno"),
@@ -214,7 +216,32 @@ export function AppMobileNavigation({
                   </div>
                 </nav>
 
-                <div className="mt-4 border-t border-border pt-4">
+                <div className="mt-4 space-y-2 border-t border-border pt-4">
+                  {showAdminQuickActions ? (
+                    <>
+                      <Link
+                        href="/profil"
+                        onClick={() => setIsOpen(false)}
+                        className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-sm font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-200"
+                      >
+                        <UserRound size={14} />
+                        Profil
+                      </Link>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsOpen(false);
+                          void signOut({ callbackUrl: "/prijava" });
+                        }}
+                        className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-sm font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-200"
+                      >
+                        <LogOut size={14} />
+                        Odjava
+                      </button>
+                    </>
+                  ) : null}
+
                   <Link
                     href="/m"
                     onClick={() => setIsOpen(false)}

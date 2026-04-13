@@ -21,6 +21,8 @@ export interface ActiveWorkerVehicleContext {
   plate: string;
   currentKm: number;
   fuelCapacity: number;
+  categoryId?: number | null;
+  categoryName?: string;
 }
 
 export interface AssignableWorkerVehicleOption {
@@ -29,6 +31,8 @@ export interface AssignableWorkerVehicleOption {
   plate: string;
   currentKm: number;
   fuelCapacity: number;
+  categoryId: number | null;
+  categoryName: string;
 }
 
 function getDbClient() {
@@ -169,7 +173,7 @@ export async function getActiveWorkerVehicleContext(employeeId: number) {
     client
       .from("vozila")
       .select(
-        "id, trenutna_km, modeli(naziv, kapacitet_rezervoara, proizvodjaci(naziv))",
+        "id, trenutna_km, modeli(naziv, kapacitet_rezervoara, kategorija_id, proizvodjaci(naziv), kategorije_vozila(naziv))",
       )
       .eq("id", assignment.vozilo_id)
       .maybeSingle(),
@@ -184,7 +188,9 @@ export async function getActiveWorkerVehicleContext(employeeId: number) {
           | {
               naziv: string;
               kapacitet_rezervoara: number | null;
+              kategorija_id: number | null;
               proizvodjaci: { naziv: string } | null;
+              kategorije_vozila: { naziv: string } | null;
             }
           | null;
       }
@@ -206,6 +212,8 @@ export async function getActiveWorkerVehicleContext(employeeId: number) {
     plate: latestRegistration?.registracijska_oznaka ?? `V-${vehicleData.id}`,
     currentKm: vehicleData.trenutna_km ?? assignment.km_pocetna,
     fuelCapacity: vehicleData.modeli?.kapacitet_rezervoara ?? 0,
+    categoryId: vehicleData.modeli?.kategorija_id ?? null,
+    categoryName: vehicleData.modeli?.kategorije_vozila?.naziv ?? "Ostalo",
   } satisfies ActiveWorkerVehicleContext;
 }
 
@@ -224,16 +232,27 @@ export async function getAvailableWorkerVehicles(
     return [];
   }
 
-  const [vehiclesResult, modelsResult, manufacturersResult, statusesResult, registrationsResult, assignmentsResult] =
+  const [
+    vehiclesResult,
+    modelsResult,
+    manufacturersResult,
+    statusesResult,
+    registrationsResult,
+    assignmentsResult,
+    categoriesResult,
+  ] =
     await Promise.all([
       client.from("vozila").select("id, model_id, status_id, trenutna_km"),
-      client.from("modeli").select("id, naziv, proizvodjac_id, kapacitet_rezervoara"),
+      client
+        .from("modeli")
+        .select("id, naziv, proizvodjac_id, kapacitet_rezervoara, kategorija_id"),
       client.from("proizvodjaci").select("id, naziv"),
       client.from("statusi_vozila").select("id, naziv"),
       client
         .from("registracije")
         .select("vozilo_id, registracijska_oznaka, datum_isteka"),
       client.from("zaduzenja").select("id, vozilo_id, is_aktivno"),
+      client.from("kategorije_vozila").select("id, naziv"),
     ] as const);
 
   const queryError = [
@@ -243,6 +262,7 @@ export async function getAvailableWorkerVehicles(
     statusesResult.error,
     registrationsResult.error,
     assignmentsResult.error,
+    categoriesResult.error,
   ].find((error) => Boolean(error));
 
   if (queryError) {
@@ -259,6 +279,9 @@ export async function getAvailableWorkerVehicles(
   const modelById = new Map((modelsResult.data ?? []).map((model) => [model.id, model]));
   const manufacturerById = new Map(
     (manufacturersResult.data ?? []).map((manufacturer) => [manufacturer.id, manufacturer]),
+  );
+  const categoryById = new Map(
+    (categoriesResult.data ?? []).map((category) => [category.id, category]),
   );
   const statusById = new Map((statusesResult.data ?? []).map((status: StatusRow) => [status.id, status]));
   const latestRegistrationByVehicle = getLatestRegistrations(registrationsResult.data ?? []);
@@ -279,6 +302,7 @@ export async function getAvailableWorkerVehicles(
     const manufacturer = model?.proizvodjac_id
       ? manufacturerById.get(model.proizvodjac_id)
       : null;
+    const category = model?.kategorija_id ? categoryById.get(model.kategorija_id) : null;
     const latestRegistration = latestRegistrationByVehicle.get(vehicle.id);
 
     return [
@@ -288,6 +312,8 @@ export async function getAvailableWorkerVehicles(
         plate: latestRegistration?.registracijska_oznaka ?? `V-${vehicle.id}`,
         currentKm: vehicle.trenutna_km ?? 0,
         fuelCapacity: model?.kapacitet_rezervoara ?? 0,
+        categoryId: model?.kategorija_id ?? null,
+        categoryName: category?.naziv ?? "Ostalo",
       },
     ];
   });

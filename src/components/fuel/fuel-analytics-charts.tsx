@@ -235,15 +235,15 @@ export function FuelAnalyticsCharts({
   return (
     <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
       <Card>
-        <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
             Litraža i trošak
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
             <select
               value={selectedPeriod}
               onChange={(event) => setSelectedPeriod(event.target.value as PeriodFilter)}
-              className="carlytics-select h-8 rounded-lg px-2 text-xs"
+              className="carlytics-select h-8 w-full rounded-lg px-2 text-xs sm:w-auto"
             >
               <option value="3">Zadnja 3 mj.</option>
               <option value="6">Zadnjih 6 mj.</option>
@@ -257,7 +257,7 @@ export function FuelAnalyticsCharts({
         {filteredMonthlySeries.length === 0 ? (
           <p className="text-sm text-muted">Nema dovoljno unosa za prikaz trenda litraže i troška.</p>
         ) : (
-          <div className="h-72 rounded-xl border border-border bg-surface-elevated p-2.5">
+          <div className="h-64 rounded-xl border border-border bg-surface-elevated p-2.5 sm:h-72">
             <Bar data={litersAndCostData} options={litersAndCostOptions} />
           </div>
         )}
@@ -288,7 +288,7 @@ export function FuelAnalyticsCharts({
                 </Badge>
               ))}
             </div>
-            <div className="mt-3 h-60 rounded-xl border border-border bg-surface-elevated p-2.5">
+            <div className="mt-3 h-56 rounded-xl border border-border bg-surface-elevated p-2.5 sm:h-60">
               <Bar data={avgPriceData} options={avgPriceOptions} />
             </div>
           </>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
 import { FuelSectionFilters } from "@/components/fuel/fuel-section-filters";
@@ -17,6 +17,7 @@ import { ServerPagination } from "@/components/ui/server-pagination";
 import type { OperationsOverviewData } from "@/lib/fleet/operations-service";
 import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
 import { formatDateTime } from "@/lib/utils/date-format";
+import { replaceCurrentUrlQueryParams } from "@/lib/utils/url-query";
 
 interface GorivoLivePageContentProps {
   initialOperationsData: OperationsOverviewData;
@@ -56,22 +57,6 @@ function toMonthLabel(monthKey: string) {
 
   const shortYear = yearPart?.slice(-2) ?? "";
   return `${HR_MONTH_LABELS[monthIndex]} '${shortYear}`;
-}
-
-function buildGorivoHref(params: { vozilo?: string; stranica?: number }) {
-  const query = new URLSearchParams();
-
-  if (params.vozilo) {
-    query.set("vozilo", params.vozilo);
-  }
-
-  if (params.stranica && params.stranica > 1) {
-    query.set("stranica", String(params.stranica));
-  }
-
-  const queryString = query.toString();
-
-  return queryString ? `/gorivo?${queryString}` : "/gorivo";
 }
 
 function toMonthKey(date: Date) {
@@ -180,6 +165,7 @@ export function GorivoLivePageContent({
   currentPage,
 }: GorivoLivePageContentProps) {
   const [operationsData, setOperationsData] = useState(initialOperationsData);
+  const [ledgerPage, setLedgerPage] = useState(currentPage);
 
   const refreshOperationsData = useCallback(async () => {
     const response = await fetch("/api/live/operations", {
@@ -223,17 +209,18 @@ export function GorivoLivePageContent({
     : operationsData.fuelLedger;
 
   const totalPages = Math.max(1, Math.ceil(filteredFuelLedger.length / ITEMS_PER_PAGE));
-  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const safeCurrentPage = Math.min(Math.max(ledgerPage, 1), totalPages);
   const pagedFuelLedger = filteredFuelLedger.slice(
     (safeCurrentPage - 1) * ITEMS_PER_PAGE,
     safeCurrentPage * ITEMS_PER_PAGE,
   );
 
-  const pageHref = (page: number) =>
-    buildGorivoHref({
-      vozilo: selectedVehicleId ? String(selectedVehicleId) : undefined,
-      stranica: page,
+  useEffect(() => {
+    replaceCurrentUrlQueryParams({
+      vozilo: selectedVehicleId ? String(selectedVehicleId) : null,
+      stranica: safeCurrentPage > 1 ? String(safeCurrentPage) : null,
     });
+  }, [safeCurrentPage, selectedVehicleId]);
 
   const monthlySeries = buildFuelMonthlySeries(filteredFuelLedger);
   const fuelTypeAverages = buildFuelTypeAverages(filteredFuelLedger);
@@ -251,12 +238,12 @@ export function GorivoLivePageContent({
   );
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <PageHeader
         title="Gorivo"
         description="Kontrola troška i analiza potrošnje goriva po vozilu i tipu goriva."
         actions={
-          <>
+          <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:justify-end">
             <FuelSectionFilters
               selectedVehicleId={selectedVehicleId}
               vehicleOptions={vehicleOptions}
@@ -268,7 +255,7 @@ export function GorivoLivePageContent({
             >
               Unos goriva
             </Link>
-          </>
+          </div>
         }
       />
 
@@ -352,7 +339,7 @@ export function GorivoLivePageContent({
               ))}
             </div>
 
-            <div className="hidden overflow-x-auto lg:block">
+            <div className="hidden max-w-full overflow-x-auto lg:block">
               <table className="min-w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-border text-xs uppercase tracking-[0.2em] text-muted">
@@ -406,7 +393,7 @@ export function GorivoLivePageContent({
             <ServerPagination
               currentPage={safeCurrentPage}
               totalPages={totalPages}
-              hrefForPage={pageHref}
+              onPageChange={setLedgerPage}
             />
           </>
         )}

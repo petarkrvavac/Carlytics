@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useCallback, useEffect, useRef, useState } from "react";
+import { useActionState, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { INITIAL_ACTION_STATE } from "@/lib/actions/action-state";
 import {
@@ -19,7 +19,11 @@ const LIVE_WORKER_CONTEXT_SOURCE_TABLES = [
   "zaduzenja",
   "vozila",
   "registracije",
+  "modeli",
+  "kategorije_vozila",
 ];
+
+const UNCATEGORIZED_CATEGORY_KEY = "uncategorized";
 
 interface WorkerAssignmentControlsProps {
   activeContext: ActiveWorkerVehicleContext | null;
@@ -69,6 +73,7 @@ export function WorkerAssignmentControls({
   const releaseSnapshotRef = useRef<ActiveWorkerVehicleContext | null>(null);
   const [localActiveContext, setLocalActiveContext] = useState(activeContext);
   const [localAvailableVehicles, setLocalAvailableVehicles] = useState(availableVehicles);
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState("");
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
 
   const refreshWorkerContext = useCallback(async () => {
@@ -106,13 +111,81 @@ export function WorkerAssignmentControls({
     INITIAL_ACTION_STATE,
   );
 
+  const categoryOptions = useMemo(() => {
+    const categoriesMap = new Map<string, { label: string; count: number }>();
+
+    for (const vehicle of localAvailableVehicles) {
+      const categoryKey =
+        typeof vehicle.categoryId === "number"
+          ? String(vehicle.categoryId)
+          : UNCATEGORIZED_CATEGORY_KEY;
+      const categoryLabel = vehicle.categoryName || "Ostalo";
+      const existingCategory = categoriesMap.get(categoryKey);
+
+      if (existingCategory) {
+        existingCategory.count += 1;
+        continue;
+      }
+
+      categoriesMap.set(categoryKey, {
+        label: categoryLabel,
+        count: 1,
+      });
+    }
+
+    return Array.from(categoriesMap.entries())
+      .map(([key, value]) => ({
+        key,
+        label: value.label,
+        count: value.count,
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label, "hr-HR"));
+  }, [localAvailableVehicles]);
+
+  const visibleVehiclesByCategory = useMemo(() => {
+    if (!selectedCategoryKey) {
+      return [];
+    }
+
+    return localAvailableVehicles.filter((vehicle) => {
+      const vehicleCategoryKey =
+        typeof vehicle.categoryId === "number"
+          ? String(vehicle.categoryId)
+          : UNCATEGORIZED_CATEGORY_KEY;
+
+      return vehicleCategoryKey === selectedCategoryKey;
+    });
+  }, [localAvailableVehicles, selectedCategoryKey]);
+
   useEffect(() => {
     setLocalActiveContext(activeContext);
+
+    if (activeContext) {
+      setSelectedCategoryKey("");
+      setSelectedVehicleId("");
+    }
   }, [activeContext]);
 
   useEffect(() => {
     setLocalAvailableVehicles(availableVehicles);
   }, [availableVehicles]);
+
+  useEffect(() => {
+    if (!selectedCategoryKey) {
+      return;
+    }
+
+    const selectedCategoryStillExists = categoryOptions.some(
+      (categoryOption) => categoryOption.key === selectedCategoryKey,
+    );
+
+    if (selectedCategoryStillExists) {
+      return;
+    }
+
+    setSelectedCategoryKey("");
+    setSelectedVehicleId("");
+  }, [categoryOptions, selectedCategoryKey]);
 
   useEffect(() => {
     if (releaseState.status !== "success" || !releaseState.message) {
@@ -143,6 +216,8 @@ export function WorkerAssignmentControls({
             plate: releasedContext.plate,
             currentKm: releasedContext.currentKm,
             fuelCapacity: releasedContext.fuelCapacity,
+            categoryId: releasedContext.categoryId ?? null,
+            categoryName: releasedContext.categoryName ?? "Ostalo",
           },
         ];
 
@@ -152,8 +227,10 @@ export function WorkerAssignmentControls({
     }
 
     setLocalActiveContext(null);
+    setSelectedCategoryKey("");
     releaseSnapshotRef.current = null;
-  }, [localActiveContext, releaseState.message, releaseState.status]);
+    void refreshWorkerContext();
+  }, [localActiveContext, refreshWorkerContext, releaseState.message, releaseState.status]);
 
   useEffect(() => {
     if (assignState.status !== "success" || !assignState.message) {
@@ -200,11 +277,21 @@ export function WorkerAssignmentControls({
       plate: selectedVehicle.plate,
       currentKm: kmStartFromPayload ?? selectedVehicle.currentKm,
       fuelCapacity: selectedVehicle.fuelCapacity,
+      categoryId: selectedVehicle.categoryId,
+      categoryName: selectedVehicle.categoryName,
     });
 
+    setSelectedCategoryKey("");
     setSelectedVehicleId("");
     pendingAssignedVehicleIdRef.current = null;
-  }, [assignState.message, assignState.payload, assignState.status, localAvailableVehicles]);
+    void refreshWorkerContext();
+  }, [
+    assignState.message,
+    assignState.payload,
+    assignState.status,
+    localAvailableVehicles,
+    refreshWorkerContext,
+  ]);
 
   if (localActiveContext) {
     return (
@@ -265,7 +352,7 @@ export function WorkerAssignmentControls({
   return (
     <div className="space-y-3">
       <p className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-300">
-        Nemate aktivno zaduženje. Odaberite slobodno vozilo i zadužite ga.
+        Nemate aktivno zaduženje. Odaberite kategoriju vozila, zatim slobodno vozilo.
       </p>
 
       {localAvailableVehicles.length === 0 ? (
@@ -284,16 +371,42 @@ export function WorkerAssignmentControls({
           className="space-y-3 rounded-xl border border-border bg-surface/90 p-3"
         >
           <label className="block text-xs uppercase tracking-[0.2em] text-muted">
+            Kategorija vozila
+            <select
+              value={selectedCategoryKey}
+              onChange={(event) => {
+                setSelectedCategoryKey(event.target.value);
+                setSelectedVehicleId("");
+              }}
+              disabled={isAssigning}
+              className="carlytics-select mt-2 w-full px-3 py-2.5 text-sm"
+            >
+              <option value="">Odaberi kategoriju</option>
+              {categoryOptions.map((categoryOption) => (
+                <option key={categoryOption.key} value={categoryOption.key}>
+                  {categoryOption.label} ({categoryOption.count})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block text-xs uppercase tracking-[0.2em] text-muted">
             Slobodna vozila
             <select
               name="vehicleId"
               value={selectedVehicleId}
               onChange={(event) => setSelectedVehicleId(event.target.value)}
-              disabled={isAssigning}
+              disabled={!selectedCategoryKey || isAssigning}
               className="carlytics-select mt-2 w-full px-3 py-2.5 text-sm"
             >
-              <option value="">Odaberi vozilo</option>
-              {localAvailableVehicles.map((vehicle) => (
+              <option value="">
+                {!selectedCategoryKey
+                  ? "Prvo odaberi kategoriju"
+                  : visibleVehiclesByCategory.length === 0
+                    ? "Nema vozila za odabranu kategoriju"
+                    : "Odaberi vozilo"}
+              </option>
+              {visibleVehiclesByCategory.map((vehicle) => (
                 <option key={vehicle.vehicleId} value={vehicle.vehicleId}>
                   {vehicle.vehicleLabel} ({vehicle.plate}) - {vehicle.currentKm.toLocaleString("hr-HR")} km
                 </option>

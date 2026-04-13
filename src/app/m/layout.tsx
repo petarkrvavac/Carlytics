@@ -22,8 +22,8 @@ export default async function MobileLayout({ children }: MobileLayoutProps) {
 
   return (
     <LiveUpdatesProvider>
-      <div className="ambient-bg min-h-screen">
-        <div className="mx-auto min-h-screen max-w-md px-4 py-4">
+      <div className="ambient-bg min-h-screen h-dvh overflow-hidden">
+        <div className="mx-auto flex h-full max-w-md flex-col px-4 py-4">
           <header className="mb-4 rounded-2xl border border-border bg-surface/90 p-4">
             <div className="flex items-center justify-between gap-3">
               <Link
@@ -59,7 +59,7 @@ export default async function MobileLayout({ children }: MobileLayoutProps) {
             </p>
           </header>
 
-          <main>{children}</main>
+          <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
         </div>
       </div>
     </LiveUpdatesProvider>

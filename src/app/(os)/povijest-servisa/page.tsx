@@ -35,6 +35,7 @@ export default async function PovijestServisaPage({ searchParams }: PovijestServ
 
   return (
     <PovijestServisaLivePageContent
+      key={`${selectedVehicleId ?? "all"}-${selectedPeriod}-${currentPage}`}
       initialTimelineData={timelineData}
       initialHeaderData={headerData}
       selectedVehicleId={selectedVehicleId}

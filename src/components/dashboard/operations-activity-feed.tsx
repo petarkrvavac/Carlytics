@@ -24,7 +24,7 @@ interface OperationsActivityFeedProps {
   totalItems?: number;
   currentPage: number;
   totalPages: number;
-  hrefForPage: (page: number) => string;
+  onPageChange: (page: number) => void;
 }
 
 function getTypeIcon(type: ActivityFeedType) {
@@ -104,7 +104,7 @@ export function OperationsActivityFeed({
   totalItems,
   currentPage,
   totalPages,
-  hrefForPage,
+  onPageChange,
 }: OperationsActivityFeedProps) {
   return (
     <Card className="flex h-full flex-col">
@@ -164,7 +164,7 @@ export function OperationsActivityFeed({
           <ServerPagination
             currentPage={currentPage}
             totalPages={totalPages}
-            hrefForPage={hrefForPage}
+            onPageChange={onPageChange}
             className="mt-auto pt-2"
           />
         </div>

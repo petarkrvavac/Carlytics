@@ -54,7 +54,7 @@ export function FuelSectionFilters({
   return (
     <div
       key={`fuel-section-filters-${currentVehicleValue}`}
-      className="flex items-center gap-2 rounded-xl border border-border bg-surface px-2 py-1.5"
+      className="flex w-full min-w-0 flex-col gap-2 rounded-xl border border-border bg-surface px-2 py-1.5 sm:w-auto sm:flex-row sm:items-center"
     >
       <select
         name="vozilo"
@@ -64,7 +64,7 @@ export function FuelSectionFilters({
           applyVehicleFilter(nextVehicle);
         }}
         disabled={isPending}
-        className="carlytics-select h-8 rounded-lg px-2 text-xs"
+        className="carlytics-select h-8 w-full min-w-0 rounded-lg px-2 text-xs sm:w-60"
       >
         <option value="">Sva vozila</option>
         {vehicleOptions.map((vehicleOption) => (
@@ -77,7 +77,7 @@ export function FuelSectionFilters({
       <Link
         href={clearHref}
         scroll={false}
-        className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+        className="inline-flex h-8 w-full items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200 sm:w-auto"
       >
         Očisti
       </Link>

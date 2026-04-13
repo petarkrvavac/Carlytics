@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AttachmentViewerButton } from "@/components/attachments/attachment-viewer-button";
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
@@ -19,6 +19,7 @@ import type {
 } from "@/lib/fleet/operations-service";
 import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
 import { formatDate } from "@/lib/utils/date-format";
+import { replaceCurrentUrlQueryParams } from "@/lib/utils/url-query";
 
 interface PovijestServisaLivePageContentProps {
   initialTimelineData: ServiceCenterTimelineData;
@@ -71,30 +72,6 @@ function isServiceWithinPeriod(
   return referenceDate.getTime() >= periodStart.getTime();
 }
 
-function buildPovijestServisaHref(params: {
-  vozilo?: string;
-  stranica?: number;
-  period?: PeriodFilter;
-}) {
-  const query = new URLSearchParams();
-
-  if (params.vozilo) {
-    query.set("vozilo", params.vozilo);
-  }
-
-  if (params.period) {
-    query.set("period", params.period);
-  }
-
-  if (params.stranica && params.stranica > 1) {
-    query.set("stranica", String(params.stranica));
-  }
-
-  const queryString = query.toString();
-
-  return queryString ? `/povijest-servisa?${queryString}` : "/povijest-servisa";
-}
-
 export function PovijestServisaLivePageContent({
   initialTimelineData,
   initialHeaderData,
@@ -104,6 +81,7 @@ export function PovijestServisaLivePageContent({
 }: PovijestServisaLivePageContentProps) {
   const [timelineData, setTimelineData] = useState(initialTimelineData);
   const [headerData, setHeaderData] = useState(initialHeaderData);
+  const [timelinePage, setTimelinePage] = useState(currentPage);
 
   const refreshServiceCenterData = useCallback(async () => {
     const query = new URLSearchParams();
@@ -177,18 +155,19 @@ export function PovijestServisaLivePageContent({
     });
 
   const totalPages = Math.max(1, Math.ceil(completedTimeline.length / ITEMS_PER_PAGE));
-  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const safeCurrentPage = Math.min(Math.max(timelinePage, 1), totalPages);
   const pagedCompletedTimeline = completedTimeline.slice(
     (safeCurrentPage - 1) * ITEMS_PER_PAGE,
     safeCurrentPage * ITEMS_PER_PAGE,
   );
 
-  const pageHref = (page: number) =>
-    buildPovijestServisaHref({
-      vozilo: selectedVehicleId ? String(selectedVehicleId) : undefined,
-      stranica: page,
+  useEffect(() => {
+    replaceCurrentUrlQueryParams({
+      vozilo: selectedVehicleId ? String(selectedVehicleId) : null,
       period: selectedPeriod,
+      stranica: safeCurrentPage > 1 ? String(safeCurrentPage) : null,
     });
+  }, [safeCurrentPage, selectedPeriod, selectedVehicleId]);
 
   return (
     <div className="space-y-5">
@@ -196,7 +175,7 @@ export function PovijestServisaLivePageContent({
         title="Povijest servisa"
         description="Povijest servisa, troškovi po kategorijama i trendovi po vremenskom razdoblju."
         actions={
-          <div className="flex w-full flex-wrap items-center justify-start gap-2 lg:w-auto lg:justify-end">
+          <div className="flex w-full min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-start lg:w-auto lg:justify-end">
             <ServiceHistoryFilters
               selectedVehicleId={selectedVehicleId}
               selectedPeriod={selectedPeriod}
@@ -249,27 +228,27 @@ export function PovijestServisaLivePageContent({
           <p className="text-sm text-muted">Nema završenih servisa za odabrani filter.</p>
         ) : (
           <>
-            <ul className="mx-auto max-h-[66vh] max-w-4xl space-y-2.5 overflow-y-auto pr-1 lg:hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <ul className="max-h-[68vh] space-y-2 overflow-y-auto pr-1 md:hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               {pagedCompletedTimeline.map((service) => (
-                <li key={`mobile-${service.id}`} className="rounded-xl border border-border bg-slate-950/60 px-3 py-2.5">
+                <li key={`mobile-${service.id}`} className="rounded-xl border border-border bg-slate-950/60 px-2.5 py-2">
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-slate-100">
                         {service.vehicleLabel}
                         <span className="text-slate-400"> ({service.plate})</span>
                       </p>
-                      <p className="mt-1 text-sm text-slate-200">{service.description}</p>
+                      <p className="mt-1 line-clamp-2 text-sm text-slate-200">{service.description}</p>
                       <p className="mt-1 text-xs text-muted">
                         Start: {formatDate(service.startedAtIso)} • Kraj: {formatDate(service.endedAtIso ?? service.startedAtIso)}
                       </p>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
                       <AttachmentViewerButton
                         attachmentSource={service.attachmentUrl}
                         title={`${service.vehicleLabel} (${service.plate})`}
                       />
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-1">
                         {service.categoryLabel ? <Badge variant="neutral">{service.categoryLabel}</Badge> : null}
                         <Badge variant="success">Završeno</Badge>
                       </div>
@@ -292,47 +271,47 @@ export function PovijestServisaLivePageContent({
               ))}
             </ul>
 
-            <div className="hidden overflow-x-auto lg:block">
-              <table className="min-w-full text-left text-sm">
+            <div className="hidden max-h-[72vh] overflow-auto md:block">
+              <table className="min-w-230 text-left text-[13px]">
                 <thead>
-                  <tr className="border-b border-border text-xs uppercase tracking-[0.2em] text-muted">
-                    <th className="px-2 py-2">Vozilo</th>
-                    <th className="px-2 py-2">Opis</th>
-                    <th className="px-2 py-2">Datumi</th>
-                    <th className="px-2 py-2 text-right">KM</th>
-                    <th className="px-2 py-2 text-right">Cijena</th>
-                    <th className="px-2 py-2">Status</th>
-                    <th className="px-2 py-2 text-right">Privitci</th>
+                  <tr className="border-b border-border bg-surface text-xs uppercase tracking-[0.2em] text-muted">
+                    <th className="sticky top-0 min-w-44 bg-surface px-3 py-2.5">Vozilo</th>
+                    <th className="sticky top-0 min-w-72 bg-surface px-3 py-2.5">Opis</th>
+                    <th className="sticky top-0 min-w-52 bg-surface px-3 py-2.5">Datumi</th>
+                    <th className="sticky top-0 min-w-24 bg-surface px-3 py-2.5 text-right">KM</th>
+                    <th className="sticky top-0 min-w-28 bg-surface px-3 py-2.5 text-right">Cijena</th>
+                    <th className="sticky top-0 min-w-40 bg-surface px-3 py-2.5">Status</th>
+                    <th className="sticky top-0 min-w-20 bg-surface px-3 py-2.5 text-right">Privitci</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pagedCompletedTimeline.map((service) => (
-                    <tr key={`desktop-${service.id}`} className="border-b border-border/60 last:border-0">
-                      <td className="px-2 py-3">
+                    <tr key={`desktop-${service.id}`} className="border-b border-border/60 transition-colors hover:bg-slate-900/45 last:border-0">
+                      <td className="px-3 py-3 align-top">
                         <p className="font-semibold text-slate-100">{service.vehicleLabel}</p>
                         <p className="text-xs text-slate-400">{service.plate}</p>
                       </td>
-                      <td className="px-2 py-3 text-slate-200">{service.description}</td>
-                      <td className="px-2 py-3 text-xs text-muted">
+                      <td className="px-3 py-3 align-top text-slate-200">{service.description}</td>
+                      <td className="px-3 py-3 align-top text-xs text-muted">
                         <p>Start: {formatDate(service.startedAtIso)}</p>
                         <p>Kraj: {formatDate(service.endedAtIso ?? service.startedAtIso)}</p>
                       </td>
-                      <td className="px-2 py-3 text-right data-font text-slate-200">
+                      <td className="px-3 py-3 align-top text-right data-font text-slate-200">
                         {service.kmAtMoment.toLocaleString("hr-HR")}
                       </td>
-                      <td className="px-2 py-3 text-right data-font text-amber-200">
+                      <td className="px-3 py-3 align-top text-right data-font text-amber-200">
                         {service.cost.toLocaleString("hr-HR", {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         })}
                       </td>
-                      <td className="px-2 py-3">
+                      <td className="px-3 py-3 align-top">
                         <div className="flex flex-wrap gap-2">
                           {service.categoryLabel ? <Badge variant="neutral">{service.categoryLabel}</Badge> : null}
                           <Badge variant="success">Završeno</Badge>
                         </div>
                       </td>
-                      <td className="px-2 py-3 text-right">
+                      <td className="px-3 py-3 align-top text-right">
                         <AttachmentViewerButton
                           attachmentSource={service.attachmentUrl}
                           title={`${service.vehicleLabel} (${service.plate})`}
@@ -347,7 +326,7 @@ export function PovijestServisaLivePageContent({
             <ServerPagination
               currentPage={safeCurrentPage}
               totalPages={totalPages}
-              hrefForPage={pageHref}
+              onPageChange={setTimelinePage}
             />
           </>
         )}

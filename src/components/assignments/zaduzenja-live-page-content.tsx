@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
 import { DesktopActiveAssignmentsTable } from "@/components/assignments/desktop-active-assignments-table";
@@ -13,6 +13,7 @@ import type { OperationsOverviewData } from "@/lib/fleet/operations-service";
 import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
 import { formatDate } from "@/lib/utils/date-format";
 import { parsePageParam } from "@/lib/utils/page-params";
+import { replaceCurrentUrlQueryParams } from "@/lib/utils/url-query";
 
 interface ZaduzenjaLivePageContentProps {
   initialOperationsData: OperationsOverviewData;
@@ -122,6 +123,8 @@ export function ZaduzenjaLivePageContent({
   initialSearchParams,
 }: ZaduzenjaLivePageContentProps) {
   const [operationsData, setOperationsData] = useState(initialOperationsData);
+  const [activePage, setActivePage] = useState(parsePageParam(initialSearchParams?.aktivna));
+  const [historyPage, setHistoryPage] = useState(parsePageParam(initialSearchParams?.povijest));
 
   const refreshOperationsData = useCallback(async () => {
     const response = await fetch("/api/live/operations", {
@@ -149,8 +152,6 @@ export function ZaduzenjaLivePageContent({
   });
 
   const selectedView = parseViewInput(initialSearchParams?.prikaz);
-  const activePage = parsePageParam(initialSearchParams?.aktivna);
-  const historyPage = parsePageParam(initialSearchParams?.povijest);
 
   const filteredHistory = useMemo(
     () =>
@@ -168,6 +169,22 @@ export function ZaduzenjaLivePageContent({
   const safeActivePage = Math.min(activePage, activeTotalPages);
   const safeHistoryPage = Math.min(historyPage, historyTotalPages);
 
+  useEffect(() => {
+    replaceCurrentUrlQueryParams({
+      prikaz: selectedView === "povijest" ? "povijest" : null,
+      od: initialSearchParams?.od ?? null,
+      do: initialSearchParams?.do ?? null,
+      aktivna: safeActivePage > 1 ? String(safeActivePage) : null,
+      povijest: safeHistoryPage > 1 ? String(safeHistoryPage) : null,
+    });
+  }, [
+    initialSearchParams?.do,
+    initialSearchParams?.od,
+    safeActivePage,
+    safeHistoryPage,
+    selectedView,
+  ]);
+
   const pagedActiveAssignments = operationsData.activeAssignments.slice(
     (safeActivePage - 1) * ITEMS_PER_PAGE,
     safeActivePage * ITEMS_PER_PAGE,
@@ -177,24 +194,6 @@ export function ZaduzenjaLivePageContent({
     (safeHistoryPage - 1) * ITEMS_PER_PAGE,
     safeHistoryPage * ITEMS_PER_PAGE,
   );
-
-  const activePageHref = (page: number) =>
-    buildZaduzenjaHref({
-      od: initialSearchParams?.od,
-      do: initialSearchParams?.do,
-      aktivna: page,
-      povijest: safeHistoryPage,
-      prikaz: "aktivna",
-    });
-
-  const historyPageHref = (page: number) =>
-    buildZaduzenjaHref({
-      od: initialSearchParams?.od,
-      do: initialSearchParams?.do,
-      aktivna: safeActivePage,
-      povijest: page,
-      prikaz: "povijest",
-    });
 
   const activeViewHref = buildZaduzenjaHref({
     od: initialSearchParams?.od,
@@ -267,7 +266,7 @@ export function ZaduzenjaLivePageContent({
                 <ServerPagination
                   currentPage={safeActivePage}
                   totalPages={activeTotalPages}
-                  hrefForPage={activePageHref}
+                  onPageChange={setActivePage}
                 />
               </>
             )}
@@ -402,7 +401,7 @@ export function ZaduzenjaLivePageContent({
                 <ServerPagination
                   currentPage={safeHistoryPage}
                   totalPages={historyTotalPages}
-                  hrefForPage={historyPageHref}
+                  onPageChange={setHistoryPage}
                 />
               </>
             )}

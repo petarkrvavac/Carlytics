@@ -92,11 +92,17 @@ export function AddVehicleForm({
       className={cn(
         "rounded-2xl border border-border bg-surface/95",
         isModalMode
-          ? "flex h-full min-h-0 flex-col overflow-y-auto p-3 sm:p-4"
+          ? "flex h-full min-h-0 flex-col overflow-hidden p-3 sm:p-4"
           : "space-y-4 p-5",
       )}
     >
-      <div className={cn(isModalMode ? "space-y-3 pr-1 xl:space-y-4" : "space-y-3") }>
+      <div
+        className={cn(
+          isModalMode
+            ? "min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 xl:space-y-4"
+            : "space-y-3",
+        )}
+      >
         <section className={sectionClassName}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-foreground">
@@ -403,50 +409,57 @@ export function AddVehicleForm({
         </section>
       </div>
 
-      {state.message ? (
-        <div
-          className={
-            state.status === "success"
-              ? "rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
-              : state.status === "error"
-                ? "rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
-                : "rounded-xl border border-border bg-surface-elevated px-3 py-2 text-sm text-foreground"
-          }
-        >
-          {state.message}
-        </div>
-      ) : null}
-
-      {!hasRequiredContext ? (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-          Nedostaju statusi vozila u bazi. Unos je privremeno onemogućen.
-        </div>
-      ) : null}
-
-      <div className={cn("mt-2 flex items-center justify-end gap-2", isModalMode && "border-t border-border pt-3")}>
-        {onCancel ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="inline-flex h-10 items-center rounded-xl border border-border bg-surface-elevated px-4 text-sm text-foreground transition hover:border-cyan-500/35 hover:text-cyan-700 dark:hover:text-cyan-200"
-          >
-            Odustani
-          </button>
-        ) : (
-          <Link
-            href={cancelHref}
-            className="inline-flex h-10 items-center rounded-xl border border-border bg-surface-elevated px-4 text-sm text-foreground transition hover:border-cyan-500/35 hover:text-cyan-700 dark:hover:text-cyan-200"
-          >
-            Odustani
-          </Link>
+      <div
+        className={cn(
+          "mt-2 space-y-2",
+          isModalMode && "border-t border-border bg-surface/95 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.25rem)]",
         )}
-        <button
-          type="submit"
-          disabled={isPending || !hasRequiredContext}
-          className="inline-flex h-10 items-center rounded-xl border border-cyan-300 bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-70"
-        >
-          {isPending ? "Spremanje..." : "Spremi vozilo"}
-        </button>
+      >
+        {state.message ? (
+          <div
+            className={
+              state.status === "success"
+                ? "rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
+                : state.status === "error"
+                  ? "rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
+                  : "rounded-xl border border-border bg-surface-elevated px-3 py-2 text-sm text-foreground"
+            }
+          >
+            {state.message}
+          </div>
+        ) : null}
+
+        {!hasRequiredContext ? (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+            Nedostaju statusi vozila u bazi. Unos je privremeno onemogućen.
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-end gap-2">
+          {onCancel ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="inline-flex h-10 items-center rounded-xl border border-border bg-surface-elevated px-4 text-sm text-foreground transition hover:border-cyan-500/35 hover:text-cyan-700 dark:hover:text-cyan-200"
+            >
+              Odustani
+            </button>
+          ) : (
+            <Link
+              href={cancelHref}
+              className="inline-flex h-10 items-center rounded-xl border border-border bg-surface-elevated px-4 text-sm text-foreground transition hover:border-cyan-500/35 hover:text-cyan-700 dark:hover:text-cyan-200"
+            >
+              Odustani
+            </Link>
+          )}
+          <button
+            type="submit"
+            disabled={isPending || !hasRequiredContext}
+            className="inline-flex h-10 items-center rounded-xl border border-cyan-300 bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {isPending ? "Spremanje..." : "Spremi vozilo"}
+          </button>
+        </div>
       </div>
     </form>
   );

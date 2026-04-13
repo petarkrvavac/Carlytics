@@ -26,7 +26,7 @@ export function PageHeader({
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">{description}</p>
       </div>
       {hasActionRow ? (
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-3 lg:w-auto lg:justify-end">
           {actions}
           {showMobileViewButton ? (
             <Link

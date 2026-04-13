@@ -272,7 +272,7 @@ export function FleetSectionContent({
       )}
 
       {isModalOpen ? (
-        <div className="fixed inset-0 z-50 px-3 py-4 sm:p-6">
+        <div className="fixed inset-0 z-50 p-0 sm:p-6">
           <button
             type="button"
             onClick={closeModal}
@@ -280,7 +280,7 @@ export function FleetSectionContent({
             className="absolute inset-0 bg-slate-950/55"
           />
 
-          <div className="relative mx-auto flex h-[min(96vh,920px)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-border bg-background">
+          <div className="relative mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-none border border-border bg-background sm:h-[min(96vh,920px)] sm:rounded-2xl">
             <div className="flex items-start justify-between gap-3 border-b border-border bg-surface/70 p-3 sm:p-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-cyan-700 dark:text-cyan-300">Dodaj vozilo</p>
@@ -299,7 +299,7 @@ export function FleetSectionContent({
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 p-3 sm:p-4">
+            <div className="min-h-0 flex-1 p-2 sm:p-4">
               <AddVehicleForm
                 modelOptions={formContext.modelOptions}
                 statusOptions={formContext.statusOptions}

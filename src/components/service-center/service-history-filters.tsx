@@ -74,7 +74,7 @@ export function ServiceHistoryFilters({
   return (
     <div
       key={`service-history-filters-${currentVehicleValue}-${currentPeriod}`}
-      className="mr-1 flex items-center gap-2 rounded-xl border border-border bg-surface px-2 py-1.5"
+      className="mr-1 flex w-full min-w-0 flex-col gap-2 rounded-xl border border-border bg-surface px-2 py-1.5 sm:w-auto sm:flex-row sm:items-center"
     >
       <select
         name="vozilo"
@@ -84,7 +84,7 @@ export function ServiceHistoryFilters({
           applyFilters(nextVehicle, currentPeriod);
         }}
         disabled={isPending}
-        className="carlytics-select h-8 rounded-lg px-2 text-xs"
+        className="carlytics-select h-8 w-full min-w-0 rounded-lg px-2 text-xs sm:w-64"
       >
         <option value="">Sva vozila</option>
         {vehicleOptions.map((vehicleOption) => (
@@ -102,7 +102,7 @@ export function ServiceHistoryFilters({
           applyFilters(currentVehicleValue, nextPeriod);
         }}
         disabled={isPending}
-        className="carlytics-select h-8 rounded-lg px-2 text-xs"
+        className="carlytics-select h-8 w-full min-w-0 rounded-lg px-2 text-xs sm:w-auto"
       >
         <option value="3">Zadnja 3 mj.</option>
         <option value="6">Zadnjih 6 mj.</option>
@@ -113,7 +113,7 @@ export function ServiceHistoryFilters({
       <Link
         href={clearHref}
         scroll={false}
-        className="inline-flex h-8 items-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+        className="inline-flex h-8 w-full items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200 sm:w-auto"
       >
         Očisti
       </Link>
