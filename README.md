@@ -71,12 +71,12 @@ This approach reduces frontend complexity, minimizes duplicated realtime logic, 
 
 ```mermaid
 flowchart LR
-  A[Domain tables] --> B[PostgreSQL triggers]
+  A["Domain tables"] --> B["PostgreSQL triggers"]
   B --> C[app_events]
-  C --> D[Supabase Realtime]
+  C --> D["Supabase Realtime"]
   D --> E[LiveUpdatesProvider]
-  E --> F[/api/live endpoints]
-  F --> G[Updated UI views]
+  E --> F["/api/live endpoints"]
+  F --> G["Updated UI views"]
 ```
 
 Main event sources include:
