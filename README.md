@@ -14,7 +14,7 @@ Carlytics centralizes vehicles, assignments, fuel logs, service history, inciden
 
 ## 📸 Preview
 
-![Carlytics Dashboard](./docs/dashboard.png)
+![Carlytics Dashboard](./docs/dashboard-screenshot.png)
 
 > Real-time dashboard with live fleet updates, service alerts, and centralized activity stream.
 

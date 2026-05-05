@@ -1,7 +1,0 @@
-- Supabase type regeneration command: node scripts/gen-supabase-types.mjs (no npm script alias).
-- In this Windows environment, rg command is unavailable in terminal; use editor search tools or PowerShell alternatives.
-- Legacy table prijave_kvarova should not appear in src/**; target table is servisne_intervencije.
-- Shared soft-delete/status filtering for interventions is centralized in src/lib/fleet/intervention-utils.ts.
-- Current Supabase JS types in this repo do not support insert option defaultToNull on .insert(...); use minimal insert payload without unsupported options.
-- ESLint react-hooks/set-state-in-effect is active; avoid sync setState in useEffect for URL-filter UI and prefer derived/uncontrolled controls.
-- Next route handlers under src/app/api/** must never return null; always return NextResponse/Response on every branch to satisfy Next 16 route type validation.
