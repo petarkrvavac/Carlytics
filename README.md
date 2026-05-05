@@ -1,147 +1,215 @@
-# Carlytics
+# 🚗 Carlytics
 
-Fleet management aplikacija za praćenje vozila, zaduženja, goriva, kvarova, servisnih intervencija i zaposlenika.
+A real-time, event-driven fleet management platform built with modern full-stack architecture.
 
-Projekt je napravljen kao role-aware sustav:
-- admin i serviser rade u desktop modulu Fleet OS
-- radnik koristi mobilni modul za prijavu kvara i unos goriva
+Carlytics centralizes vehicles, assignments, fuel logs, service history, incidents, employees, and operational activity into one role-aware Fleet OS.
 
-## Što aplikacija radi
+![Next.js](https://img.shields.io/badge/Next.js-16-black)
+![TypeScript](https://img.shields.io/badge/TypeScript-blue)
+![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-38BDF8)
 
-Glavne funkcionalnosti:
-- Dashboard: pregled KPI-jeva, upozorenja i operativnog feeda
-- Flota: pregled i upravljanje vozilima
-- Zaduženja: praćenje aktivnih i povijesnih zaduženja
-- Gorivo: evidencija točenja, cijena i kilometraže
-- Prijava kvara: unos i praćenje statusa kvarova
-- Servisni centar: timeline intervencija i prioritetne stavke
-- Zaposlenici: upravljanje aktivacijom i invitation tok za postavu lozinke
+**🔴 Live Demo:** [carlytics-zeta.vercel.app](https://carlytics-zeta.vercel.app/)  
+**🟢 Tech:** Next.js • TypeScript • Supabase • PostgreSQL • Tailwind CSS
 
-## Tehnologije
+## 📸 Preview
 
-- Next.js 16 (App Router, Server Components)
-- React 19 + TypeScript (strict)
-- Supabase (PostgreSQL + typed klijent)
-- NextAuth (credentials prijava + JWT session)
-- Tailwind CSS v4
-- Zod (validacija ulaza)
-- Argon2 i bcryptjs (lozinke/hash kompatibilnost)
+![Carlytics Dashboard](./docs/dashboard.png)
 
-## Arhitektura projekta
+> Real-time dashboard with live fleet updates, service alerts, and centralized activity stream.
 
-Ključne mape:
-- src/app: rute (desktop Fleet OS, mobilni modul, auth i API)
-- src/components: UI i feature komponente
-- src/lib: auth, akcije, servisi, navigacija i pomoćni utili
-- src/types: generirani i ručno definirani tipovi
-- scripts: pomoćne skripte (npr. generiranje Supabase tipova)
+## 🚀 Highlights
 
-Važni route segmenti:
-- src/app/(os): desktop aplikacija za admin/serviser role
-- src/app/m: mobilni modul za radnik rolu
-- src/app/api/auth/[...nextauth]: auth endpoint
+### Real-time System
 
-## Preduvjeti
+- Supabase Realtime subscriptions
+- UI updates without full page reloads
+- Source-table filtering for targeted refreshes
 
-Prije pokretanja osiguraj:
-- Node.js 20+
-- npm 10+
-- pristup Supabase projektu s postojećom shemom
+### Backend Design
 
-## Konfiguracija okoline
+- PostgreSQL triggers for operational events
+- Centralized event stream in `app_events`
+- Persistent activity log for system changes
 
-Kreiraj datoteku .env.local u rootu projekta:
+### Product Workflow
 
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+- Desktop Fleet OS for administrators and fleet managers
+- Mobile-first workflow for field employees
+- Role-aware routing and protected routes
 
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=generate-a-long-random-secret
+## 🧩 Problem
+
+Fleet operations often spread vehicle data, service history, assignments, fuel logs, and incident reports across multiple tools. That makes it difficult to react quickly, track operational history, and keep teams synchronized in real time.
+
+## 💡 Solution
+
+Carlytics centralizes all fleet-related data into one operational platform. Database triggers convert important changes into events, Supabase Realtime streams those events to the frontend, and the UI refreshes affected views without requiring full page reloads.
+
+## ⚙️ Features
+
+- Vehicle management and digital vehicle profiles
+- Active and historical vehicle assignments
+- Service, maintenance, registration, and tire history
+- Fuel tracking with cost analytics
+- Fault/incident reporting with image attachments
+- Employee management and invitation-based onboarding
+- Role-based desktop and mobile workflows
+- Real-time dashboard, fleet, fuel, assignment, employee, and service updates
+
+## 🏗 Architecture
+
+The system follows an event-driven architecture:
+
+- PostgreSQL triggers detect operational changes
+- Trigger function writes normalized events into `app_events`
+- Frontend subscribes to `app_events` using Supabase Realtime
+- Live refresh hooks filter events by source table
+- Lightweight API routes reload only the affected page data
+
+This approach reduces frontend complexity, minimizes duplicated realtime logic, and creates a persistent audit trail of important system activity.
+
+```mermaid
+flowchart LR
+  A[Domain tables] --> B[PostgreSQL triggers]
+  B --> C[app_events]
+  C --> D[Supabase Realtime]
+  D --> E[LiveUpdatesProvider]
+  E --> F[/api/live endpoints]
+  F --> G[Updated UI views]
 ```
 
-Napomena:
-- bez NEXT_PUBLIC_SUPABASE_URL i NEXT_PUBLIC_SUPABASE_ANON_KEY aplikacija ne može čitati podatke
-- SUPABASE_SERVICE_ROLE_KEY je preporučen za server-side tokove i stabilniji rad kroz RLS
-- NEXTAUTH_SECRET je obavezan za sigurnu JWT sesiju
+Main event sources include:
 
-## Pokretanje projekta
+- `vozila`
+- `zaduzenja`
+- `evidencija_goriva`
+- `servisne_intervencije`
+- `registracije`
+- `zaposlenici`
 
-1. Instalacija ovisnosti
+## 🛠 Tech Stack
+
+Next.js • React • TypeScript • Supabase PostgreSQL • Supabase Realtime • Supabase Storage • NextAuth • Tailwind CSS • Zod • Chart.js • Vercel
+
+## 🚀 Getting Started
+
+### 1. Clone Repository
+
+```bash
+git clone https://github.com/petarkrvavac/Carlytics.git
+cd Carlytics
+```
+
+### 2. Install Dependencies
 
 ```bash
 npm install
 ```
 
-2. Pokretanje development servera
+### 3. Setup Environment Variables
+
+Create `.env.local` in the project root. You can use `.env.example` as a template:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=generate-a-long-random-secret
+
+SUPABASE_PROJECT_ID=your-supabase-project-id
+```
+
+### 4. Import Database
+
+Import the provided PostgreSQL dump before running the app:
+
+> Requires PostgreSQL installed locally.
+
+```bash
+createdb carlytics
+psql -d carlytics -f database-sql/database.sql
+```
+
+For Supabase, import `database-sql/database.sql` into a fresh project through the SQL editor or a direct `psql` connection.
+
+### 5. Run Development Server
 
 ```bash
 npm run dev
 ```
 
-3. Otvori aplikaciju
+Open:
 
 ```text
 http://localhost:3000
 ```
 
-Prijava:
-- koristi postojeće zaposlenike iz baze (tablica zaposlenici)
-- role mapping se radi prema tablici uloge
+## 🔐 Environment Variables
 
-## Dostupne skripte
+| Variable | Description |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public anon key used by the client and realtime subscription |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-side key used for privileged reads/writes while RLS is enabled |
+| `NEXTAUTH_URL` | Base URL used by NextAuth |
+| `NEXTAUTH_SECRET` | Secret used to sign JWT sessions |
+| `SUPABASE_PROJECT_ID` | Supabase project id used for type generation |
 
-```bash
-npm run dev        # lokalni razvoj
-npm run build      # produkcijski build
-npm run start      # start produkcijske verzije
-npm run lint       # ESLint provjera
-npm run typecheck  # TypeScript provjera bez emitiranja
-npm run gen:types  # generiranje Supabase tipova u src/types/database.ts
+## 🗄 Database Setup
+
+The database schema and seed data are provided in:
+
+```text
+database-sql/database.sql
 ```
 
-## Kako koristiti aplikaciju
+The dump includes:
 
-Tipičan tok za admin/serviser korisnika:
-1. Prijava kroz stranicu /prijava
-2. Pregled KPI-ja na /dashboard
-3. Upravljanje vozilima i statusima u /flota
-4. Praćenje servisa i kvarova kroz /servisni-centar i /prijava-kvara
-5. Upravljanje korisnicima kroz /zaposlenici (aktivacija/deaktivacija, invite link)
+- PostgreSQL tables, relationships, constraints, indexes, and sequences
+- Seed data for vehicles, employees, assignments, fuel, service history, roles, and lookup tables
+- `emit_app_event()` trigger function
+- Triggers for fuel entries, assignments, and service interventions
+- `app_events` table used by the realtime refresh system
+- RLS enabled on application tables
 
-Tipičan tok za radnik korisnika:
-1. Prijava
-2. Preusmjeravanje na mobilni modul /m
-3. Brzi unos goriva i prijava kvara
+After importing the database, create a Supabase Storage bucket named:
 
-## UX i loading ponašanje
-
-- route-level loading skeletoni su implementirani za dashboard i ključne operativne rute
-- servisni centar koristi sekcijski Suspense (header/timeline/prioriteti) za fluidnije učitavanje
-- zaposlenici učitavaju form context na zahtjev pri otvaranju modala
-
-## Najčešći problemi
-
-Ako npm run dev ne podigne aplikaciju:
-- provjeri da su .env.local varijable postavljene
-- pokreni npm run typecheck i npm run lint
-- potvrdi da Supabase projekt i shema odgovaraju tipovima u src/types/database.ts
-
-Ako auth ne radi:
-- provjeri NEXTAUTH_URL i NEXTAUTH_SECRET
-- provjeri da postoji zaposlenik s valjanim korisničkim imenom i lozinkom
-
-## Dodatno
-
-Za ažuriranje DB tipova nakon promjene sheme koristi:
-
-```bash
-npm run gen:types
+```text
+kvarovi
 ```
 
-Nakon toga preporuka je pokrenuti:
+This bucket is used for uploaded fault/incident images. If realtime updates do not appear, enable realtime replication for the `app_events` table in Supabase.
 
-```bash
-npm run typecheck
-```
+### Demo Accounts
+
+| Role | Username | Password |
+| --- | --- | --- |
+| Administrator | `seed.admin01` | `Test1234!` |
+| Fleet manager | `seed.voditelj01` | `Test1234!` |
+| Employee | `seed.radnik01` | `Test1234!` |
+
+## 🔮 Future Improvements
+
+- Automatic VIN-based vehicle detection
+- Advanced analytics and exportable fleet reports
+- More granular RLS policies for user-scoped database access
+- Automated email delivery for employee invitations
+- PWA/offline support for field employees
+
+## 👤 Author
+
+**Petar Krvavac**  
+Computer Science Student @ FSRE Mostar
+
+- GitHub: [petarkrvavac](https://github.com/petarkrvavac)
+- Repository: [Carlytics](https://github.com/petarkrvavac/Carlytics)
+
+## 📄 License
+
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
+This project is licensed under the **MIT License**.  
+See the [LICENSE](./LICENSE) file for details.

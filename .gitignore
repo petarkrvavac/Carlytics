@@ -81,3 +81,5 @@ zavrsni.txt
 
 /scripts/seed-massive-test-data.sql
 /scripts/update-seed-massive-dates.sql
+database-backup
+
