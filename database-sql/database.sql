@@ -5,7 +5,7 @@
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.0
 
--- Started on 2026-05-05 15:46:43
+-- Started on 2026-05-12 18:00:21
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -24,13 +24,13 @@ SET row_security = off;
 -- Name: public; Type: SCHEMA; Schema: -; Owner: pg_database_owner
 --
 
-CREATE SCHEMA IF NOT EXISTS public;
+CREATE SCHEMA public;
 
 
 ALTER SCHEMA public OWNER TO pg_database_owner;
 
 --
--- TOC entry 4036 (class 0 OID 0)
+-- TOC entry 4054 (class 0 OID 0)
 -- Dependencies: 97
 -- Name: SCHEMA public; Type: COMMENT; Schema: -; Owner: pg_database_owner
 --
@@ -39,7 +39,7 @@ COMMENT ON SCHEMA public IS 'standard public schema';
 
 
 --
--- TOC entry 506 (class 1255 OID 23339)
+-- TOC entry 510 (class 1255 OID 23339)
 -- Name: emit_app_event(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -55,31 +55,44 @@ BEGIN
 
     CASE TG_TABLE_NAME
         WHEN 'evidencija_goriva' THEN
-            v_tip_dogadjaja := 'unos_goriva';
+            v_tip_dogadjaja := 'fuel_changed';
 
-        -- Ovdje smo zamijenili staru tablicu novom
         WHEN 'servisne_intervencije' THEN
             IF TG_OP = 'INSERT' THEN
-                v_tip_dogadjaja := 'nova_prijava_kvara';
+                v_tip_dogadjaja := 'service_intervention_created';
             ELSIF TG_OP = 'UPDATE' AND OLD.status_prijave IS DISTINCT FROM NEW.status_prijave THEN
-                -- Možeš dodati specifičan event ako je status 'Završeno'
-                IF NEW.status_prijave = 'Zatvoreno' THEN
-                    v_tip_dogadjaja := 'servis_zavrsen';
+                IF lower(COALESCE(NEW.status_prijave, '')) IN ('zatvoreno', 'closed') THEN
+                    v_tip_dogadjaja := 'service_completed';
                 ELSE
-                    v_tip_dogadjaja := 'status_promjena';
+                    v_tip_dogadjaja := 'service_status_changed';
                 END IF;
+            ELSIF TG_OP = 'UPDATE' THEN
+                v_tip_dogadjaja := 'service_intervention_changed';
+            ELSIF TG_OP = 'DELETE' THEN
+                v_tip_dogadjaja := 'service_intervention_changed';
             ELSE
                 v_treba_pisati := false;
             END IF;
 
         WHEN 'zaduzenja' THEN
             IF TG_OP = 'INSERT' THEN
-                v_tip_dogadjaja := 'novo_zaduzenje';
+                v_tip_dogadjaja := 'assignment_created';
             ELSIF TG_OP = 'UPDATE' AND OLD.is_aktivno = true AND NEW.is_aktivno = false THEN
-                v_tip_dogadjaja := 'razduzenje';
+                v_tip_dogadjaja := 'assignment_closed';
+            ELSIF TG_OP = 'UPDATE' THEN
+                v_tip_dogadjaja := 'assignment_changed';
+            ELSIF TG_OP = 'DELETE' THEN
+                v_tip_dogadjaja := 'assignment_changed';
             ELSE
                 v_treba_pisati := false;
             END IF;
+
+        WHEN 'vozila' THEN
+            v_tip_dogadjaja := 'vehicle_changed';
+
+        WHEN 'registracije' THEN
+            v_tip_dogadjaja := 'registration_changed';
+
         ELSE
             v_treba_pisati := false;
     END CASE;
@@ -97,7 +110,7 @@ $$;
 ALTER FUNCTION public.emit_app_event() OWNER TO postgres;
 
 --
--- TOC entry 479 (class 1255 OID 17162)
+-- TOC entry 483 (class 1255 OID 17162)
 -- Name: rls_auto_enable(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -137,7 +150,7 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
--- TOC entry 388 (class 1259 OID 23325)
+-- TOC entry 390 (class 1259 OID 23325)
 -- Name: app_events; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -148,16 +161,16 @@ CREATE TABLE public.app_events (
     operacija text NOT NULL,
     id_zapisa bigint,
     kreirano_u timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT app_events_event_type_chk CHECK ((tip_dogadjaja = ANY (ARRAY['unos_goriva'::text, 'nova_prijava_kvara'::text, 'status_promjena'::text, 'novo_zaduzenje'::text, 'razduzenje'::text, 'fuel_changed'::text, 'fault_changed'::text, 'assignment_changed'::text]))),
+    CONSTRAINT app_events_event_type_chk CHECK ((tip_dogadjaja = ANY (ARRAY['fuel_changed'::text, 'service_intervention_created'::text, 'service_intervention_changed'::text, 'service_status_changed'::text, 'service_completed'::text, 'assignment_created'::text, 'assignment_changed'::text, 'assignment_closed'::text, 'vehicle_changed'::text, 'registration_changed'::text]))),
     CONSTRAINT app_events_operation_chk CHECK ((operacija = ANY (ARRAY['INSERT'::text, 'UPDATE'::text, 'DELETE'::text]))),
-    CONSTRAINT app_events_source_table_chk CHECK ((izvorna_tablica = ANY (ARRAY['evidencija_goriva'::text, 'servisne_intervencije'::text, 'zaduzenja'::text, 'vozila'::text])))
+    CONSTRAINT app_events_source_table_chk CHECK ((izvorna_tablica = ANY (ARRAY['evidencija_goriva'::text, 'servisne_intervencije'::text, 'zaduzenja'::text, 'vozila'::text, 'registracije'::text])))
 );
 
 
 ALTER TABLE public.app_events OWNER TO postgres;
 
 --
--- TOC entry 387 (class 1259 OID 23324)
+-- TOC entry 389 (class 1259 OID 23324)
 -- Name: app_events_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -172,7 +185,7 @@ ALTER TABLE public.app_events ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTI
 
 
 --
--- TOC entry 354 (class 1259 OID 20543)
+-- TOC entry 356 (class 1259 OID 20543)
 -- Name: drzave; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -185,7 +198,7 @@ CREATE TABLE public.drzave (
 ALTER TABLE public.drzave OWNER TO postgres;
 
 --
--- TOC entry 353 (class 1259 OID 20542)
+-- TOC entry 355 (class 1259 OID 20542)
 -- Name: drzave_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -200,7 +213,7 @@ ALTER TABLE public.drzave ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 
 --
--- TOC entry 384 (class 1259 OID 20734)
+-- TOC entry 386 (class 1259 OID 20734)
 -- Name: evidencija_goriva; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -218,7 +231,7 @@ CREATE TABLE public.evidencija_goriva (
 ALTER TABLE public.evidencija_goriva OWNER TO postgres;
 
 --
--- TOC entry 383 (class 1259 OID 20733)
+-- TOC entry 385 (class 1259 OID 20733)
 -- Name: evidencija_goriva_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -233,7 +246,7 @@ ALTER TABLE public.evidencija_goriva ALTER COLUMN id ADD GENERATED ALWAYS AS IDE
 
 
 --
--- TOC entry 386 (class 1259 OID 20747)
+-- TOC entry 388 (class 1259 OID 20747)
 -- Name: evidencija_guma; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -250,7 +263,7 @@ CREATE TABLE public.evidencija_guma (
 ALTER TABLE public.evidencija_guma OWNER TO postgres;
 
 --
--- TOC entry 385 (class 1259 OID 20746)
+-- TOC entry 387 (class 1259 OID 20746)
 -- Name: evidencija_guma_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -265,7 +278,7 @@ ALTER TABLE public.evidencija_guma ALTER COLUMN id ADD GENERATED ALWAYS AS IDENT
 
 
 --
--- TOC entry 370 (class 1259 OID 20601)
+-- TOC entry 372 (class 1259 OID 20601)
 -- Name: kategorije_kvarova; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -278,7 +291,7 @@ CREATE TABLE public.kategorije_kvarova (
 ALTER TABLE public.kategorije_kvarova OWNER TO postgres;
 
 --
--- TOC entry 369 (class 1259 OID 20600)
+-- TOC entry 371 (class 1259 OID 20600)
 -- Name: kategorije_kvarova_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -293,7 +306,7 @@ ALTER TABLE public.kategorije_kvarova ALTER COLUMN id ADD GENERATED ALWAYS AS ID
 
 
 --
--- TOC entry 364 (class 1259 OID 20583)
+-- TOC entry 366 (class 1259 OID 20583)
 -- Name: kategorije_vozila; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -306,7 +319,7 @@ CREATE TABLE public.kategorije_vozila (
 ALTER TABLE public.kategorije_vozila OWNER TO postgres;
 
 --
--- TOC entry 363 (class 1259 OID 20582)
+-- TOC entry 365 (class 1259 OID 20582)
 -- Name: kategorije_vozila_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -321,7 +334,7 @@ ALTER TABLE public.kategorije_vozila ALTER COLUMN id ADD GENERATED ALWAYS AS IDE
 
 
 --
--- TOC entry 358 (class 1259 OID 20560)
+-- TOC entry 360 (class 1259 OID 20560)
 -- Name: mjesta; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -335,7 +348,7 @@ CREATE TABLE public.mjesta (
 ALTER TABLE public.mjesta OWNER TO postgres;
 
 --
--- TOC entry 357 (class 1259 OID 20559)
+-- TOC entry 359 (class 1259 OID 20559)
 -- Name: mjesta_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -350,7 +363,7 @@ ALTER TABLE public.mjesta ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 
 --
--- TOC entry 372 (class 1259 OID 20607)
+-- TOC entry 374 (class 1259 OID 20607)
 -- Name: modeli; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -369,7 +382,7 @@ CREATE TABLE public.modeli (
 ALTER TABLE public.modeli OWNER TO postgres;
 
 --
--- TOC entry 371 (class 1259 OID 20606)
+-- TOC entry 373 (class 1259 OID 20606)
 -- Name: modeli_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -384,7 +397,7 @@ ALTER TABLE public.modeli ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 
 --
--- TOC entry 362 (class 1259 OID 20577)
+-- TOC entry 364 (class 1259 OID 20577)
 -- Name: proizvodjaci; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -397,7 +410,7 @@ CREATE TABLE public.proizvodjaci (
 ALTER TABLE public.proizvodjaci OWNER TO postgres;
 
 --
--- TOC entry 361 (class 1259 OID 20576)
+-- TOC entry 363 (class 1259 OID 20576)
 -- Name: proizvodjaci_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -412,7 +425,7 @@ ALTER TABLE public.proizvodjaci ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY
 
 
 --
--- TOC entry 380 (class 1259 OID 20694)
+-- TOC entry 382 (class 1259 OID 20694)
 -- Name: registracije; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -429,7 +442,7 @@ CREATE TABLE public.registracije (
 ALTER TABLE public.registracije OWNER TO postgres;
 
 --
--- TOC entry 379 (class 1259 OID 20693)
+-- TOC entry 381 (class 1259 OID 20693)
 -- Name: registracije_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -444,7 +457,7 @@ ALTER TABLE public.registracije ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY
 
 
 --
--- TOC entry 382 (class 1259 OID 20705)
+-- TOC entry 384 (class 1259 OID 20705)
 -- Name: servisne_intervencije; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -460,14 +473,17 @@ CREATE TABLE public.servisne_intervencije (
     zaposlenik_id integer,
     hitnost text,
     status_prijave text DEFAULT 'novo'::text,
-    attachment_url text
+    attachment_url text,
+    obrisano_u timestamp with time zone,
+    obrisao_zaposlenik_id integer,
+    razlog_brisanja text
 );
 
 
 ALTER TABLE public.servisne_intervencije OWNER TO postgres;
 
 --
--- TOC entry 381 (class 1259 OID 20704)
+-- TOC entry 383 (class 1259 OID 20704)
 -- Name: servisne_intervencije_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -482,7 +498,7 @@ ALTER TABLE public.servisne_intervencije ALTER COLUMN id ADD GENERATED ALWAYS AS
 
 
 --
--- TOC entry 368 (class 1259 OID 20595)
+-- TOC entry 370 (class 1259 OID 20595)
 -- Name: statusi_vozila; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -495,7 +511,7 @@ CREATE TABLE public.statusi_vozila (
 ALTER TABLE public.statusi_vozila OWNER TO postgres;
 
 --
--- TOC entry 367 (class 1259 OID 20594)
+-- TOC entry 369 (class 1259 OID 20594)
 -- Name: statusi_vozila_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -510,7 +526,7 @@ ALTER TABLE public.statusi_vozila ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTI
 
 
 --
--- TOC entry 366 (class 1259 OID 20589)
+-- TOC entry 368 (class 1259 OID 20589)
 -- Name: tipovi_goriva; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -523,7 +539,7 @@ CREATE TABLE public.tipovi_goriva (
 ALTER TABLE public.tipovi_goriva OWNER TO postgres;
 
 --
--- TOC entry 365 (class 1259 OID 20588)
+-- TOC entry 367 (class 1259 OID 20588)
 -- Name: tipovi_goriva_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -538,7 +554,7 @@ ALTER TABLE public.tipovi_goriva ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTIT
 
 
 --
--- TOC entry 360 (class 1259 OID 20571)
+-- TOC entry 362 (class 1259 OID 20571)
 -- Name: uloge; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -551,7 +567,7 @@ CREATE TABLE public.uloge (
 ALTER TABLE public.uloge OWNER TO postgres;
 
 --
--- TOC entry 359 (class 1259 OID 20570)
+-- TOC entry 361 (class 1259 OID 20570)
 -- Name: uloge_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -566,7 +582,7 @@ ALTER TABLE public.uloge ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 
 --
--- TOC entry 374 (class 1259 OID 20630)
+-- TOC entry 376 (class 1259 OID 20630)
 -- Name: vozila; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -585,14 +601,16 @@ CREATE TABLE public.vozila (
     zadnji_mali_servis_datum date,
     zadnji_veliki_servis_datum date,
     is_aktivan boolean DEFAULT true,
-    razlog_deaktivacije text
+    razlog_deaktivacije text,
+    obrisano_u timestamp with time zone,
+    obrisao_zaposlenik_id integer
 );
 
 
 ALTER TABLE public.vozila OWNER TO postgres;
 
 --
--- TOC entry 373 (class 1259 OID 20629)
+-- TOC entry 375 (class 1259 OID 20629)
 -- Name: vozila_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -607,7 +625,7 @@ ALTER TABLE public.vozila ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 
 --
--- TOC entry 378 (class 1259 OID 20676)
+-- TOC entry 380 (class 1259 OID 20676)
 -- Name: zaduzenja; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -626,7 +644,7 @@ CREATE TABLE public.zaduzenja (
 ALTER TABLE public.zaduzenja OWNER TO postgres;
 
 --
--- TOC entry 377 (class 1259 OID 20675)
+-- TOC entry 379 (class 1259 OID 20675)
 -- Name: zaduzenja_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -641,7 +659,7 @@ ALTER TABLE public.zaduzenja ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 
 --
--- TOC entry 376 (class 1259 OID 20656)
+-- TOC entry 378 (class 1259 OID 20656)
 -- Name: zaposlenici; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -664,7 +682,7 @@ CREATE TABLE public.zaposlenici (
 ALTER TABLE public.zaposlenici OWNER TO postgres;
 
 --
--- TOC entry 375 (class 1259 OID 20655)
+-- TOC entry 377 (class 1259 OID 20655)
 -- Name: zaposlenici_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -679,7 +697,7 @@ ALTER TABLE public.zaposlenici ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY 
 
 
 --
--- TOC entry 356 (class 1259 OID 20549)
+-- TOC entry 358 (class 1259 OID 20549)
 -- Name: zupanije; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -693,7 +711,7 @@ CREATE TABLE public.zupanije (
 ALTER TABLE public.zupanije OWNER TO postgres;
 
 --
--- TOC entry 355 (class 1259 OID 20548)
+-- TOC entry 357 (class 1259 OID 20548)
 -- Name: zupanije_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
@@ -708,1758 +726,1761 @@ ALTER TABLE public.zupanije ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 
 --
--- TOC entry 4030 (class 0 OID 23325)
--- Dependencies: 388
+-- TOC entry 4048 (class 0 OID 23325)
+-- Dependencies: 390
 -- Data for Name: app_events; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
 COPY public.app_events (id, tip_dogadjaja, izvorna_tablica, operacija, id_zapisa, kreirano_u) FROM stdin;
-2	unos_goriva	evidencija_goriva	INSERT	37	2026-03-30 16:46:30.887019+00
-1342	unos_goriva	evidencija_goriva	UPDATE	49	2026-04-13 14:06:47.431729+00
-1343	unos_goriva	evidencija_goriva	UPDATE	50	2026-04-13 14:06:47.431729+00
-1344	unos_goriva	evidencija_goriva	UPDATE	51	2026-04-13 14:06:47.431729+00
-1345	unos_goriva	evidencija_goriva	UPDATE	52	2026-04-13 14:06:47.431729+00
-1346	unos_goriva	evidencija_goriva	UPDATE	53	2026-04-13 14:06:47.431729+00
-8	novo_zaduzenje	zaduzenja	INSERT	71	2026-03-31 08:29:15.802293+00
-9	razduzenje	zaduzenja	UPDATE	71	2026-03-31 08:29:20.744182+00
-10	novo_zaduzenje	zaduzenja	INSERT	72	2026-03-31 08:34:42.682662+00
-1347	unos_goriva	evidencija_goriva	UPDATE	54	2026-04-13 14:06:47.431729+00
-1348	unos_goriva	evidencija_goriva	UPDATE	55	2026-04-13 14:06:47.431729+00
-1349	unos_goriva	evidencija_goriva	UPDATE	56	2026-04-13 14:06:47.431729+00
-1350	unos_goriva	evidencija_goriva	UPDATE	57	2026-04-13 14:06:47.431729+00
-1351	unos_goriva	evidencija_goriva	UPDATE	58	2026-04-13 14:06:47.431729+00
-1352	unos_goriva	evidencija_goriva	UPDATE	59	2026-04-13 14:06:47.431729+00
-1353	unos_goriva	evidencija_goriva	UPDATE	60	2026-04-13 14:06:47.431729+00
-1354	unos_goriva	evidencija_goriva	UPDATE	61	2026-04-13 14:06:47.431729+00
-19	razduzenje	zaduzenja	UPDATE	36	2026-03-31 19:59:47.298029+00
-20	novo_zaduzenje	zaduzenja	INSERT	73	2026-03-31 19:59:55.398317+00
-21	razduzenje	zaduzenja	UPDATE	73	2026-03-31 19:59:58.692445+00
-1355	unos_goriva	evidencija_goriva	UPDATE	62	2026-04-13 14:06:47.431729+00
-1356	unos_goriva	evidencija_goriva	UPDATE	63	2026-04-13 14:06:47.431729+00
-1357	unos_goriva	evidencija_goriva	UPDATE	64	2026-04-13 14:06:47.431729+00
-1358	unos_goriva	evidencija_goriva	UPDATE	65	2026-04-13 14:06:47.431729+00
-1359	unos_goriva	evidencija_goriva	UPDATE	66	2026-04-13 14:06:47.431729+00
-27	novo_zaduzenje	zaduzenja	INSERT	74	2026-03-31 20:30:45.416348+00
-28	razduzenje	zaduzenja	UPDATE	74	2026-03-31 20:30:47.365408+00
-29	novo_zaduzenje	zaduzenja	INSERT	75	2026-03-31 20:32:12.046908+00
-30	razduzenje	zaduzenja	UPDATE	75	2026-03-31 20:32:13.30894+00
-31	novo_zaduzenje	zaduzenja	INSERT	76	2026-03-31 20:34:39.509521+00
-32	razduzenje	zaduzenja	UPDATE	76	2026-03-31 20:34:41.368602+00
-1360	unos_goriva	evidencija_goriva	UPDATE	67	2026-04-13 14:06:47.431729+00
-1361	unos_goriva	evidencija_goriva	UPDATE	68	2026-04-13 14:06:47.431729+00
-35	novo_zaduzenje	zaduzenja	INSERT	77	2026-03-31 20:38:13.72881+00
-36	razduzenje	zaduzenja	UPDATE	77	2026-03-31 20:38:15.695163+00
-37	novo_zaduzenje	zaduzenja	INSERT	78	2026-03-31 20:38:28.192893+00
-38	razduzenje	zaduzenja	UPDATE	78	2026-03-31 20:38:29.817162+00
-39	novo_zaduzenje	zaduzenja	INSERT	79	2026-03-31 20:41:36.900295+00
-40	razduzenje	zaduzenja	UPDATE	79	2026-03-31 20:41:40.565724+00
-41	novo_zaduzenje	zaduzenja	INSERT	80	2026-03-31 20:42:07.766656+00
-42	razduzenje	zaduzenja	UPDATE	80	2026-03-31 20:42:10.236727+00
-43	novo_zaduzenje	zaduzenja	INSERT	81	2026-03-31 20:42:40.165215+00
-44	razduzenje	zaduzenja	UPDATE	81	2026-03-31 20:42:42.790907+00
-45	novo_zaduzenje	zaduzenja	INSERT	82	2026-03-31 20:46:08.662103+00
-46	razduzenje	zaduzenja	UPDATE	82	2026-03-31 20:46:10.178067+00
-47	novo_zaduzenje	zaduzenja	INSERT	83	2026-03-31 20:46:52.040532+00
-48	razduzenje	zaduzenja	UPDATE	83	2026-03-31 20:47:12.014325+00
-49	novo_zaduzenje	zaduzenja	INSERT	84	2026-03-31 20:49:09.89056+00
-50	razduzenje	zaduzenja	UPDATE	84	2026-03-31 20:49:12.150757+00
-51	novo_zaduzenje	zaduzenja	INSERT	85	2026-03-31 20:51:36.348132+00
-52	razduzenje	zaduzenja	UPDATE	85	2026-03-31 20:51:38.357445+00
-53	novo_zaduzenje	zaduzenja	INSERT	86	2026-03-31 20:55:20.900208+00
-54	razduzenje	zaduzenja	UPDATE	86	2026-03-31 20:55:22.824678+00
-55	novo_zaduzenje	zaduzenja	INSERT	87	2026-03-31 20:55:58.973518+00
-56	unos_goriva	evidencija_goriva	INSERT	38	2026-03-31 20:56:07.273969+00
-57	razduzenje	zaduzenja	UPDATE	87	2026-03-31 20:56:10.075753+00
-58	novo_zaduzenje	zaduzenja	INSERT	88	2026-03-31 21:05:30.449787+00
-59	razduzenje	zaduzenja	UPDATE	88	2026-03-31 21:05:33.59895+00
-60	novo_zaduzenje	zaduzenja	INSERT	89	2026-03-31 21:06:10.862316+00
-1362	unos_goriva	evidencija_goriva	UPDATE	69	2026-04-13 14:06:47.431729+00
-1363	unos_goriva	evidencija_goriva	UPDATE	70	2026-04-13 14:06:47.431729+00
-1364	unos_goriva	evidencija_goriva	UPDATE	71	2026-04-13 14:06:47.431729+00
-64	unos_goriva	evidencija_goriva	INSERT	39	2026-03-31 22:36:49.097974+00
-65	unos_goriva	evidencija_goriva	INSERT	40	2026-03-31 22:37:15.506671+00
-66	unos_goriva	evidencija_goriva	INSERT	41	2026-03-31 22:37:29.058185+00
-67	razduzenje	zaduzenja	UPDATE	50	2026-03-31 22:37:31.081738+00
-68	novo_zaduzenje	zaduzenja	INSERT	90	2026-03-31 22:37:40.028283+00
-69	razduzenje	zaduzenja	UPDATE	90	2026-03-31 22:37:44.906056+00
-70	novo_zaduzenje	zaduzenja	INSERT	91	2026-03-31 22:38:03.306329+00
-71	unos_goriva	evidencija_goriva	INSERT	42	2026-03-31 22:38:12.451282+00
-72	razduzenje	zaduzenja	UPDATE	91	2026-03-31 22:38:14.504382+00
-1365	unos_goriva	evidencija_goriva	UPDATE	72	2026-04-13 14:06:47.431729+00
-1366	unos_goriva	evidencija_goriva	UPDATE	73	2026-04-13 14:06:47.431729+00
-1367	unos_goriva	evidencija_goriva	UPDATE	74	2026-04-13 14:06:47.431729+00
-1368	unos_goriva	evidencija_goriva	UPDATE	75	2026-04-13 14:06:47.431729+00
-1369	unos_goriva	evidencija_goriva	UPDATE	76	2026-04-13 14:06:47.431729+00
-1370	unos_goriva	evidencija_goriva	UPDATE	77	2026-04-13 14:06:47.431729+00
-79	novo_zaduzenje	zaduzenja	INSERT	92	2026-03-31 23:55:21.694158+00
-3	nova_prijava_kvara	servisne_intervencije	INSERT	29	2026-03-30 16:46:59.248713+00
-4	status_promjena	servisne_intervencije	UPDATE	8	2026-03-30 18:36:55.841873+00
-5	status_promjena	servisne_intervencije	UPDATE	8	2026-03-30 18:36:59.910341+00
-6	status_promjena	servisne_intervencije	UPDATE	8	2026-03-30 18:37:01.7936+00
-7	status_promjena	servisne_intervencije	UPDATE	8	2026-03-30 18:37:03.274016+00
-11	status_promjena	servisne_intervencije	UPDATE	25	2026-03-31 16:09:59.17271+00
-12	status_promjena	servisne_intervencije	UPDATE	27	2026-03-31 16:10:54.248799+00
-13	status_promjena	servisne_intervencije	UPDATE	21	2026-03-31 18:10:32.499047+00
-14	status_promjena	servisne_intervencije	UPDATE	26	2026-03-31 18:12:46.877281+00
-15	status_promjena	servisne_intervencije	UPDATE	26	2026-03-31 18:12:55.519287+00
-16	status_promjena	servisne_intervencije	UPDATE	20	2026-03-31 18:47:07.020521+00
-17	status_promjena	servisne_intervencije	UPDATE	19	2026-03-31 18:57:05.920081+00
-1371	unos_goriva	evidencija_goriva	UPDATE	78	2026-04-13 14:06:47.431729+00
-18	status_promjena	servisne_intervencije	UPDATE	29	2026-03-31 18:57:12.026072+00
-22	nova_prijava_kvara	servisne_intervencije	INSERT	30	2026-03-31 20:27:57.013647+00
-23	nova_prijava_kvara	servisne_intervencije	INSERT	31	2026-03-31 20:27:57.191524+00
-24	status_promjena	servisne_intervencije	UPDATE	31	2026-03-31 20:29:10.284293+00
-25	status_promjena	servisne_intervencije	UPDATE	30	2026-03-31 20:29:19.796754+00
-26	status_promjena	servisne_intervencije	UPDATE	29	2026-03-31 20:29:42.869824+00
-33	status_promjena	servisne_intervencije	UPDATE	31	2026-03-31 20:35:47.357379+00
-34	status_promjena	servisne_intervencije	UPDATE	31	2026-03-31 20:36:34.573773+00
-61	nova_prijava_kvara	servisne_intervencije	INSERT	32	2026-03-31 22:34:16.694471+00
-62	status_promjena	servisne_intervencije	UPDATE	32	2026-03-31 22:34:21.301477+00
-63	status_promjena	servisne_intervencije	UPDATE	32	2026-03-31 22:34:27.3248+00
-73	nova_prijava_kvara	servisne_intervencije	INSERT	33	2026-03-31 22:38:14.955551+00
-74	status_promjena	servisne_intervencije	UPDATE	33	2026-03-31 22:41:45.717058+00
-75	status_promjena	servisne_intervencije	UPDATE	33	2026-03-31 22:42:04.257833+00
-76	status_promjena	servisne_intervencije	UPDATE	24	2026-03-31 22:49:53.530043+00
-77	status_promjena	servisne_intervencije	UPDATE	23	2026-03-31 22:49:54.480866+00
-78	status_promjena	servisne_intervencije	UPDATE	28	2026-03-31 22:49:55.14962+00
-81	nova_prijava_kvara	servisne_intervencije	INSERT	35	2026-03-31 23:58:55.826446+00
-82	razduzenje	zaduzenja	UPDATE	92	2026-03-31 23:59:15.126711+00
-83	novo_zaduzenje	zaduzenja	INSERT	93	2026-03-31 23:59:48.919738+00
-84	razduzenje	zaduzenja	UPDATE	93	2026-03-31 23:59:52.694116+00
-85	novo_zaduzenje	zaduzenja	INSERT	94	2026-03-31 23:59:58.611811+00
-86	unos_goriva	evidencija_goriva	INSERT	43	2026-04-01 00:00:11.742702+00
-87	razduzenje	zaduzenja	UPDATE	94	2026-04-01 00:00:16.045048+00
-88	novo_zaduzenje	zaduzenja	INSERT	95	2026-04-01 00:00:21.689963+00
-89	nova_prijava_kvara	servisne_intervencije	INSERT	36	2026-04-01 00:00:47.82751+00
-90	razduzenje	zaduzenja	UPDATE	95	2026-04-01 00:00:58.144414+00
-91	status_promjena	servisne_intervencije	UPDATE	36	2026-04-01 00:02:29.23087+00
-92	status_promjena	servisne_intervencije	UPDATE	35	2026-04-01 00:02:36.443024+00
-93	status_promjena	servisne_intervencije	UPDATE	33	2026-04-01 00:02:45.028076+00
-94	status_promjena	servisne_intervencije	UPDATE	32	2026-04-01 00:03:27.364116+00
-95	status_promjena	servisne_intervencije	UPDATE	30	2026-04-01 00:03:35.522293+00
-96	status_promjena	servisne_intervencije	UPDATE	29	2026-04-01 00:03:38.078383+00
-97	status_promjena	servisne_intervencije	UPDATE	25	2026-04-01 00:03:41.133387+00
-98	status_promjena	servisne_intervencije	UPDATE	24	2026-04-01 00:03:44.761295+00
-99	status_promjena	servisne_intervencije	UPDATE	23	2026-04-01 00:03:47.77594+00
-100	status_promjena	servisne_intervencije	UPDATE	22	2026-04-01 00:03:51.47304+00
-101	status_promjena	servisne_intervencije	UPDATE	21	2026-04-01 00:03:55.80766+00
-102	status_promjena	servisne_intervencije	UPDATE	20	2026-04-01 00:03:59.040104+00
-103	status_promjena	servisne_intervencije	UPDATE	19	2026-04-01 00:04:01.95019+00
-104	status_promjena	servisne_intervencije	UPDATE	18	2026-04-01 00:04:17.967638+00
-105	status_promjena	servisne_intervencije	UPDATE	17	2026-04-01 00:04:25.213305+00
-106	status_promjena	servisne_intervencije	UPDATE	27	2026-04-01 00:04:35.509533+00
-107	status_promjena	servisne_intervencije	UPDATE	15	2026-04-01 00:04:49.772868+00
-108	status_promjena	servisne_intervencije	UPDATE	14	2026-04-01 00:04:52.992343+00
-109	status_promjena	servisne_intervencije	UPDATE	13	2026-04-01 00:04:58.083492+00
-110	status_promjena	servisne_intervencije	UPDATE	12	2026-04-01 00:05:01.422682+00
-111	status_promjena	servisne_intervencije	UPDATE	11	2026-04-01 00:05:06.287618+00
-112	status_promjena	servisne_intervencije	UPDATE	10	2026-04-01 00:05:12.229956+00
-113	status_promjena	servisne_intervencije	UPDATE	9	2026-04-01 00:05:17.98711+00
-114	status_promjena	servisne_intervencije	UPDATE	8	2026-04-01 00:05:23.120367+00
-115	status_promjena	servisne_intervencije	UPDATE	35	2026-04-01 14:15:54.469009+00
-116	status_promjena	servisne_intervencije	UPDATE	35	2026-04-01 15:16:47.158021+00
-117	status_promjena	servisne_intervencije	UPDATE	35	2026-04-01 15:19:10.342906+00
-118	status_promjena	servisne_intervencije	UPDATE	35	2026-04-01 15:19:12.381838+00
-119	status_promjena	servisne_intervencije	UPDATE	2	2026-04-11 13:41:17.958376+00
-120	status_promjena	servisne_intervencije	UPDATE	2	2026-04-11 14:29:57.187771+00
-121	nova_prijava_kvara	servisne_intervencije	INSERT	37	2026-04-11 14:30:29.273664+00
-122	nova_prijava_kvara	servisne_intervencije	INSERT	38	2026-04-11 14:33:43.577723+00
-123	razduzenje	zaduzenja	UPDATE	89	2026-04-11 14:54:49.179999+00
-124	novo_zaduzenje	zaduzenja	INSERT	96	2026-04-11 14:55:11.564259+00
-125	unos_goriva	evidencija_goriva	INSERT	44	2026-04-11 16:06:19.683059+00
-126	unos_goriva	evidencija_goriva	INSERT	45	2026-04-11 16:12:35.266712+00
-127	status_promjena	servisne_intervencije	UPDATE	4	2026-04-11 17:33:05.097891+00
-128	status_promjena	servisne_intervencije	UPDATE	1	2026-04-11 17:33:05.476216+00
-129	status_promjena	servisne_intervencije	UPDATE	4	2026-04-11 19:41:12.188102+00
-130	nova_prijava_kvara	servisne_intervencije	INSERT	39	2026-04-11 19:42:54.453314+00
-131	status_promjena	servisne_intervencije	UPDATE	39	2026-04-11 19:43:09.313096+00
-132	nova_prijava_kvara	servisne_intervencije	INSERT	40	2026-04-12 09:50:07.28492+00
-133	status_promjena	servisne_intervencije	UPDATE	40	2026-04-12 09:52:03.626884+00
-134	status_promjena	servisne_intervencije	UPDATE	1	2026-04-12 09:52:24.278493+00
-135	unos_goriva	evidencija_goriva	INSERT	46	2026-04-12 10:10:54.803407+00
-136	razduzenje	zaduzenja	UPDATE	96	2026-04-12 10:16:23.414383+00
-137	novo_zaduzenje	zaduzenja	INSERT	97	2026-04-12 10:27:20.134005+00
-138	unos_goriva	evidencija_goriva	INSERT	47	2026-04-12 10:28:10.329259+00
-139	unos_goriva	evidencija_goriva	INSERT	48	2026-04-12 10:29:55.197057+00
-140	razduzenje	zaduzenja	UPDATE	34	2026-04-12 10:40:30.886837+00
-141	status_promjena	servisne_intervencije	UPDATE	2	2026-04-12 10:43:05.740718+00
-142	novo_zaduzenje	zaduzenja	INSERT	98	2026-04-13 13:43:42.208896+00
-143	novo_zaduzenje	zaduzenja	INSERT	99	2026-04-13 13:43:42.208896+00
-144	novo_zaduzenje	zaduzenja	INSERT	100	2026-04-13 13:43:42.208896+00
-145	novo_zaduzenje	zaduzenja	INSERT	101	2026-04-13 13:43:42.208896+00
-146	novo_zaduzenje	zaduzenja	INSERT	102	2026-04-13 13:43:42.208896+00
-147	novo_zaduzenje	zaduzenja	INSERT	103	2026-04-13 13:43:42.208896+00
-148	novo_zaduzenje	zaduzenja	INSERT	104	2026-04-13 13:43:42.208896+00
-149	novo_zaduzenje	zaduzenja	INSERT	105	2026-04-13 13:43:42.208896+00
-150	novo_zaduzenje	zaduzenja	INSERT	106	2026-04-13 13:43:42.208896+00
-151	novo_zaduzenje	zaduzenja	INSERT	107	2026-04-13 13:43:42.208896+00
-152	novo_zaduzenje	zaduzenja	INSERT	108	2026-04-13 13:43:42.208896+00
-153	novo_zaduzenje	zaduzenja	INSERT	109	2026-04-13 13:43:42.208896+00
-154	novo_zaduzenje	zaduzenja	INSERT	110	2026-04-13 13:43:42.208896+00
-155	novo_zaduzenje	zaduzenja	INSERT	111	2026-04-13 13:43:42.208896+00
-156	novo_zaduzenje	zaduzenja	INSERT	112	2026-04-13 13:43:42.208896+00
-157	novo_zaduzenje	zaduzenja	INSERT	113	2026-04-13 13:43:42.208896+00
-158	novo_zaduzenje	zaduzenja	INSERT	114	2026-04-13 13:43:42.208896+00
-159	novo_zaduzenje	zaduzenja	INSERT	115	2026-04-13 13:43:42.208896+00
-160	novo_zaduzenje	zaduzenja	INSERT	116	2026-04-13 13:43:42.208896+00
-161	novo_zaduzenje	zaduzenja	INSERT	117	2026-04-13 13:43:42.208896+00
-162	novo_zaduzenje	zaduzenja	INSERT	118	2026-04-13 13:43:42.208896+00
-163	novo_zaduzenje	zaduzenja	INSERT	119	2026-04-13 13:43:42.208896+00
-164	novo_zaduzenje	zaduzenja	INSERT	120	2026-04-13 13:43:42.208896+00
-165	novo_zaduzenje	zaduzenja	INSERT	121	2026-04-13 13:43:42.208896+00
-166	novo_zaduzenje	zaduzenja	INSERT	122	2026-04-13 13:43:42.208896+00
-167	novo_zaduzenje	zaduzenja	INSERT	123	2026-04-13 13:43:42.208896+00
-168	novo_zaduzenje	zaduzenja	INSERT	124	2026-04-13 13:43:42.208896+00
-169	novo_zaduzenje	zaduzenja	INSERT	125	2026-04-13 13:43:42.208896+00
-170	novo_zaduzenje	zaduzenja	INSERT	126	2026-04-13 13:43:42.208896+00
-171	novo_zaduzenje	zaduzenja	INSERT	127	2026-04-13 13:43:42.208896+00
-172	novo_zaduzenje	zaduzenja	INSERT	128	2026-04-13 13:43:42.208896+00
-173	novo_zaduzenje	zaduzenja	INSERT	129	2026-04-13 13:43:42.208896+00
-174	novo_zaduzenje	zaduzenja	INSERT	130	2026-04-13 13:43:42.208896+00
-175	novo_zaduzenje	zaduzenja	INSERT	131	2026-04-13 13:43:42.208896+00
-176	novo_zaduzenje	zaduzenja	INSERT	132	2026-04-13 13:43:42.208896+00
-177	novo_zaduzenje	zaduzenja	INSERT	133	2026-04-13 13:43:42.208896+00
-178	novo_zaduzenje	zaduzenja	INSERT	134	2026-04-13 13:43:42.208896+00
-179	novo_zaduzenje	zaduzenja	INSERT	135	2026-04-13 13:43:42.208896+00
-180	novo_zaduzenje	zaduzenja	INSERT	136	2026-04-13 13:43:42.208896+00
-181	novo_zaduzenje	zaduzenja	INSERT	137	2026-04-13 13:43:42.208896+00
-182	novo_zaduzenje	zaduzenja	INSERT	138	2026-04-13 13:43:42.208896+00
-183	novo_zaduzenje	zaduzenja	INSERT	139	2026-04-13 13:43:42.208896+00
-184	novo_zaduzenje	zaduzenja	INSERT	140	2026-04-13 13:43:42.208896+00
-185	novo_zaduzenje	zaduzenja	INSERT	141	2026-04-13 13:43:42.208896+00
-186	novo_zaduzenje	zaduzenja	INSERT	142	2026-04-13 13:43:42.208896+00
-187	novo_zaduzenje	zaduzenja	INSERT	143	2026-04-13 13:43:42.208896+00
-188	novo_zaduzenje	zaduzenja	INSERT	144	2026-04-13 13:43:42.208896+00
-189	novo_zaduzenje	zaduzenja	INSERT	145	2026-04-13 13:43:42.208896+00
-190	novo_zaduzenje	zaduzenja	INSERT	146	2026-04-13 13:43:42.208896+00
-191	novo_zaduzenje	zaduzenja	INSERT	147	2026-04-13 13:43:42.208896+00
-192	novo_zaduzenje	zaduzenja	INSERT	148	2026-04-13 13:43:42.208896+00
-193	novo_zaduzenje	zaduzenja	INSERT	149	2026-04-13 13:43:42.208896+00
-194	novo_zaduzenje	zaduzenja	INSERT	150	2026-04-13 13:43:42.208896+00
-195	novo_zaduzenje	zaduzenja	INSERT	151	2026-04-13 13:43:42.208896+00
-196	novo_zaduzenje	zaduzenja	INSERT	152	2026-04-13 13:43:42.208896+00
-197	novo_zaduzenje	zaduzenja	INSERT	153	2026-04-13 13:43:42.208896+00
-198	novo_zaduzenje	zaduzenja	INSERT	154	2026-04-13 13:43:42.208896+00
-199	novo_zaduzenje	zaduzenja	INSERT	155	2026-04-13 13:43:42.208896+00
-200	novo_zaduzenje	zaduzenja	INSERT	156	2026-04-13 13:43:42.208896+00
-201	novo_zaduzenje	zaduzenja	INSERT	157	2026-04-13 13:43:42.208896+00
-202	novo_zaduzenje	zaduzenja	INSERT	158	2026-04-13 13:43:42.208896+00
-203	novo_zaduzenje	zaduzenja	INSERT	159	2026-04-13 13:43:42.208896+00
-204	novo_zaduzenje	zaduzenja	INSERT	160	2026-04-13 13:43:42.208896+00
-205	novo_zaduzenje	zaduzenja	INSERT	161	2026-04-13 13:43:42.208896+00
-206	novo_zaduzenje	zaduzenja	INSERT	162	2026-04-13 13:43:42.208896+00
-207	novo_zaduzenje	zaduzenja	INSERT	163	2026-04-13 13:43:42.208896+00
-208	novo_zaduzenje	zaduzenja	INSERT	164	2026-04-13 13:43:42.208896+00
-209	novo_zaduzenje	zaduzenja	INSERT	165	2026-04-13 13:43:42.208896+00
-210	novo_zaduzenje	zaduzenja	INSERT	166	2026-04-13 13:43:42.208896+00
-211	novo_zaduzenje	zaduzenja	INSERT	167	2026-04-13 13:43:42.208896+00
-212	novo_zaduzenje	zaduzenja	INSERT	168	2026-04-13 13:43:42.208896+00
-213	novo_zaduzenje	zaduzenja	INSERT	169	2026-04-13 13:43:42.208896+00
-214	novo_zaduzenje	zaduzenja	INSERT	170	2026-04-13 13:43:42.208896+00
-215	novo_zaduzenje	zaduzenja	INSERT	171	2026-04-13 13:43:42.208896+00
-216	novo_zaduzenje	zaduzenja	INSERT	172	2026-04-13 13:43:42.208896+00
-217	novo_zaduzenje	zaduzenja	INSERT	173	2026-04-13 13:43:42.208896+00
-218	novo_zaduzenje	zaduzenja	INSERT	174	2026-04-13 13:43:42.208896+00
-219	novo_zaduzenje	zaduzenja	INSERT	175	2026-04-13 13:43:42.208896+00
-220	novo_zaduzenje	zaduzenja	INSERT	176	2026-04-13 13:43:42.208896+00
-221	novo_zaduzenje	zaduzenja	INSERT	177	2026-04-13 13:43:42.208896+00
-222	novo_zaduzenje	zaduzenja	INSERT	178	2026-04-13 13:43:42.208896+00
-223	novo_zaduzenje	zaduzenja	INSERT	179	2026-04-13 13:43:42.208896+00
-224	novo_zaduzenje	zaduzenja	INSERT	180	2026-04-13 13:43:42.208896+00
-225	novo_zaduzenje	zaduzenja	INSERT	181	2026-04-13 13:43:42.208896+00
-226	novo_zaduzenje	zaduzenja	INSERT	182	2026-04-13 13:43:42.208896+00
-227	novo_zaduzenje	zaduzenja	INSERT	183	2026-04-13 13:43:42.208896+00
-228	novo_zaduzenje	zaduzenja	INSERT	184	2026-04-13 13:43:42.208896+00
-229	novo_zaduzenje	zaduzenja	INSERT	185	2026-04-13 13:43:42.208896+00
-230	novo_zaduzenje	zaduzenja	INSERT	186	2026-04-13 13:43:42.208896+00
-231	novo_zaduzenje	zaduzenja	INSERT	187	2026-04-13 13:43:42.208896+00
-232	novo_zaduzenje	zaduzenja	INSERT	188	2026-04-13 13:43:42.208896+00
-233	novo_zaduzenje	zaduzenja	INSERT	189	2026-04-13 13:43:42.208896+00
-234	novo_zaduzenje	zaduzenja	INSERT	190	2026-04-13 13:43:42.208896+00
-235	novo_zaduzenje	zaduzenja	INSERT	191	2026-04-13 13:43:42.208896+00
-236	novo_zaduzenje	zaduzenja	INSERT	192	2026-04-13 13:43:42.208896+00
-237	novo_zaduzenje	zaduzenja	INSERT	193	2026-04-13 13:43:42.208896+00
-238	novo_zaduzenje	zaduzenja	INSERT	194	2026-04-13 13:43:42.208896+00
-239	novo_zaduzenje	zaduzenja	INSERT	195	2026-04-13 13:43:42.208896+00
-240	novo_zaduzenje	zaduzenja	INSERT	196	2026-04-13 13:43:42.208896+00
-241	novo_zaduzenje	zaduzenja	INSERT	197	2026-04-13 13:43:42.208896+00
-242	novo_zaduzenje	zaduzenja	INSERT	198	2026-04-13 13:43:42.208896+00
-243	novo_zaduzenje	zaduzenja	INSERT	199	2026-04-13 13:43:42.208896+00
-244	novo_zaduzenje	zaduzenja	INSERT	200	2026-04-13 13:43:42.208896+00
-245	novo_zaduzenje	zaduzenja	INSERT	201	2026-04-13 13:43:42.208896+00
-246	novo_zaduzenje	zaduzenja	INSERT	202	2026-04-13 13:43:42.208896+00
-247	novo_zaduzenje	zaduzenja	INSERT	203	2026-04-13 13:43:42.208896+00
-248	novo_zaduzenje	zaduzenja	INSERT	204	2026-04-13 13:43:42.208896+00
-249	novo_zaduzenje	zaduzenja	INSERT	205	2026-04-13 13:43:42.208896+00
-250	novo_zaduzenje	zaduzenja	INSERT	206	2026-04-13 13:43:42.208896+00
-251	novo_zaduzenje	zaduzenja	INSERT	207	2026-04-13 13:43:42.208896+00
-252	novo_zaduzenje	zaduzenja	INSERT	208	2026-04-13 13:43:42.208896+00
-253	novo_zaduzenje	zaduzenja	INSERT	209	2026-04-13 13:43:42.208896+00
-254	novo_zaduzenje	zaduzenja	INSERT	210	2026-04-13 13:43:42.208896+00
-255	novo_zaduzenje	zaduzenja	INSERT	211	2026-04-13 13:43:42.208896+00
-256	novo_zaduzenje	zaduzenja	INSERT	212	2026-04-13 13:43:42.208896+00
-257	novo_zaduzenje	zaduzenja	INSERT	213	2026-04-13 13:43:42.208896+00
-258	novo_zaduzenje	zaduzenja	INSERT	214	2026-04-13 13:43:42.208896+00
-259	novo_zaduzenje	zaduzenja	INSERT	215	2026-04-13 13:43:42.208896+00
-260	novo_zaduzenje	zaduzenja	INSERT	216	2026-04-13 13:43:42.208896+00
-261	novo_zaduzenje	zaduzenja	INSERT	217	2026-04-13 13:43:42.208896+00
-262	novo_zaduzenje	zaduzenja	INSERT	218	2026-04-13 13:43:42.208896+00
-263	novo_zaduzenje	zaduzenja	INSERT	219	2026-04-13 13:43:42.208896+00
-264	novo_zaduzenje	zaduzenja	INSERT	220	2026-04-13 13:43:42.208896+00
-265	novo_zaduzenje	zaduzenja	INSERT	221	2026-04-13 13:43:42.208896+00
-266	novo_zaduzenje	zaduzenja	INSERT	222	2026-04-13 13:43:42.208896+00
-267	novo_zaduzenje	zaduzenja	INSERT	223	2026-04-13 13:43:42.208896+00
-268	novo_zaduzenje	zaduzenja	INSERT	224	2026-04-13 13:43:42.208896+00
-269	novo_zaduzenje	zaduzenja	INSERT	225	2026-04-13 13:43:42.208896+00
-270	novo_zaduzenje	zaduzenja	INSERT	226	2026-04-13 13:43:42.208896+00
-271	novo_zaduzenje	zaduzenja	INSERT	227	2026-04-13 13:43:42.208896+00
-272	novo_zaduzenje	zaduzenja	INSERT	228	2026-04-13 13:43:42.208896+00
-273	novo_zaduzenje	zaduzenja	INSERT	229	2026-04-13 13:43:42.208896+00
-274	novo_zaduzenje	zaduzenja	INSERT	230	2026-04-13 13:43:42.208896+00
-275	novo_zaduzenje	zaduzenja	INSERT	231	2026-04-13 13:43:42.208896+00
-276	novo_zaduzenje	zaduzenja	INSERT	232	2026-04-13 13:43:42.208896+00
-277	novo_zaduzenje	zaduzenja	INSERT	233	2026-04-13 13:43:42.208896+00
-278	novo_zaduzenje	zaduzenja	INSERT	234	2026-04-13 13:43:42.208896+00
-279	novo_zaduzenje	zaduzenja	INSERT	235	2026-04-13 13:43:42.208896+00
-280	novo_zaduzenje	zaduzenja	INSERT	236	2026-04-13 13:43:42.208896+00
-281	novo_zaduzenje	zaduzenja	INSERT	237	2026-04-13 13:43:42.208896+00
-282	novo_zaduzenje	zaduzenja	INSERT	238	2026-04-13 13:43:42.208896+00
-283	novo_zaduzenje	zaduzenja	INSERT	239	2026-04-13 13:43:42.208896+00
-284	novo_zaduzenje	zaduzenja	INSERT	240	2026-04-13 13:43:42.208896+00
-285	novo_zaduzenje	zaduzenja	INSERT	241	2026-04-13 13:43:42.208896+00
-286	novo_zaduzenje	zaduzenja	INSERT	242	2026-04-13 13:43:42.208896+00
-287	novo_zaduzenje	zaduzenja	INSERT	243	2026-04-13 13:43:42.208896+00
-288	novo_zaduzenje	zaduzenja	INSERT	244	2026-04-13 13:43:42.208896+00
-289	novo_zaduzenje	zaduzenja	INSERT	245	2026-04-13 13:43:42.208896+00
-290	novo_zaduzenje	zaduzenja	INSERT	246	2026-04-13 13:43:42.208896+00
-291	novo_zaduzenje	zaduzenja	INSERT	247	2026-04-13 13:43:42.208896+00
-292	novo_zaduzenje	zaduzenja	INSERT	248	2026-04-13 13:43:42.208896+00
-293	novo_zaduzenje	zaduzenja	INSERT	249	2026-04-13 13:43:42.208896+00
-294	novo_zaduzenje	zaduzenja	INSERT	250	2026-04-13 13:43:42.208896+00
-295	novo_zaduzenje	zaduzenja	INSERT	251	2026-04-13 13:43:42.208896+00
-296	novo_zaduzenje	zaduzenja	INSERT	252	2026-04-13 13:43:42.208896+00
-297	novo_zaduzenje	zaduzenja	INSERT	253	2026-04-13 13:43:42.208896+00
-298	novo_zaduzenje	zaduzenja	INSERT	254	2026-04-13 13:43:42.208896+00
-299	novo_zaduzenje	zaduzenja	INSERT	255	2026-04-13 13:43:42.208896+00
-300	novo_zaduzenje	zaduzenja	INSERT	256	2026-04-13 13:43:42.208896+00
-301	novo_zaduzenje	zaduzenja	INSERT	257	2026-04-13 13:43:42.208896+00
-302	novo_zaduzenje	zaduzenja	INSERT	258	2026-04-13 13:43:42.208896+00
-303	novo_zaduzenje	zaduzenja	INSERT	259	2026-04-13 13:43:42.208896+00
-304	novo_zaduzenje	zaduzenja	INSERT	260	2026-04-13 13:43:42.208896+00
-305	novo_zaduzenje	zaduzenja	INSERT	261	2026-04-13 13:43:42.208896+00
-306	novo_zaduzenje	zaduzenja	INSERT	262	2026-04-13 13:43:42.208896+00
-307	novo_zaduzenje	zaduzenja	INSERT	263	2026-04-13 13:43:42.208896+00
-308	novo_zaduzenje	zaduzenja	INSERT	264	2026-04-13 13:43:42.208896+00
-309	novo_zaduzenje	zaduzenja	INSERT	265	2026-04-13 13:43:42.208896+00
-310	novo_zaduzenje	zaduzenja	INSERT	266	2026-04-13 13:43:42.208896+00
-311	novo_zaduzenje	zaduzenja	INSERT	267	2026-04-13 13:43:42.208896+00
-312	novo_zaduzenje	zaduzenja	INSERT	268	2026-04-13 13:43:42.208896+00
-313	novo_zaduzenje	zaduzenja	INSERT	269	2026-04-13 13:43:42.208896+00
-314	novo_zaduzenje	zaduzenja	INSERT	270	2026-04-13 13:43:42.208896+00
-315	novo_zaduzenje	zaduzenja	INSERT	271	2026-04-13 13:43:42.208896+00
-316	novo_zaduzenje	zaduzenja	INSERT	272	2026-04-13 13:43:42.208896+00
-317	novo_zaduzenje	zaduzenja	INSERT	273	2026-04-13 13:43:42.208896+00
-318	novo_zaduzenje	zaduzenja	INSERT	274	2026-04-13 13:43:42.208896+00
-319	novo_zaduzenje	zaduzenja	INSERT	275	2026-04-13 13:43:42.208896+00
-320	novo_zaduzenje	zaduzenja	INSERT	276	2026-04-13 13:43:42.208896+00
-321	novo_zaduzenje	zaduzenja	INSERT	277	2026-04-13 13:43:42.208896+00
-322	novo_zaduzenje	zaduzenja	INSERT	278	2026-04-13 13:43:42.208896+00
-323	novo_zaduzenje	zaduzenja	INSERT	279	2026-04-13 13:43:42.208896+00
-324	novo_zaduzenje	zaduzenja	INSERT	280	2026-04-13 13:43:42.208896+00
-325	novo_zaduzenje	zaduzenja	INSERT	281	2026-04-13 13:43:42.208896+00
-326	novo_zaduzenje	zaduzenja	INSERT	282	2026-04-13 13:43:42.208896+00
-327	novo_zaduzenje	zaduzenja	INSERT	283	2026-04-13 13:43:42.208896+00
-328	novo_zaduzenje	zaduzenja	INSERT	284	2026-04-13 13:43:42.208896+00
-329	novo_zaduzenje	zaduzenja	INSERT	285	2026-04-13 13:43:42.208896+00
-330	novo_zaduzenje	zaduzenja	INSERT	286	2026-04-13 13:43:42.208896+00
-331	novo_zaduzenje	zaduzenja	INSERT	287	2026-04-13 13:43:42.208896+00
-332	novo_zaduzenje	zaduzenja	INSERT	288	2026-04-13 13:43:42.208896+00
-333	novo_zaduzenje	zaduzenja	INSERT	289	2026-04-13 13:43:42.208896+00
-334	novo_zaduzenje	zaduzenja	INSERT	290	2026-04-13 13:43:42.208896+00
-335	novo_zaduzenje	zaduzenja	INSERT	291	2026-04-13 13:43:42.208896+00
-336	novo_zaduzenje	zaduzenja	INSERT	292	2026-04-13 13:43:42.208896+00
-337	novo_zaduzenje	zaduzenja	INSERT	293	2026-04-13 13:43:42.208896+00
-338	novo_zaduzenje	zaduzenja	INSERT	294	2026-04-13 13:43:42.208896+00
-339	novo_zaduzenje	zaduzenja	INSERT	295	2026-04-13 13:43:42.208896+00
-340	novo_zaduzenje	zaduzenja	INSERT	296	2026-04-13 13:43:42.208896+00
-341	novo_zaduzenje	zaduzenja	INSERT	297	2026-04-13 13:43:42.208896+00
-342	novo_zaduzenje	zaduzenja	INSERT	298	2026-04-13 13:43:42.208896+00
-343	novo_zaduzenje	zaduzenja	INSERT	299	2026-04-13 13:43:42.208896+00
-344	novo_zaduzenje	zaduzenja	INSERT	300	2026-04-13 13:43:42.208896+00
-345	novo_zaduzenje	zaduzenja	INSERT	301	2026-04-13 13:43:42.208896+00
-346	novo_zaduzenje	zaduzenja	INSERT	302	2026-04-13 13:43:42.208896+00
-347	novo_zaduzenje	zaduzenja	INSERT	303	2026-04-13 13:43:42.208896+00
-348	novo_zaduzenje	zaduzenja	INSERT	304	2026-04-13 13:43:42.208896+00
-349	novo_zaduzenje	zaduzenja	INSERT	305	2026-04-13 13:43:42.208896+00
-350	novo_zaduzenje	zaduzenja	INSERT	306	2026-04-13 13:43:42.208896+00
-351	novo_zaduzenje	zaduzenja	INSERT	307	2026-04-13 13:43:42.208896+00
-352	novo_zaduzenje	zaduzenja	INSERT	308	2026-04-13 13:43:42.208896+00
-353	novo_zaduzenje	zaduzenja	INSERT	309	2026-04-13 13:43:42.208896+00
-354	novo_zaduzenje	zaduzenja	INSERT	310	2026-04-13 13:43:42.208896+00
-355	novo_zaduzenje	zaduzenja	INSERT	311	2026-04-13 13:43:42.208896+00
-356	novo_zaduzenje	zaduzenja	INSERT	312	2026-04-13 13:43:42.208896+00
-357	novo_zaduzenje	zaduzenja	INSERT	313	2026-04-13 13:43:42.208896+00
-358	novo_zaduzenje	zaduzenja	INSERT	314	2026-04-13 13:43:42.208896+00
-359	novo_zaduzenje	zaduzenja	INSERT	315	2026-04-13 13:43:42.208896+00
-360	novo_zaduzenje	zaduzenja	INSERT	316	2026-04-13 13:43:42.208896+00
-361	novo_zaduzenje	zaduzenja	INSERT	317	2026-04-13 13:43:42.208896+00
-362	novo_zaduzenje	zaduzenja	INSERT	318	2026-04-13 13:43:42.208896+00
-363	novo_zaduzenje	zaduzenja	INSERT	319	2026-04-13 13:43:42.208896+00
-364	novo_zaduzenje	zaduzenja	INSERT	320	2026-04-13 13:43:42.208896+00
-365	novo_zaduzenje	zaduzenja	INSERT	321	2026-04-13 13:43:42.208896+00
-366	novo_zaduzenje	zaduzenja	INSERT	322	2026-04-13 13:43:42.208896+00
-367	novo_zaduzenje	zaduzenja	INSERT	323	2026-04-13 13:43:42.208896+00
-368	novo_zaduzenje	zaduzenja	INSERT	324	2026-04-13 13:43:42.208896+00
-369	novo_zaduzenje	zaduzenja	INSERT	325	2026-04-13 13:43:42.208896+00
-370	novo_zaduzenje	zaduzenja	INSERT	326	2026-04-13 13:43:42.208896+00
-371	novo_zaduzenje	zaduzenja	INSERT	327	2026-04-13 13:43:42.208896+00
-372	novo_zaduzenje	zaduzenja	INSERT	328	2026-04-13 13:43:42.208896+00
-373	novo_zaduzenje	zaduzenja	INSERT	329	2026-04-13 13:43:42.208896+00
-374	novo_zaduzenje	zaduzenja	INSERT	330	2026-04-13 13:43:42.208896+00
-375	novo_zaduzenje	zaduzenja	INSERT	331	2026-04-13 13:43:42.208896+00
-376	novo_zaduzenje	zaduzenja	INSERT	332	2026-04-13 13:43:42.208896+00
-377	novo_zaduzenje	zaduzenja	INSERT	333	2026-04-13 13:43:42.208896+00
-378	novo_zaduzenje	zaduzenja	INSERT	334	2026-04-13 13:43:42.208896+00
-379	novo_zaduzenje	zaduzenja	INSERT	335	2026-04-13 13:43:42.208896+00
-380	novo_zaduzenje	zaduzenja	INSERT	336	2026-04-13 13:43:42.208896+00
-381	novo_zaduzenje	zaduzenja	INSERT	337	2026-04-13 13:43:42.208896+00
-382	novo_zaduzenje	zaduzenja	INSERT	338	2026-04-13 13:43:42.208896+00
-383	novo_zaduzenje	zaduzenja	INSERT	339	2026-04-13 13:43:42.208896+00
-384	novo_zaduzenje	zaduzenja	INSERT	340	2026-04-13 13:43:42.208896+00
-385	novo_zaduzenje	zaduzenja	INSERT	341	2026-04-13 13:43:42.208896+00
-386	novo_zaduzenje	zaduzenja	INSERT	342	2026-04-13 13:43:42.208896+00
-387	novo_zaduzenje	zaduzenja	INSERT	343	2026-04-13 13:43:42.208896+00
-388	novo_zaduzenje	zaduzenja	INSERT	344	2026-04-13 13:43:42.208896+00
-389	novo_zaduzenje	zaduzenja	INSERT	345	2026-04-13 13:43:42.208896+00
-390	novo_zaduzenje	zaduzenja	INSERT	346	2026-04-13 13:43:42.208896+00
-391	novo_zaduzenje	zaduzenja	INSERT	347	2026-04-13 13:43:42.208896+00
-392	novo_zaduzenje	zaduzenja	INSERT	348	2026-04-13 13:43:42.208896+00
-393	novo_zaduzenje	zaduzenja	INSERT	349	2026-04-13 13:43:42.208896+00
-394	novo_zaduzenje	zaduzenja	INSERT	350	2026-04-13 13:43:42.208896+00
-395	novo_zaduzenje	zaduzenja	INSERT	351	2026-04-13 13:43:42.208896+00
-396	novo_zaduzenje	zaduzenja	INSERT	352	2026-04-13 13:43:42.208896+00
-397	novo_zaduzenje	zaduzenja	INSERT	353	2026-04-13 13:43:42.208896+00
-398	novo_zaduzenje	zaduzenja	INSERT	354	2026-04-13 13:43:42.208896+00
-399	novo_zaduzenje	zaduzenja	INSERT	355	2026-04-13 13:43:42.208896+00
-400	novo_zaduzenje	zaduzenja	INSERT	356	2026-04-13 13:43:42.208896+00
-401	novo_zaduzenje	zaduzenja	INSERT	357	2026-04-13 13:43:42.208896+00
-402	novo_zaduzenje	zaduzenja	INSERT	358	2026-04-13 13:43:42.208896+00
-403	novo_zaduzenje	zaduzenja	INSERT	359	2026-04-13 13:43:42.208896+00
-404	novo_zaduzenje	zaduzenja	INSERT	360	2026-04-13 13:43:42.208896+00
-405	novo_zaduzenje	zaduzenja	INSERT	361	2026-04-13 13:43:42.208896+00
-406	novo_zaduzenje	zaduzenja	INSERT	362	2026-04-13 13:43:42.208896+00
-407	novo_zaduzenje	zaduzenja	INSERT	363	2026-04-13 13:43:42.208896+00
-408	novo_zaduzenje	zaduzenja	INSERT	364	2026-04-13 13:43:42.208896+00
-409	novo_zaduzenje	zaduzenja	INSERT	365	2026-04-13 13:43:42.208896+00
-410	novo_zaduzenje	zaduzenja	INSERT	366	2026-04-13 13:43:42.208896+00
-411	novo_zaduzenje	zaduzenja	INSERT	367	2026-04-13 13:43:42.208896+00
-412	novo_zaduzenje	zaduzenja	INSERT	368	2026-04-13 13:43:42.208896+00
-413	novo_zaduzenje	zaduzenja	INSERT	369	2026-04-13 13:43:42.208896+00
-414	novo_zaduzenje	zaduzenja	INSERT	370	2026-04-13 13:43:42.208896+00
-415	novo_zaduzenje	zaduzenja	INSERT	371	2026-04-13 13:43:42.208896+00
-416	novo_zaduzenje	zaduzenja	INSERT	372	2026-04-13 13:43:42.208896+00
-417	novo_zaduzenje	zaduzenja	INSERT	373	2026-04-13 13:43:42.208896+00
-418	novo_zaduzenje	zaduzenja	INSERT	374	2026-04-13 13:43:42.208896+00
-419	novo_zaduzenje	zaduzenja	INSERT	375	2026-04-13 13:43:42.208896+00
-420	novo_zaduzenje	zaduzenja	INSERT	376	2026-04-13 13:43:42.208896+00
-421	novo_zaduzenje	zaduzenja	INSERT	377	2026-04-13 13:43:42.208896+00
-422	novo_zaduzenje	zaduzenja	INSERT	378	2026-04-13 13:43:42.208896+00
-423	novo_zaduzenje	zaduzenja	INSERT	379	2026-04-13 13:43:42.208896+00
-424	novo_zaduzenje	zaduzenja	INSERT	380	2026-04-13 13:43:42.208896+00
-425	novo_zaduzenje	zaduzenja	INSERT	381	2026-04-13 13:43:42.208896+00
-426	novo_zaduzenje	zaduzenja	INSERT	382	2026-04-13 13:43:42.208896+00
-427	novo_zaduzenje	zaduzenja	INSERT	383	2026-04-13 13:43:42.208896+00
-428	novo_zaduzenje	zaduzenja	INSERT	384	2026-04-13 13:43:42.208896+00
-429	novo_zaduzenje	zaduzenja	INSERT	385	2026-04-13 13:43:42.208896+00
-430	novo_zaduzenje	zaduzenja	INSERT	386	2026-04-13 13:43:42.208896+00
-431	novo_zaduzenje	zaduzenja	INSERT	387	2026-04-13 13:43:42.208896+00
-432	novo_zaduzenje	zaduzenja	INSERT	388	2026-04-13 13:43:42.208896+00
-433	novo_zaduzenje	zaduzenja	INSERT	389	2026-04-13 13:43:42.208896+00
-434	novo_zaduzenje	zaduzenja	INSERT	390	2026-04-13 13:43:42.208896+00
-435	novo_zaduzenje	zaduzenja	INSERT	391	2026-04-13 13:43:42.208896+00
-436	novo_zaduzenje	zaduzenja	INSERT	392	2026-04-13 13:43:42.208896+00
-437	novo_zaduzenje	zaduzenja	INSERT	393	2026-04-13 13:43:42.208896+00
-438	novo_zaduzenje	zaduzenja	INSERT	394	2026-04-13 13:43:42.208896+00
-439	novo_zaduzenje	zaduzenja	INSERT	395	2026-04-13 13:43:42.208896+00
-440	novo_zaduzenje	zaduzenja	INSERT	396	2026-04-13 13:43:42.208896+00
-441	novo_zaduzenje	zaduzenja	INSERT	397	2026-04-13 13:43:42.208896+00
-442	novo_zaduzenje	zaduzenja	INSERT	398	2026-04-13 13:43:42.208896+00
-443	novo_zaduzenje	zaduzenja	INSERT	399	2026-04-13 13:43:42.208896+00
-444	novo_zaduzenje	zaduzenja	INSERT	400	2026-04-13 13:43:42.208896+00
-445	novo_zaduzenje	zaduzenja	INSERT	401	2026-04-13 13:43:42.208896+00
-446	novo_zaduzenje	zaduzenja	INSERT	402	2026-04-13 13:43:42.208896+00
-447	novo_zaduzenje	zaduzenja	INSERT	403	2026-04-13 13:43:42.208896+00
-448	novo_zaduzenje	zaduzenja	INSERT	404	2026-04-13 13:43:42.208896+00
-449	novo_zaduzenje	zaduzenja	INSERT	405	2026-04-13 13:43:42.208896+00
-450	novo_zaduzenje	zaduzenja	INSERT	406	2026-04-13 13:43:42.208896+00
-451	novo_zaduzenje	zaduzenja	INSERT	407	2026-04-13 13:43:42.208896+00
-452	novo_zaduzenje	zaduzenja	INSERT	408	2026-04-13 13:43:42.208896+00
-453	novo_zaduzenje	zaduzenja	INSERT	409	2026-04-13 13:43:42.208896+00
-454	novo_zaduzenje	zaduzenja	INSERT	410	2026-04-13 13:43:42.208896+00
-455	novo_zaduzenje	zaduzenja	INSERT	411	2026-04-13 13:43:42.208896+00
-456	novo_zaduzenje	zaduzenja	INSERT	412	2026-04-13 13:43:42.208896+00
-457	novo_zaduzenje	zaduzenja	INSERT	413	2026-04-13 13:43:42.208896+00
-458	novo_zaduzenje	zaduzenja	INSERT	414	2026-04-13 13:43:42.208896+00
-459	novo_zaduzenje	zaduzenja	INSERT	415	2026-04-13 13:43:42.208896+00
-460	novo_zaduzenje	zaduzenja	INSERT	416	2026-04-13 13:43:42.208896+00
-461	novo_zaduzenje	zaduzenja	INSERT	417	2026-04-13 13:43:42.208896+00
-462	novo_zaduzenje	zaduzenja	INSERT	418	2026-04-13 13:43:42.208896+00
-463	novo_zaduzenje	zaduzenja	INSERT	419	2026-04-13 13:43:42.208896+00
-464	novo_zaduzenje	zaduzenja	INSERT	420	2026-04-13 13:43:42.208896+00
-465	novo_zaduzenje	zaduzenja	INSERT	421	2026-04-13 13:43:42.208896+00
-466	novo_zaduzenje	zaduzenja	INSERT	422	2026-04-13 13:43:42.208896+00
-467	novo_zaduzenje	zaduzenja	INSERT	423	2026-04-13 13:43:42.208896+00
-468	novo_zaduzenje	zaduzenja	INSERT	424	2026-04-13 13:43:42.208896+00
-469	novo_zaduzenje	zaduzenja	INSERT	425	2026-04-13 13:43:42.208896+00
-470	novo_zaduzenje	zaduzenja	INSERT	426	2026-04-13 13:43:42.208896+00
-471	novo_zaduzenje	zaduzenja	INSERT	427	2026-04-13 13:43:42.208896+00
-472	novo_zaduzenje	zaduzenja	INSERT	428	2026-04-13 13:43:42.208896+00
-473	novo_zaduzenje	zaduzenja	INSERT	429	2026-04-13 13:43:42.208896+00
-474	novo_zaduzenje	zaduzenja	INSERT	430	2026-04-13 13:43:42.208896+00
-475	novo_zaduzenje	zaduzenja	INSERT	431	2026-04-13 13:43:42.208896+00
-476	novo_zaduzenje	zaduzenja	INSERT	432	2026-04-13 13:43:42.208896+00
-477	novo_zaduzenje	zaduzenja	INSERT	433	2026-04-13 13:43:42.208896+00
-478	novo_zaduzenje	zaduzenja	INSERT	434	2026-04-13 13:43:42.208896+00
-479	novo_zaduzenje	zaduzenja	INSERT	435	2026-04-13 13:43:42.208896+00
-480	novo_zaduzenje	zaduzenja	INSERT	436	2026-04-13 13:43:42.208896+00
-481	novo_zaduzenje	zaduzenja	INSERT	437	2026-04-13 13:43:42.208896+00
-482	novo_zaduzenje	zaduzenja	INSERT	438	2026-04-13 13:43:42.208896+00
-483	novo_zaduzenje	zaduzenja	INSERT	439	2026-04-13 13:43:42.208896+00
-484	novo_zaduzenje	zaduzenja	INSERT	440	2026-04-13 13:43:42.208896+00
-485	novo_zaduzenje	zaduzenja	INSERT	441	2026-04-13 13:43:42.208896+00
-486	novo_zaduzenje	zaduzenja	INSERT	442	2026-04-13 13:43:42.208896+00
-487	novo_zaduzenje	zaduzenja	INSERT	443	2026-04-13 13:43:42.208896+00
-488	novo_zaduzenje	zaduzenja	INSERT	444	2026-04-13 13:43:42.208896+00
-489	novo_zaduzenje	zaduzenja	INSERT	445	2026-04-13 13:43:42.208896+00
-490	novo_zaduzenje	zaduzenja	INSERT	446	2026-04-13 13:43:42.208896+00
-491	novo_zaduzenje	zaduzenja	INSERT	447	2026-04-13 13:43:42.208896+00
-492	novo_zaduzenje	zaduzenja	INSERT	448	2026-04-13 13:43:42.208896+00
-493	novo_zaduzenje	zaduzenja	INSERT	449	2026-04-13 13:43:42.208896+00
-494	novo_zaduzenje	zaduzenja	INSERT	450	2026-04-13 13:43:42.208896+00
-495	novo_zaduzenje	zaduzenja	INSERT	451	2026-04-13 13:43:42.208896+00
-496	novo_zaduzenje	zaduzenja	INSERT	452	2026-04-13 13:43:42.208896+00
-497	novo_zaduzenje	zaduzenja	INSERT	453	2026-04-13 13:43:42.208896+00
-498	novo_zaduzenje	zaduzenja	INSERT	454	2026-04-13 13:43:42.208896+00
-499	novo_zaduzenje	zaduzenja	INSERT	455	2026-04-13 13:43:42.208896+00
-500	novo_zaduzenje	zaduzenja	INSERT	456	2026-04-13 13:43:42.208896+00
-501	novo_zaduzenje	zaduzenja	INSERT	457	2026-04-13 13:43:42.208896+00
-502	novo_zaduzenje	zaduzenja	INSERT	458	2026-04-13 13:43:42.208896+00
-503	novo_zaduzenje	zaduzenja	INSERT	459	2026-04-13 13:43:42.208896+00
-504	novo_zaduzenje	zaduzenja	INSERT	460	2026-04-13 13:43:42.208896+00
-505	novo_zaduzenje	zaduzenja	INSERT	461	2026-04-13 13:43:42.208896+00
-506	novo_zaduzenje	zaduzenja	INSERT	462	2026-04-13 13:43:42.208896+00
-507	novo_zaduzenje	zaduzenja	INSERT	463	2026-04-13 13:43:42.208896+00
-508	novo_zaduzenje	zaduzenja	INSERT	464	2026-04-13 13:43:42.208896+00
-509	novo_zaduzenje	zaduzenja	INSERT	465	2026-04-13 13:43:42.208896+00
-510	novo_zaduzenje	zaduzenja	INSERT	466	2026-04-13 13:43:42.208896+00
-511	novo_zaduzenje	zaduzenja	INSERT	467	2026-04-13 13:43:42.208896+00
-512	novo_zaduzenje	zaduzenja	INSERT	468	2026-04-13 13:43:42.208896+00
-513	novo_zaduzenje	zaduzenja	INSERT	469	2026-04-13 13:43:42.208896+00
-514	novo_zaduzenje	zaduzenja	INSERT	470	2026-04-13 13:43:42.208896+00
-515	novo_zaduzenje	zaduzenja	INSERT	471	2026-04-13 13:43:42.208896+00
-516	novo_zaduzenje	zaduzenja	INSERT	472	2026-04-13 13:43:42.208896+00
-517	novo_zaduzenje	zaduzenja	INSERT	473	2026-04-13 13:43:42.208896+00
-518	novo_zaduzenje	zaduzenja	INSERT	474	2026-04-13 13:43:42.208896+00
-519	novo_zaduzenje	zaduzenja	INSERT	475	2026-04-13 13:43:42.208896+00
-520	novo_zaduzenje	zaduzenja	INSERT	476	2026-04-13 13:43:42.208896+00
-521	novo_zaduzenje	zaduzenja	INSERT	477	2026-04-13 13:43:42.208896+00
-522	novo_zaduzenje	zaduzenja	INSERT	478	2026-04-13 13:43:42.208896+00
-523	novo_zaduzenje	zaduzenja	INSERT	479	2026-04-13 13:43:42.208896+00
-524	novo_zaduzenje	zaduzenja	INSERT	480	2026-04-13 13:43:42.208896+00
-525	novo_zaduzenje	zaduzenja	INSERT	481	2026-04-13 13:43:42.208896+00
-526	novo_zaduzenje	zaduzenja	INSERT	482	2026-04-13 13:43:42.208896+00
-527	novo_zaduzenje	zaduzenja	INSERT	483	2026-04-13 13:43:42.208896+00
-528	novo_zaduzenje	zaduzenja	INSERT	484	2026-04-13 13:43:42.208896+00
-529	novo_zaduzenje	zaduzenja	INSERT	485	2026-04-13 13:43:42.208896+00
-530	novo_zaduzenje	zaduzenja	INSERT	486	2026-04-13 13:43:42.208896+00
-531	novo_zaduzenje	zaduzenja	INSERT	487	2026-04-13 13:43:42.208896+00
-532	novo_zaduzenje	zaduzenja	INSERT	488	2026-04-13 13:43:42.208896+00
-533	novo_zaduzenje	zaduzenja	INSERT	489	2026-04-13 13:43:42.208896+00
-534	novo_zaduzenje	zaduzenja	INSERT	490	2026-04-13 13:43:42.208896+00
-535	novo_zaduzenje	zaduzenja	INSERT	491	2026-04-13 13:43:42.208896+00
-536	novo_zaduzenje	zaduzenja	INSERT	492	2026-04-13 13:43:42.208896+00
-537	novo_zaduzenje	zaduzenja	INSERT	493	2026-04-13 13:43:42.208896+00
-538	novo_zaduzenje	zaduzenja	INSERT	494	2026-04-13 13:43:42.208896+00
-539	novo_zaduzenje	zaduzenja	INSERT	495	2026-04-13 13:43:42.208896+00
-540	novo_zaduzenje	zaduzenja	INSERT	496	2026-04-13 13:43:42.208896+00
-541	novo_zaduzenje	zaduzenja	INSERT	497	2026-04-13 13:43:42.208896+00
-542	unos_goriva	evidencija_goriva	INSERT	49	2026-04-13 13:43:42.208896+00
-543	unos_goriva	evidencija_goriva	INSERT	50	2026-04-13 13:43:42.208896+00
-544	unos_goriva	evidencija_goriva	INSERT	51	2026-04-13 13:43:42.208896+00
-545	unos_goriva	evidencija_goriva	INSERT	52	2026-04-13 13:43:42.208896+00
-546	unos_goriva	evidencija_goriva	INSERT	53	2026-04-13 13:43:42.208896+00
-547	unos_goriva	evidencija_goriva	INSERT	54	2026-04-13 13:43:42.208896+00
-548	unos_goriva	evidencija_goriva	INSERT	55	2026-04-13 13:43:42.208896+00
-549	unos_goriva	evidencija_goriva	INSERT	56	2026-04-13 13:43:42.208896+00
-550	unos_goriva	evidencija_goriva	INSERT	57	2026-04-13 13:43:42.208896+00
-551	unos_goriva	evidencija_goriva	INSERT	58	2026-04-13 13:43:42.208896+00
-552	unos_goriva	evidencija_goriva	INSERT	59	2026-04-13 13:43:42.208896+00
-553	unos_goriva	evidencija_goriva	INSERT	60	2026-04-13 13:43:42.208896+00
-554	unos_goriva	evidencija_goriva	INSERT	61	2026-04-13 13:43:42.208896+00
-555	unos_goriva	evidencija_goriva	INSERT	62	2026-04-13 13:43:42.208896+00
-556	unos_goriva	evidencija_goriva	INSERT	63	2026-04-13 13:43:42.208896+00
-557	unos_goriva	evidencija_goriva	INSERT	64	2026-04-13 13:43:42.208896+00
-558	unos_goriva	evidencija_goriva	INSERT	65	2026-04-13 13:43:42.208896+00
-559	unos_goriva	evidencija_goriva	INSERT	66	2026-04-13 13:43:42.208896+00
-560	unos_goriva	evidencija_goriva	INSERT	67	2026-04-13 13:43:42.208896+00
-561	unos_goriva	evidencija_goriva	INSERT	68	2026-04-13 13:43:42.208896+00
-562	unos_goriva	evidencija_goriva	INSERT	69	2026-04-13 13:43:42.208896+00
-563	unos_goriva	evidencija_goriva	INSERT	70	2026-04-13 13:43:42.208896+00
-564	unos_goriva	evidencija_goriva	INSERT	71	2026-04-13 13:43:42.208896+00
-565	unos_goriva	evidencija_goriva	INSERT	72	2026-04-13 13:43:42.208896+00
-566	unos_goriva	evidencija_goriva	INSERT	73	2026-04-13 13:43:42.208896+00
-567	unos_goriva	evidencija_goriva	INSERT	74	2026-04-13 13:43:42.208896+00
-568	unos_goriva	evidencija_goriva	INSERT	75	2026-04-13 13:43:42.208896+00
-569	unos_goriva	evidencija_goriva	INSERT	76	2026-04-13 13:43:42.208896+00
-570	unos_goriva	evidencija_goriva	INSERT	77	2026-04-13 13:43:42.208896+00
-571	unos_goriva	evidencija_goriva	INSERT	78	2026-04-13 13:43:42.208896+00
-572	unos_goriva	evidencija_goriva	INSERT	79	2026-04-13 13:43:42.208896+00
-573	unos_goriva	evidencija_goriva	INSERT	80	2026-04-13 13:43:42.208896+00
-574	unos_goriva	evidencija_goriva	INSERT	81	2026-04-13 13:43:42.208896+00
-575	unos_goriva	evidencija_goriva	INSERT	82	2026-04-13 13:43:42.208896+00
-576	unos_goriva	evidencija_goriva	INSERT	83	2026-04-13 13:43:42.208896+00
-577	unos_goriva	evidencija_goriva	INSERT	84	2026-04-13 13:43:42.208896+00
-578	unos_goriva	evidencija_goriva	INSERT	85	2026-04-13 13:43:42.208896+00
-579	unos_goriva	evidencija_goriva	INSERT	86	2026-04-13 13:43:42.208896+00
-580	unos_goriva	evidencija_goriva	INSERT	87	2026-04-13 13:43:42.208896+00
-581	unos_goriva	evidencija_goriva	INSERT	88	2026-04-13 13:43:42.208896+00
-582	unos_goriva	evidencija_goriva	INSERT	89	2026-04-13 13:43:42.208896+00
-583	unos_goriva	evidencija_goriva	INSERT	90	2026-04-13 13:43:42.208896+00
-584	unos_goriva	evidencija_goriva	INSERT	91	2026-04-13 13:43:42.208896+00
-585	unos_goriva	evidencija_goriva	INSERT	92	2026-04-13 13:43:42.208896+00
-586	unos_goriva	evidencija_goriva	INSERT	93	2026-04-13 13:43:42.208896+00
-587	unos_goriva	evidencija_goriva	INSERT	94	2026-04-13 13:43:42.208896+00
-588	unos_goriva	evidencija_goriva	INSERT	95	2026-04-13 13:43:42.208896+00
-589	unos_goriva	evidencija_goriva	INSERT	96	2026-04-13 13:43:42.208896+00
-590	unos_goriva	evidencija_goriva	INSERT	97	2026-04-13 13:43:42.208896+00
-591	unos_goriva	evidencija_goriva	INSERT	98	2026-04-13 13:43:42.208896+00
-592	unos_goriva	evidencija_goriva	INSERT	99	2026-04-13 13:43:42.208896+00
-593	unos_goriva	evidencija_goriva	INSERT	100	2026-04-13 13:43:42.208896+00
-594	unos_goriva	evidencija_goriva	INSERT	101	2026-04-13 13:43:42.208896+00
-595	unos_goriva	evidencija_goriva	INSERT	102	2026-04-13 13:43:42.208896+00
-596	unos_goriva	evidencija_goriva	INSERT	103	2026-04-13 13:43:42.208896+00
-597	unos_goriva	evidencija_goriva	INSERT	104	2026-04-13 13:43:42.208896+00
-598	unos_goriva	evidencija_goriva	INSERT	105	2026-04-13 13:43:42.208896+00
-599	unos_goriva	evidencija_goriva	INSERT	106	2026-04-13 13:43:42.208896+00
-600	unos_goriva	evidencija_goriva	INSERT	107	2026-04-13 13:43:42.208896+00
-601	unos_goriva	evidencija_goriva	INSERT	108	2026-04-13 13:43:42.208896+00
-602	unos_goriva	evidencija_goriva	INSERT	109	2026-04-13 13:43:42.208896+00
-603	unos_goriva	evidencija_goriva	INSERT	110	2026-04-13 13:43:42.208896+00
-604	unos_goriva	evidencija_goriva	INSERT	111	2026-04-13 13:43:42.208896+00
-605	unos_goriva	evidencija_goriva	INSERT	112	2026-04-13 13:43:42.208896+00
-606	unos_goriva	evidencija_goriva	INSERT	113	2026-04-13 13:43:42.208896+00
-607	unos_goriva	evidencija_goriva	INSERT	114	2026-04-13 13:43:42.208896+00
-608	unos_goriva	evidencija_goriva	INSERT	115	2026-04-13 13:43:42.208896+00
-609	unos_goriva	evidencija_goriva	INSERT	116	2026-04-13 13:43:42.208896+00
-610	unos_goriva	evidencija_goriva	INSERT	117	2026-04-13 13:43:42.208896+00
-611	unos_goriva	evidencija_goriva	INSERT	118	2026-04-13 13:43:42.208896+00
-612	unos_goriva	evidencija_goriva	INSERT	119	2026-04-13 13:43:42.208896+00
-613	unos_goriva	evidencija_goriva	INSERT	120	2026-04-13 13:43:42.208896+00
-614	unos_goriva	evidencija_goriva	INSERT	121	2026-04-13 13:43:42.208896+00
-615	unos_goriva	evidencija_goriva	INSERT	122	2026-04-13 13:43:42.208896+00
-616	unos_goriva	evidencija_goriva	INSERT	123	2026-04-13 13:43:42.208896+00
-617	unos_goriva	evidencija_goriva	INSERT	124	2026-04-13 13:43:42.208896+00
-618	unos_goriva	evidencija_goriva	INSERT	125	2026-04-13 13:43:42.208896+00
-619	unos_goriva	evidencija_goriva	INSERT	126	2026-04-13 13:43:42.208896+00
-620	unos_goriva	evidencija_goriva	INSERT	127	2026-04-13 13:43:42.208896+00
-621	unos_goriva	evidencija_goriva	INSERT	128	2026-04-13 13:43:42.208896+00
-622	unos_goriva	evidencija_goriva	INSERT	129	2026-04-13 13:43:42.208896+00
-623	unos_goriva	evidencija_goriva	INSERT	130	2026-04-13 13:43:42.208896+00
-624	unos_goriva	evidencija_goriva	INSERT	131	2026-04-13 13:43:42.208896+00
-625	unos_goriva	evidencija_goriva	INSERT	132	2026-04-13 13:43:42.208896+00
-626	unos_goriva	evidencija_goriva	INSERT	133	2026-04-13 13:43:42.208896+00
-627	unos_goriva	evidencija_goriva	INSERT	134	2026-04-13 13:43:42.208896+00
-628	unos_goriva	evidencija_goriva	INSERT	135	2026-04-13 13:43:42.208896+00
-629	unos_goriva	evidencija_goriva	INSERT	136	2026-04-13 13:43:42.208896+00
-630	unos_goriva	evidencija_goriva	INSERT	137	2026-04-13 13:43:42.208896+00
-631	unos_goriva	evidencija_goriva	INSERT	138	2026-04-13 13:43:42.208896+00
-632	unos_goriva	evidencija_goriva	INSERT	139	2026-04-13 13:43:42.208896+00
-633	unos_goriva	evidencija_goriva	INSERT	140	2026-04-13 13:43:42.208896+00
-634	unos_goriva	evidencija_goriva	INSERT	141	2026-04-13 13:43:42.208896+00
-635	unos_goriva	evidencija_goriva	INSERT	142	2026-04-13 13:43:42.208896+00
-636	unos_goriva	evidencija_goriva	INSERT	143	2026-04-13 13:43:42.208896+00
-637	unos_goriva	evidencija_goriva	INSERT	144	2026-04-13 13:43:42.208896+00
-638	unos_goriva	evidencija_goriva	INSERT	145	2026-04-13 13:43:42.208896+00
-639	unos_goriva	evidencija_goriva	INSERT	146	2026-04-13 13:43:42.208896+00
-640	unos_goriva	evidencija_goriva	INSERT	147	2026-04-13 13:43:42.208896+00
-641	unos_goriva	evidencija_goriva	INSERT	148	2026-04-13 13:43:42.208896+00
-642	unos_goriva	evidencija_goriva	INSERT	149	2026-04-13 13:43:42.208896+00
-643	unos_goriva	evidencija_goriva	INSERT	150	2026-04-13 13:43:42.208896+00
-644	unos_goriva	evidencija_goriva	INSERT	151	2026-04-13 13:43:42.208896+00
-645	unos_goriva	evidencija_goriva	INSERT	152	2026-04-13 13:43:42.208896+00
-646	unos_goriva	evidencija_goriva	INSERT	153	2026-04-13 13:43:42.208896+00
-647	unos_goriva	evidencija_goriva	INSERT	154	2026-04-13 13:43:42.208896+00
-648	unos_goriva	evidencija_goriva	INSERT	155	2026-04-13 13:43:42.208896+00
-649	unos_goriva	evidencija_goriva	INSERT	156	2026-04-13 13:43:42.208896+00
-650	unos_goriva	evidencija_goriva	INSERT	157	2026-04-13 13:43:42.208896+00
-651	unos_goriva	evidencija_goriva	INSERT	158	2026-04-13 13:43:42.208896+00
-652	unos_goriva	evidencija_goriva	INSERT	159	2026-04-13 13:43:42.208896+00
-653	unos_goriva	evidencija_goriva	INSERT	160	2026-04-13 13:43:42.208896+00
-654	unos_goriva	evidencija_goriva	INSERT	161	2026-04-13 13:43:42.208896+00
-655	unos_goriva	evidencija_goriva	INSERT	162	2026-04-13 13:43:42.208896+00
-656	unos_goriva	evidencija_goriva	INSERT	163	2026-04-13 13:43:42.208896+00
-657	unos_goriva	evidencija_goriva	INSERT	164	2026-04-13 13:43:42.208896+00
-658	unos_goriva	evidencija_goriva	INSERT	165	2026-04-13 13:43:42.208896+00
-659	unos_goriva	evidencija_goriva	INSERT	166	2026-04-13 13:43:42.208896+00
-660	unos_goriva	evidencija_goriva	INSERT	167	2026-04-13 13:43:42.208896+00
-661	unos_goriva	evidencija_goriva	INSERT	168	2026-04-13 13:43:42.208896+00
-662	unos_goriva	evidencija_goriva	INSERT	169	2026-04-13 13:43:42.208896+00
-663	unos_goriva	evidencija_goriva	INSERT	170	2026-04-13 13:43:42.208896+00
-664	unos_goriva	evidencija_goriva	INSERT	171	2026-04-13 13:43:42.208896+00
-665	unos_goriva	evidencija_goriva	INSERT	172	2026-04-13 13:43:42.208896+00
-666	unos_goriva	evidencija_goriva	INSERT	173	2026-04-13 13:43:42.208896+00
-667	unos_goriva	evidencija_goriva	INSERT	174	2026-04-13 13:43:42.208896+00
-668	unos_goriva	evidencija_goriva	INSERT	175	2026-04-13 13:43:42.208896+00
-669	unos_goriva	evidencija_goriva	INSERT	176	2026-04-13 13:43:42.208896+00
-670	unos_goriva	evidencija_goriva	INSERT	177	2026-04-13 13:43:42.208896+00
-671	unos_goriva	evidencija_goriva	INSERT	178	2026-04-13 13:43:42.208896+00
-672	unos_goriva	evidencija_goriva	INSERT	179	2026-04-13 13:43:42.208896+00
-673	unos_goriva	evidencija_goriva	INSERT	180	2026-04-13 13:43:42.208896+00
-674	unos_goriva	evidencija_goriva	INSERT	181	2026-04-13 13:43:42.208896+00
-675	unos_goriva	evidencija_goriva	INSERT	182	2026-04-13 13:43:42.208896+00
-676	unos_goriva	evidencija_goriva	INSERT	183	2026-04-13 13:43:42.208896+00
-677	unos_goriva	evidencija_goriva	INSERT	184	2026-04-13 13:43:42.208896+00
-678	unos_goriva	evidencija_goriva	INSERT	185	2026-04-13 13:43:42.208896+00
-679	unos_goriva	evidencija_goriva	INSERT	186	2026-04-13 13:43:42.208896+00
-680	unos_goriva	evidencija_goriva	INSERT	187	2026-04-13 13:43:42.208896+00
-681	unos_goriva	evidencija_goriva	INSERT	188	2026-04-13 13:43:42.208896+00
-682	unos_goriva	evidencija_goriva	INSERT	189	2026-04-13 13:43:42.208896+00
-683	unos_goriva	evidencija_goriva	INSERT	190	2026-04-13 13:43:42.208896+00
-684	unos_goriva	evidencija_goriva	INSERT	191	2026-04-13 13:43:42.208896+00
-685	unos_goriva	evidencija_goriva	INSERT	192	2026-04-13 13:43:42.208896+00
-686	unos_goriva	evidencija_goriva	INSERT	193	2026-04-13 13:43:42.208896+00
-687	unos_goriva	evidencija_goriva	INSERT	194	2026-04-13 13:43:42.208896+00
-688	unos_goriva	evidencija_goriva	INSERT	195	2026-04-13 13:43:42.208896+00
-689	unos_goriva	evidencija_goriva	INSERT	196	2026-04-13 13:43:42.208896+00
-690	unos_goriva	evidencija_goriva	INSERT	197	2026-04-13 13:43:42.208896+00
-691	unos_goriva	evidencija_goriva	INSERT	198	2026-04-13 13:43:42.208896+00
-692	unos_goriva	evidencija_goriva	INSERT	199	2026-04-13 13:43:42.208896+00
-693	unos_goriva	evidencija_goriva	INSERT	200	2026-04-13 13:43:42.208896+00
-694	unos_goriva	evidencija_goriva	INSERT	201	2026-04-13 13:43:42.208896+00
-695	unos_goriva	evidencija_goriva	INSERT	202	2026-04-13 13:43:42.208896+00
-696	unos_goriva	evidencija_goriva	INSERT	203	2026-04-13 13:43:42.208896+00
-697	unos_goriva	evidencija_goriva	INSERT	204	2026-04-13 13:43:42.208896+00
-698	unos_goriva	evidencija_goriva	INSERT	205	2026-04-13 13:43:42.208896+00
-699	unos_goriva	evidencija_goriva	INSERT	206	2026-04-13 13:43:42.208896+00
-700	unos_goriva	evidencija_goriva	INSERT	207	2026-04-13 13:43:42.208896+00
-701	unos_goriva	evidencija_goriva	INSERT	208	2026-04-13 13:43:42.208896+00
-702	unos_goriva	evidencija_goriva	INSERT	209	2026-04-13 13:43:42.208896+00
-703	unos_goriva	evidencija_goriva	INSERT	210	2026-04-13 13:43:42.208896+00
-704	unos_goriva	evidencija_goriva	INSERT	211	2026-04-13 13:43:42.208896+00
-705	unos_goriva	evidencija_goriva	INSERT	212	2026-04-13 13:43:42.208896+00
-706	unos_goriva	evidencija_goriva	INSERT	213	2026-04-13 13:43:42.208896+00
-707	unos_goriva	evidencija_goriva	INSERT	214	2026-04-13 13:43:42.208896+00
-708	unos_goriva	evidencija_goriva	INSERT	215	2026-04-13 13:43:42.208896+00
-709	unos_goriva	evidencija_goriva	INSERT	216	2026-04-13 13:43:42.208896+00
-710	unos_goriva	evidencija_goriva	INSERT	217	2026-04-13 13:43:42.208896+00
-711	unos_goriva	evidencija_goriva	INSERT	218	2026-04-13 13:43:42.208896+00
-712	unos_goriva	evidencija_goriva	INSERT	219	2026-04-13 13:43:42.208896+00
-713	unos_goriva	evidencija_goriva	INSERT	220	2026-04-13 13:43:42.208896+00
-714	unos_goriva	evidencija_goriva	INSERT	221	2026-04-13 13:43:42.208896+00
-715	unos_goriva	evidencija_goriva	INSERT	222	2026-04-13 13:43:42.208896+00
-716	unos_goriva	evidencija_goriva	INSERT	223	2026-04-13 13:43:42.208896+00
-717	unos_goriva	evidencija_goriva	INSERT	224	2026-04-13 13:43:42.208896+00
-718	unos_goriva	evidencija_goriva	INSERT	225	2026-04-13 13:43:42.208896+00
-719	unos_goriva	evidencija_goriva	INSERT	226	2026-04-13 13:43:42.208896+00
-720	unos_goriva	evidencija_goriva	INSERT	227	2026-04-13 13:43:42.208896+00
-721	unos_goriva	evidencija_goriva	INSERT	228	2026-04-13 13:43:42.208896+00
-722	unos_goriva	evidencija_goriva	INSERT	229	2026-04-13 13:43:42.208896+00
-723	unos_goriva	evidencija_goriva	INSERT	230	2026-04-13 13:43:42.208896+00
-724	unos_goriva	evidencija_goriva	INSERT	231	2026-04-13 13:43:42.208896+00
-725	unos_goriva	evidencija_goriva	INSERT	232	2026-04-13 13:43:42.208896+00
-726	unos_goriva	evidencija_goriva	INSERT	233	2026-04-13 13:43:42.208896+00
-727	unos_goriva	evidencija_goriva	INSERT	234	2026-04-13 13:43:42.208896+00
-728	unos_goriva	evidencija_goriva	INSERT	235	2026-04-13 13:43:42.208896+00
-729	unos_goriva	evidencija_goriva	INSERT	236	2026-04-13 13:43:42.208896+00
-730	unos_goriva	evidencija_goriva	INSERT	237	2026-04-13 13:43:42.208896+00
-731	unos_goriva	evidencija_goriva	INSERT	238	2026-04-13 13:43:42.208896+00
-732	unos_goriva	evidencija_goriva	INSERT	239	2026-04-13 13:43:42.208896+00
-733	unos_goriva	evidencija_goriva	INSERT	240	2026-04-13 13:43:42.208896+00
-734	unos_goriva	evidencija_goriva	INSERT	241	2026-04-13 13:43:42.208896+00
-735	unos_goriva	evidencija_goriva	INSERT	242	2026-04-13 13:43:42.208896+00
-736	unos_goriva	evidencija_goriva	INSERT	243	2026-04-13 13:43:42.208896+00
-737	unos_goriva	evidencija_goriva	INSERT	244	2026-04-13 13:43:42.208896+00
-738	unos_goriva	evidencija_goriva	INSERT	245	2026-04-13 13:43:42.208896+00
-739	unos_goriva	evidencija_goriva	INSERT	246	2026-04-13 13:43:42.208896+00
-740	unos_goriva	evidencija_goriva	INSERT	247	2026-04-13 13:43:42.208896+00
-741	unos_goriva	evidencija_goriva	INSERT	248	2026-04-13 13:43:42.208896+00
-742	unos_goriva	evidencija_goriva	INSERT	249	2026-04-13 13:43:42.208896+00
-743	unos_goriva	evidencija_goriva	INSERT	250	2026-04-13 13:43:42.208896+00
-744	unos_goriva	evidencija_goriva	INSERT	251	2026-04-13 13:43:42.208896+00
-745	unos_goriva	evidencija_goriva	INSERT	252	2026-04-13 13:43:42.208896+00
-746	unos_goriva	evidencija_goriva	INSERT	253	2026-04-13 13:43:42.208896+00
-747	unos_goriva	evidencija_goriva	INSERT	254	2026-04-13 13:43:42.208896+00
-748	unos_goriva	evidencija_goriva	INSERT	255	2026-04-13 13:43:42.208896+00
-749	unos_goriva	evidencija_goriva	INSERT	256	2026-04-13 13:43:42.208896+00
-750	unos_goriva	evidencija_goriva	INSERT	257	2026-04-13 13:43:42.208896+00
-751	unos_goriva	evidencija_goriva	INSERT	258	2026-04-13 13:43:42.208896+00
-752	unos_goriva	evidencija_goriva	INSERT	259	2026-04-13 13:43:42.208896+00
-753	unos_goriva	evidencija_goriva	INSERT	260	2026-04-13 13:43:42.208896+00
-754	unos_goriva	evidencija_goriva	INSERT	261	2026-04-13 13:43:42.208896+00
-755	unos_goriva	evidencija_goriva	INSERT	262	2026-04-13 13:43:42.208896+00
-756	unos_goriva	evidencija_goriva	INSERT	263	2026-04-13 13:43:42.208896+00
-757	unos_goriva	evidencija_goriva	INSERT	264	2026-04-13 13:43:42.208896+00
-758	unos_goriva	evidencija_goriva	INSERT	265	2026-04-13 13:43:42.208896+00
-759	unos_goriva	evidencija_goriva	INSERT	266	2026-04-13 13:43:42.208896+00
-760	unos_goriva	evidencija_goriva	INSERT	267	2026-04-13 13:43:42.208896+00
-761	unos_goriva	evidencija_goriva	INSERT	268	2026-04-13 13:43:42.208896+00
-762	unos_goriva	evidencija_goriva	INSERT	269	2026-04-13 13:43:42.208896+00
-763	unos_goriva	evidencija_goriva	INSERT	270	2026-04-13 13:43:42.208896+00
-764	unos_goriva	evidencija_goriva	INSERT	271	2026-04-13 13:43:42.208896+00
-765	unos_goriva	evidencija_goriva	INSERT	272	2026-04-13 13:43:42.208896+00
-766	unos_goriva	evidencija_goriva	INSERT	273	2026-04-13 13:43:42.208896+00
-767	unos_goriva	evidencija_goriva	INSERT	274	2026-04-13 13:43:42.208896+00
-768	unos_goriva	evidencija_goriva	INSERT	275	2026-04-13 13:43:42.208896+00
-769	unos_goriva	evidencija_goriva	INSERT	276	2026-04-13 13:43:42.208896+00
-770	unos_goriva	evidencija_goriva	INSERT	277	2026-04-13 13:43:42.208896+00
-771	unos_goriva	evidencija_goriva	INSERT	278	2026-04-13 13:43:42.208896+00
-772	unos_goriva	evidencija_goriva	INSERT	279	2026-04-13 13:43:42.208896+00
-773	unos_goriva	evidencija_goriva	INSERT	280	2026-04-13 13:43:42.208896+00
-774	unos_goriva	evidencija_goriva	INSERT	281	2026-04-13 13:43:42.208896+00
-775	unos_goriva	evidencija_goriva	INSERT	282	2026-04-13 13:43:42.208896+00
-776	unos_goriva	evidencija_goriva	INSERT	283	2026-04-13 13:43:42.208896+00
-777	unos_goriva	evidencija_goriva	INSERT	284	2026-04-13 13:43:42.208896+00
-778	unos_goriva	evidencija_goriva	INSERT	285	2026-04-13 13:43:42.208896+00
-779	unos_goriva	evidencija_goriva	INSERT	286	2026-04-13 13:43:42.208896+00
-780	unos_goriva	evidencija_goriva	INSERT	287	2026-04-13 13:43:42.208896+00
-781	unos_goriva	evidencija_goriva	INSERT	288	2026-04-13 13:43:42.208896+00
-782	unos_goriva	evidencija_goriva	INSERT	289	2026-04-13 13:43:42.208896+00
-783	unos_goriva	evidencija_goriva	INSERT	290	2026-04-13 13:43:42.208896+00
-784	unos_goriva	evidencija_goriva	INSERT	291	2026-04-13 13:43:42.208896+00
-785	unos_goriva	evidencija_goriva	INSERT	292	2026-04-13 13:43:42.208896+00
-786	unos_goriva	evidencija_goriva	INSERT	293	2026-04-13 13:43:42.208896+00
-787	unos_goriva	evidencija_goriva	INSERT	294	2026-04-13 13:43:42.208896+00
-788	unos_goriva	evidencija_goriva	INSERT	295	2026-04-13 13:43:42.208896+00
-789	unos_goriva	evidencija_goriva	INSERT	296	2026-04-13 13:43:42.208896+00
-790	unos_goriva	evidencija_goriva	INSERT	297	2026-04-13 13:43:42.208896+00
-791	unos_goriva	evidencija_goriva	INSERT	298	2026-04-13 13:43:42.208896+00
-792	unos_goriva	evidencija_goriva	INSERT	299	2026-04-13 13:43:42.208896+00
-793	unos_goriva	evidencija_goriva	INSERT	300	2026-04-13 13:43:42.208896+00
-794	unos_goriva	evidencija_goriva	INSERT	301	2026-04-13 13:43:42.208896+00
-795	unos_goriva	evidencija_goriva	INSERT	302	2026-04-13 13:43:42.208896+00
-796	unos_goriva	evidencija_goriva	INSERT	303	2026-04-13 13:43:42.208896+00
-797	unos_goriva	evidencija_goriva	INSERT	304	2026-04-13 13:43:42.208896+00
-798	unos_goriva	evidencija_goriva	INSERT	305	2026-04-13 13:43:42.208896+00
-799	unos_goriva	evidencija_goriva	INSERT	306	2026-04-13 13:43:42.208896+00
-800	unos_goriva	evidencija_goriva	INSERT	307	2026-04-13 13:43:42.208896+00
-801	unos_goriva	evidencija_goriva	INSERT	308	2026-04-13 13:43:42.208896+00
-802	unos_goriva	evidencija_goriva	INSERT	309	2026-04-13 13:43:42.208896+00
-803	unos_goriva	evidencija_goriva	INSERT	310	2026-04-13 13:43:42.208896+00
-804	unos_goriva	evidencija_goriva	INSERT	311	2026-04-13 13:43:42.208896+00
-805	unos_goriva	evidencija_goriva	INSERT	312	2026-04-13 13:43:42.208896+00
-806	unos_goriva	evidencija_goriva	INSERT	313	2026-04-13 13:43:42.208896+00
-807	unos_goriva	evidencija_goriva	INSERT	314	2026-04-13 13:43:42.208896+00
-808	unos_goriva	evidencija_goriva	INSERT	315	2026-04-13 13:43:42.208896+00
-809	unos_goriva	evidencija_goriva	INSERT	316	2026-04-13 13:43:42.208896+00
-810	unos_goriva	evidencija_goriva	INSERT	317	2026-04-13 13:43:42.208896+00
-811	unos_goriva	evidencija_goriva	INSERT	318	2026-04-13 13:43:42.208896+00
-812	unos_goriva	evidencija_goriva	INSERT	319	2026-04-13 13:43:42.208896+00
-813	unos_goriva	evidencija_goriva	INSERT	320	2026-04-13 13:43:42.208896+00
-814	unos_goriva	evidencija_goriva	INSERT	321	2026-04-13 13:43:42.208896+00
-815	unos_goriva	evidencija_goriva	INSERT	322	2026-04-13 13:43:42.208896+00
-816	unos_goriva	evidencija_goriva	INSERT	323	2026-04-13 13:43:42.208896+00
-817	unos_goriva	evidencija_goriva	INSERT	324	2026-04-13 13:43:42.208896+00
-818	unos_goriva	evidencija_goriva	INSERT	325	2026-04-13 13:43:42.208896+00
-819	unos_goriva	evidencija_goriva	INSERT	326	2026-04-13 13:43:42.208896+00
-820	unos_goriva	evidencija_goriva	INSERT	327	2026-04-13 13:43:42.208896+00
-821	unos_goriva	evidencija_goriva	INSERT	328	2026-04-13 13:43:42.208896+00
-822	unos_goriva	evidencija_goriva	INSERT	329	2026-04-13 13:43:42.208896+00
-823	unos_goriva	evidencija_goriva	INSERT	330	2026-04-13 13:43:42.208896+00
-824	unos_goriva	evidencija_goriva	INSERT	331	2026-04-13 13:43:42.208896+00
-825	unos_goriva	evidencija_goriva	INSERT	332	2026-04-13 13:43:42.208896+00
-826	unos_goriva	evidencija_goriva	INSERT	333	2026-04-13 13:43:42.208896+00
-827	unos_goriva	evidencija_goriva	INSERT	334	2026-04-13 13:43:42.208896+00
-828	unos_goriva	evidencija_goriva	INSERT	335	2026-04-13 13:43:42.208896+00
-829	unos_goriva	evidencija_goriva	INSERT	336	2026-04-13 13:43:42.208896+00
-830	unos_goriva	evidencija_goriva	INSERT	337	2026-04-13 13:43:42.208896+00
-831	unos_goriva	evidencija_goriva	INSERT	338	2026-04-13 13:43:42.208896+00
-832	unos_goriva	evidencija_goriva	INSERT	339	2026-04-13 13:43:42.208896+00
-833	unos_goriva	evidencija_goriva	INSERT	340	2026-04-13 13:43:42.208896+00
-834	unos_goriva	evidencija_goriva	INSERT	341	2026-04-13 13:43:42.208896+00
-835	unos_goriva	evidencija_goriva	INSERT	342	2026-04-13 13:43:42.208896+00
-836	unos_goriva	evidencija_goriva	INSERT	343	2026-04-13 13:43:42.208896+00
-837	unos_goriva	evidencija_goriva	INSERT	344	2026-04-13 13:43:42.208896+00
-838	unos_goriva	evidencija_goriva	INSERT	345	2026-04-13 13:43:42.208896+00
-839	unos_goriva	evidencija_goriva	INSERT	346	2026-04-13 13:43:42.208896+00
-840	unos_goriva	evidencija_goriva	INSERT	347	2026-04-13 13:43:42.208896+00
-841	unos_goriva	evidencija_goriva	INSERT	348	2026-04-13 13:43:42.208896+00
-842	unos_goriva	evidencija_goriva	INSERT	349	2026-04-13 13:43:42.208896+00
-843	unos_goriva	evidencija_goriva	INSERT	350	2026-04-13 13:43:42.208896+00
-844	unos_goriva	evidencija_goriva	INSERT	351	2026-04-13 13:43:42.208896+00
-845	unos_goriva	evidencija_goriva	INSERT	352	2026-04-13 13:43:42.208896+00
-846	unos_goriva	evidencija_goriva	INSERT	353	2026-04-13 13:43:42.208896+00
-847	unos_goriva	evidencija_goriva	INSERT	354	2026-04-13 13:43:42.208896+00
-848	unos_goriva	evidencija_goriva	INSERT	355	2026-04-13 13:43:42.208896+00
-849	unos_goriva	evidencija_goriva	INSERT	356	2026-04-13 13:43:42.208896+00
-850	unos_goriva	evidencija_goriva	INSERT	357	2026-04-13 13:43:42.208896+00
-851	unos_goriva	evidencija_goriva	INSERT	358	2026-04-13 13:43:42.208896+00
-852	unos_goriva	evidencija_goriva	INSERT	359	2026-04-13 13:43:42.208896+00
-853	unos_goriva	evidencija_goriva	INSERT	360	2026-04-13 13:43:42.208896+00
-854	unos_goriva	evidencija_goriva	INSERT	361	2026-04-13 13:43:42.208896+00
-855	unos_goriva	evidencija_goriva	INSERT	362	2026-04-13 13:43:42.208896+00
-856	unos_goriva	evidencija_goriva	INSERT	363	2026-04-13 13:43:42.208896+00
-857	unos_goriva	evidencija_goriva	INSERT	364	2026-04-13 13:43:42.208896+00
-858	unos_goriva	evidencija_goriva	INSERT	365	2026-04-13 13:43:42.208896+00
-859	unos_goriva	evidencija_goriva	INSERT	366	2026-04-13 13:43:42.208896+00
-860	unos_goriva	evidencija_goriva	INSERT	367	2026-04-13 13:43:42.208896+00
-861	unos_goriva	evidencija_goriva	INSERT	368	2026-04-13 13:43:42.208896+00
-862	unos_goriva	evidencija_goriva	INSERT	369	2026-04-13 13:43:42.208896+00
-863	unos_goriva	evidencija_goriva	INSERT	370	2026-04-13 13:43:42.208896+00
-864	unos_goriva	evidencija_goriva	INSERT	371	2026-04-13 13:43:42.208896+00
-865	unos_goriva	evidencija_goriva	INSERT	372	2026-04-13 13:43:42.208896+00
-866	unos_goriva	evidencija_goriva	INSERT	373	2026-04-13 13:43:42.208896+00
-867	unos_goriva	evidencija_goriva	INSERT	374	2026-04-13 13:43:42.208896+00
-868	unos_goriva	evidencija_goriva	INSERT	375	2026-04-13 13:43:42.208896+00
-869	unos_goriva	evidencija_goriva	INSERT	376	2026-04-13 13:43:42.208896+00
-870	unos_goriva	evidencija_goriva	INSERT	377	2026-04-13 13:43:42.208896+00
-871	unos_goriva	evidencija_goriva	INSERT	378	2026-04-13 13:43:42.208896+00
-872	unos_goriva	evidencija_goriva	INSERT	379	2026-04-13 13:43:42.208896+00
-873	unos_goriva	evidencija_goriva	INSERT	380	2026-04-13 13:43:42.208896+00
-874	unos_goriva	evidencija_goriva	INSERT	381	2026-04-13 13:43:42.208896+00
-875	unos_goriva	evidencija_goriva	INSERT	382	2026-04-13 13:43:42.208896+00
-876	unos_goriva	evidencija_goriva	INSERT	383	2026-04-13 13:43:42.208896+00
-877	unos_goriva	evidencija_goriva	INSERT	384	2026-04-13 13:43:42.208896+00
-878	unos_goriva	evidencija_goriva	INSERT	385	2026-04-13 13:43:42.208896+00
-879	unos_goriva	evidencija_goriva	INSERT	386	2026-04-13 13:43:42.208896+00
-880	unos_goriva	evidencija_goriva	INSERT	387	2026-04-13 13:43:42.208896+00
-881	unos_goriva	evidencija_goriva	INSERT	388	2026-04-13 13:43:42.208896+00
-882	unos_goriva	evidencija_goriva	INSERT	389	2026-04-13 13:43:42.208896+00
-883	unos_goriva	evidencija_goriva	INSERT	390	2026-04-13 13:43:42.208896+00
-884	unos_goriva	evidencija_goriva	INSERT	391	2026-04-13 13:43:42.208896+00
-885	unos_goriva	evidencija_goriva	INSERT	392	2026-04-13 13:43:42.208896+00
-886	unos_goriva	evidencija_goriva	INSERT	393	2026-04-13 13:43:42.208896+00
-887	unos_goriva	evidencija_goriva	INSERT	394	2026-04-13 13:43:42.208896+00
-888	unos_goriva	evidencija_goriva	INSERT	395	2026-04-13 13:43:42.208896+00
-889	unos_goriva	evidencija_goriva	INSERT	396	2026-04-13 13:43:42.208896+00
-890	unos_goriva	evidencija_goriva	INSERT	397	2026-04-13 13:43:42.208896+00
-891	unos_goriva	evidencija_goriva	INSERT	398	2026-04-13 13:43:42.208896+00
-892	unos_goriva	evidencija_goriva	INSERT	399	2026-04-13 13:43:42.208896+00
-893	unos_goriva	evidencija_goriva	INSERT	400	2026-04-13 13:43:42.208896+00
-894	unos_goriva	evidencija_goriva	INSERT	401	2026-04-13 13:43:42.208896+00
-895	unos_goriva	evidencija_goriva	INSERT	402	2026-04-13 13:43:42.208896+00
-896	unos_goriva	evidencija_goriva	INSERT	403	2026-04-13 13:43:42.208896+00
-897	unos_goriva	evidencija_goriva	INSERT	404	2026-04-13 13:43:42.208896+00
-898	unos_goriva	evidencija_goriva	INSERT	405	2026-04-13 13:43:42.208896+00
-899	unos_goriva	evidencija_goriva	INSERT	406	2026-04-13 13:43:42.208896+00
-900	unos_goriva	evidencija_goriva	INSERT	407	2026-04-13 13:43:42.208896+00
-901	unos_goriva	evidencija_goriva	INSERT	408	2026-04-13 13:43:42.208896+00
-902	unos_goriva	evidencija_goriva	INSERT	409	2026-04-13 13:43:42.208896+00
-903	unos_goriva	evidencija_goriva	INSERT	410	2026-04-13 13:43:42.208896+00
-904	unos_goriva	evidencija_goriva	INSERT	411	2026-04-13 13:43:42.208896+00
-905	unos_goriva	evidencija_goriva	INSERT	412	2026-04-13 13:43:42.208896+00
-906	unos_goriva	evidencija_goriva	INSERT	413	2026-04-13 13:43:42.208896+00
-907	unos_goriva	evidencija_goriva	INSERT	414	2026-04-13 13:43:42.208896+00
-908	unos_goriva	evidencija_goriva	INSERT	415	2026-04-13 13:43:42.208896+00
-909	unos_goriva	evidencija_goriva	INSERT	416	2026-04-13 13:43:42.208896+00
-910	unos_goriva	evidencija_goriva	INSERT	417	2026-04-13 13:43:42.208896+00
-911	unos_goriva	evidencija_goriva	INSERT	418	2026-04-13 13:43:42.208896+00
-912	unos_goriva	evidencija_goriva	INSERT	419	2026-04-13 13:43:42.208896+00
-913	unos_goriva	evidencija_goriva	INSERT	420	2026-04-13 13:43:42.208896+00
-914	unos_goriva	evidencija_goriva	INSERT	421	2026-04-13 13:43:42.208896+00
-915	unos_goriva	evidencija_goriva	INSERT	422	2026-04-13 13:43:42.208896+00
-916	unos_goriva	evidencija_goriva	INSERT	423	2026-04-13 13:43:42.208896+00
-917	unos_goriva	evidencija_goriva	INSERT	424	2026-04-13 13:43:42.208896+00
-918	unos_goriva	evidencija_goriva	INSERT	425	2026-04-13 13:43:42.208896+00
-919	unos_goriva	evidencija_goriva	INSERT	426	2026-04-13 13:43:42.208896+00
-920	unos_goriva	evidencija_goriva	INSERT	427	2026-04-13 13:43:42.208896+00
-921	unos_goriva	evidencija_goriva	INSERT	428	2026-04-13 13:43:42.208896+00
-922	unos_goriva	evidencija_goriva	INSERT	429	2026-04-13 13:43:42.208896+00
-923	unos_goriva	evidencija_goriva	INSERT	430	2026-04-13 13:43:42.208896+00
-924	unos_goriva	evidencija_goriva	INSERT	431	2026-04-13 13:43:42.208896+00
-925	unos_goriva	evidencija_goriva	INSERT	432	2026-04-13 13:43:42.208896+00
-926	unos_goriva	evidencija_goriva	INSERT	433	2026-04-13 13:43:42.208896+00
-927	unos_goriva	evidencija_goriva	INSERT	434	2026-04-13 13:43:42.208896+00
-928	unos_goriva	evidencija_goriva	INSERT	435	2026-04-13 13:43:42.208896+00
-929	unos_goriva	evidencija_goriva	INSERT	436	2026-04-13 13:43:42.208896+00
-930	unos_goriva	evidencija_goriva	INSERT	437	2026-04-13 13:43:42.208896+00
-931	unos_goriva	evidencija_goriva	INSERT	438	2026-04-13 13:43:42.208896+00
-932	unos_goriva	evidencija_goriva	INSERT	439	2026-04-13 13:43:42.208896+00
-933	unos_goriva	evidencija_goriva	INSERT	440	2026-04-13 13:43:42.208896+00
-934	unos_goriva	evidencija_goriva	INSERT	441	2026-04-13 13:43:42.208896+00
-935	unos_goriva	evidencija_goriva	INSERT	442	2026-04-13 13:43:42.208896+00
-936	unos_goriva	evidencija_goriva	INSERT	443	2026-04-13 13:43:42.208896+00
-937	unos_goriva	evidencija_goriva	INSERT	444	2026-04-13 13:43:42.208896+00
-938	unos_goriva	evidencija_goriva	INSERT	445	2026-04-13 13:43:42.208896+00
-939	unos_goriva	evidencija_goriva	INSERT	446	2026-04-13 13:43:42.208896+00
-940	unos_goriva	evidencija_goriva	INSERT	447	2026-04-13 13:43:42.208896+00
-941	unos_goriva	evidencija_goriva	INSERT	448	2026-04-13 13:43:42.208896+00
-942	nova_prijava_kvara	servisne_intervencije	INSERT	41	2026-04-13 13:43:42.208896+00
-943	nova_prijava_kvara	servisne_intervencije	INSERT	42	2026-04-13 13:43:42.208896+00
-944	nova_prijava_kvara	servisne_intervencije	INSERT	43	2026-04-13 13:43:42.208896+00
-945	nova_prijava_kvara	servisne_intervencije	INSERT	44	2026-04-13 13:43:42.208896+00
-946	nova_prijava_kvara	servisne_intervencije	INSERT	45	2026-04-13 13:43:42.208896+00
-947	nova_prijava_kvara	servisne_intervencije	INSERT	46	2026-04-13 13:43:42.208896+00
-948	nova_prijava_kvara	servisne_intervencije	INSERT	47	2026-04-13 13:43:42.208896+00
-949	nova_prijava_kvara	servisne_intervencije	INSERT	48	2026-04-13 13:43:42.208896+00
-950	nova_prijava_kvara	servisne_intervencije	INSERT	49	2026-04-13 13:43:42.208896+00
-951	nova_prijava_kvara	servisne_intervencije	INSERT	50	2026-04-13 13:43:42.208896+00
-952	nova_prijava_kvara	servisne_intervencije	INSERT	51	2026-04-13 13:43:42.208896+00
-953	nova_prijava_kvara	servisne_intervencije	INSERT	52	2026-04-13 13:43:42.208896+00
-954	nova_prijava_kvara	servisne_intervencije	INSERT	53	2026-04-13 13:43:42.208896+00
-955	nova_prijava_kvara	servisne_intervencije	INSERT	54	2026-04-13 13:43:42.208896+00
-956	nova_prijava_kvara	servisne_intervencije	INSERT	55	2026-04-13 13:43:42.208896+00
-957	nova_prijava_kvara	servisne_intervencije	INSERT	56	2026-04-13 13:43:42.208896+00
-958	nova_prijava_kvara	servisne_intervencije	INSERT	57	2026-04-13 13:43:42.208896+00
-959	nova_prijava_kvara	servisne_intervencije	INSERT	58	2026-04-13 13:43:42.208896+00
-960	nova_prijava_kvara	servisne_intervencije	INSERT	59	2026-04-13 13:43:42.208896+00
-961	nova_prijava_kvara	servisne_intervencije	INSERT	60	2026-04-13 13:43:42.208896+00
-962	nova_prijava_kvara	servisne_intervencije	INSERT	61	2026-04-13 13:43:42.208896+00
-963	nova_prijava_kvara	servisne_intervencije	INSERT	62	2026-04-13 13:43:42.208896+00
-964	nova_prijava_kvara	servisne_intervencije	INSERT	63	2026-04-13 13:43:42.208896+00
-965	nova_prijava_kvara	servisne_intervencije	INSERT	64	2026-04-13 13:43:42.208896+00
-966	nova_prijava_kvara	servisne_intervencije	INSERT	65	2026-04-13 13:43:42.208896+00
-967	nova_prijava_kvara	servisne_intervencije	INSERT	66	2026-04-13 13:43:42.208896+00
-968	nova_prijava_kvara	servisne_intervencije	INSERT	67	2026-04-13 13:43:42.208896+00
-969	nova_prijava_kvara	servisne_intervencije	INSERT	68	2026-04-13 13:43:42.208896+00
-970	nova_prijava_kvara	servisne_intervencije	INSERT	69	2026-04-13 13:43:42.208896+00
-971	nova_prijava_kvara	servisne_intervencije	INSERT	70	2026-04-13 13:43:42.208896+00
-972	nova_prijava_kvara	servisne_intervencije	INSERT	71	2026-04-13 13:43:42.208896+00
-973	nova_prijava_kvara	servisne_intervencije	INSERT	72	2026-04-13 13:43:42.208896+00
-974	nova_prijava_kvara	servisne_intervencije	INSERT	73	2026-04-13 13:43:42.208896+00
-975	nova_prijava_kvara	servisne_intervencije	INSERT	74	2026-04-13 13:43:42.208896+00
-976	nova_prijava_kvara	servisne_intervencije	INSERT	75	2026-04-13 13:43:42.208896+00
-977	nova_prijava_kvara	servisne_intervencije	INSERT	76	2026-04-13 13:43:42.208896+00
-978	nova_prijava_kvara	servisne_intervencije	INSERT	77	2026-04-13 13:43:42.208896+00
-979	nova_prijava_kvara	servisne_intervencije	INSERT	78	2026-04-13 13:43:42.208896+00
-980	nova_prijava_kvara	servisne_intervencije	INSERT	79	2026-04-13 13:43:42.208896+00
-981	nova_prijava_kvara	servisne_intervencije	INSERT	80	2026-04-13 13:43:42.208896+00
-982	nova_prijava_kvara	servisne_intervencije	INSERT	81	2026-04-13 13:43:42.208896+00
-983	nova_prijava_kvara	servisne_intervencije	INSERT	82	2026-04-13 13:43:42.208896+00
-984	nova_prijava_kvara	servisne_intervencije	INSERT	83	2026-04-13 13:43:42.208896+00
-985	nova_prijava_kvara	servisne_intervencije	INSERT	84	2026-04-13 13:43:42.208896+00
-986	nova_prijava_kvara	servisne_intervencije	INSERT	85	2026-04-13 13:43:42.208896+00
-987	nova_prijava_kvara	servisne_intervencije	INSERT	86	2026-04-13 13:43:42.208896+00
-988	nova_prijava_kvara	servisne_intervencije	INSERT	87	2026-04-13 13:43:42.208896+00
-989	nova_prijava_kvara	servisne_intervencije	INSERT	88	2026-04-13 13:43:42.208896+00
-990	nova_prijava_kvara	servisne_intervencije	INSERT	89	2026-04-13 13:43:42.208896+00
-991	nova_prijava_kvara	servisne_intervencije	INSERT	90	2026-04-13 13:43:42.208896+00
-992	nova_prijava_kvara	servisne_intervencije	INSERT	91	2026-04-13 13:43:42.208896+00
-993	nova_prijava_kvara	servisne_intervencije	INSERT	92	2026-04-13 13:43:42.208896+00
-994	nova_prijava_kvara	servisne_intervencije	INSERT	93	2026-04-13 13:43:42.208896+00
-995	nova_prijava_kvara	servisne_intervencije	INSERT	94	2026-04-13 13:43:42.208896+00
-996	nova_prijava_kvara	servisne_intervencije	INSERT	95	2026-04-13 13:43:42.208896+00
-997	nova_prijava_kvara	servisne_intervencije	INSERT	96	2026-04-13 13:43:42.208896+00
-998	nova_prijava_kvara	servisne_intervencije	INSERT	97	2026-04-13 13:43:42.208896+00
-999	nova_prijava_kvara	servisne_intervencije	INSERT	98	2026-04-13 13:43:42.208896+00
-1000	nova_prijava_kvara	servisne_intervencije	INSERT	99	2026-04-13 13:43:42.208896+00
-1001	nova_prijava_kvara	servisne_intervencije	INSERT	100	2026-04-13 13:43:42.208896+00
-1002	nova_prijava_kvara	servisne_intervencije	INSERT	101	2026-04-13 13:43:42.208896+00
-1003	nova_prijava_kvara	servisne_intervencije	INSERT	102	2026-04-13 13:43:42.208896+00
-1004	nova_prijava_kvara	servisne_intervencije	INSERT	103	2026-04-13 13:43:42.208896+00
-1005	nova_prijava_kvara	servisne_intervencije	INSERT	104	2026-04-13 13:43:42.208896+00
-1006	nova_prijava_kvara	servisne_intervencije	INSERT	105	2026-04-13 13:43:42.208896+00
-1007	nova_prijava_kvara	servisne_intervencije	INSERT	106	2026-04-13 13:43:42.208896+00
-1008	nova_prijava_kvara	servisne_intervencije	INSERT	107	2026-04-13 13:43:42.208896+00
-1009	nova_prijava_kvara	servisne_intervencije	INSERT	108	2026-04-13 13:43:42.208896+00
-1010	nova_prijava_kvara	servisne_intervencije	INSERT	109	2026-04-13 13:43:42.208896+00
-1011	nova_prijava_kvara	servisne_intervencije	INSERT	110	2026-04-13 13:43:42.208896+00
-1012	nova_prijava_kvara	servisne_intervencije	INSERT	111	2026-04-13 13:43:42.208896+00
-1013	nova_prijava_kvara	servisne_intervencije	INSERT	112	2026-04-13 13:43:42.208896+00
-1014	nova_prijava_kvara	servisne_intervencije	INSERT	113	2026-04-13 13:43:42.208896+00
-1015	nova_prijava_kvara	servisne_intervencije	INSERT	114	2026-04-13 13:43:42.208896+00
-1016	nova_prijava_kvara	servisne_intervencije	INSERT	115	2026-04-13 13:43:42.208896+00
-1017	nova_prijava_kvara	servisne_intervencije	INSERT	116	2026-04-13 13:43:42.208896+00
-1018	nova_prijava_kvara	servisne_intervencije	INSERT	117	2026-04-13 13:43:42.208896+00
-1019	nova_prijava_kvara	servisne_intervencije	INSERT	118	2026-04-13 13:43:42.208896+00
-1020	nova_prijava_kvara	servisne_intervencije	INSERT	119	2026-04-13 13:43:42.208896+00
-1021	nova_prijava_kvara	servisne_intervencije	INSERT	120	2026-04-13 13:43:42.208896+00
-1022	nova_prijava_kvara	servisne_intervencije	INSERT	121	2026-04-13 13:43:42.208896+00
-1023	nova_prijava_kvara	servisne_intervencije	INSERT	122	2026-04-13 13:43:42.208896+00
-1024	nova_prijava_kvara	servisne_intervencije	INSERT	123	2026-04-13 13:43:42.208896+00
-1025	nova_prijava_kvara	servisne_intervencije	INSERT	124	2026-04-13 13:43:42.208896+00
-1026	nova_prijava_kvara	servisne_intervencije	INSERT	125	2026-04-13 13:43:42.208896+00
-1027	nova_prijava_kvara	servisne_intervencije	INSERT	126	2026-04-13 13:43:42.208896+00
-1028	nova_prijava_kvara	servisne_intervencije	INSERT	127	2026-04-13 13:43:42.208896+00
-1029	nova_prijava_kvara	servisne_intervencije	INSERT	128	2026-04-13 13:43:42.208896+00
-1030	nova_prijava_kvara	servisne_intervencije	INSERT	129	2026-04-13 13:43:42.208896+00
-1031	nova_prijava_kvara	servisne_intervencije	INSERT	130	2026-04-13 13:43:42.208896+00
-1032	nova_prijava_kvara	servisne_intervencije	INSERT	131	2026-04-13 13:43:42.208896+00
-1033	nova_prijava_kvara	servisne_intervencije	INSERT	132	2026-04-13 13:43:42.208896+00
-1034	nova_prijava_kvara	servisne_intervencije	INSERT	133	2026-04-13 13:43:42.208896+00
-1035	nova_prijava_kvara	servisne_intervencije	INSERT	134	2026-04-13 13:43:42.208896+00
-1036	nova_prijava_kvara	servisne_intervencije	INSERT	135	2026-04-13 13:43:42.208896+00
-1037	nova_prijava_kvara	servisne_intervencije	INSERT	136	2026-04-13 13:43:42.208896+00
-1038	nova_prijava_kvara	servisne_intervencije	INSERT	137	2026-04-13 13:43:42.208896+00
-1039	nova_prijava_kvara	servisne_intervencije	INSERT	138	2026-04-13 13:43:42.208896+00
-1040	nova_prijava_kvara	servisne_intervencije	INSERT	139	2026-04-13 13:43:42.208896+00
-1041	nova_prijava_kvara	servisne_intervencije	INSERT	140	2026-04-13 13:43:42.208896+00
-1042	nova_prijava_kvara	servisne_intervencije	INSERT	141	2026-04-13 13:43:42.208896+00
-1043	nova_prijava_kvara	servisne_intervencije	INSERT	142	2026-04-13 13:43:42.208896+00
-1044	nova_prijava_kvara	servisne_intervencije	INSERT	143	2026-04-13 13:43:42.208896+00
-1045	nova_prijava_kvara	servisne_intervencije	INSERT	144	2026-04-13 13:43:42.208896+00
-1046	nova_prijava_kvara	servisne_intervencije	INSERT	145	2026-04-13 13:43:42.208896+00
-1047	nova_prijava_kvara	servisne_intervencije	INSERT	146	2026-04-13 13:43:42.208896+00
-1048	nova_prijava_kvara	servisne_intervencije	INSERT	147	2026-04-13 13:43:42.208896+00
-1049	nova_prijava_kvara	servisne_intervencije	INSERT	148	2026-04-13 13:43:42.208896+00
-1050	nova_prijava_kvara	servisne_intervencije	INSERT	149	2026-04-13 13:43:42.208896+00
-1051	nova_prijava_kvara	servisne_intervencije	INSERT	150	2026-04-13 13:43:42.208896+00
-1052	nova_prijava_kvara	servisne_intervencije	INSERT	151	2026-04-13 13:43:42.208896+00
-1053	nova_prijava_kvara	servisne_intervencije	INSERT	152	2026-04-13 13:43:42.208896+00
-1054	nova_prijava_kvara	servisne_intervencije	INSERT	153	2026-04-13 13:43:42.208896+00
-1055	nova_prijava_kvara	servisne_intervencije	INSERT	154	2026-04-13 13:43:42.208896+00
-1056	nova_prijava_kvara	servisne_intervencije	INSERT	155	2026-04-13 13:43:42.208896+00
-1057	nova_prijava_kvara	servisne_intervencije	INSERT	156	2026-04-13 13:43:42.208896+00
-1058	nova_prijava_kvara	servisne_intervencije	INSERT	157	2026-04-13 13:43:42.208896+00
-1059	nova_prijava_kvara	servisne_intervencije	INSERT	158	2026-04-13 13:43:42.208896+00
-1060	nova_prijava_kvara	servisne_intervencije	INSERT	159	2026-04-13 13:43:42.208896+00
-1061	nova_prijava_kvara	servisne_intervencije	INSERT	160	2026-04-13 13:43:42.208896+00
-1062	nova_prijava_kvara	servisne_intervencije	INSERT	161	2026-04-13 13:43:42.208896+00
-1063	nova_prijava_kvara	servisne_intervencije	INSERT	162	2026-04-13 13:43:42.208896+00
-1064	nova_prijava_kvara	servisne_intervencije	INSERT	163	2026-04-13 13:43:42.208896+00
-1065	nova_prijava_kvara	servisne_intervencije	INSERT	164	2026-04-13 13:43:42.208896+00
-1066	nova_prijava_kvara	servisne_intervencije	INSERT	165	2026-04-13 13:43:42.208896+00
-1067	nova_prijava_kvara	servisne_intervencije	INSERT	166	2026-04-13 13:43:42.208896+00
-1068	nova_prijava_kvara	servisne_intervencije	INSERT	167	2026-04-13 13:43:42.208896+00
-1069	nova_prijava_kvara	servisne_intervencije	INSERT	168	2026-04-13 13:43:42.208896+00
-1070	nova_prijava_kvara	servisne_intervencije	INSERT	169	2026-04-13 13:43:42.208896+00
-1071	nova_prijava_kvara	servisne_intervencije	INSERT	170	2026-04-13 13:43:42.208896+00
-1072	nova_prijava_kvara	servisne_intervencije	INSERT	171	2026-04-13 13:43:42.208896+00
-1073	nova_prijava_kvara	servisne_intervencije	INSERT	172	2026-04-13 13:43:42.208896+00
-1074	nova_prijava_kvara	servisne_intervencije	INSERT	173	2026-04-13 13:43:42.208896+00
-1075	nova_prijava_kvara	servisne_intervencije	INSERT	174	2026-04-13 13:43:42.208896+00
-1076	nova_prijava_kvara	servisne_intervencije	INSERT	175	2026-04-13 13:43:42.208896+00
-1077	nova_prijava_kvara	servisne_intervencije	INSERT	176	2026-04-13 13:43:42.208896+00
-1078	nova_prijava_kvara	servisne_intervencije	INSERT	177	2026-04-13 13:43:42.208896+00
-1079	nova_prijava_kvara	servisne_intervencije	INSERT	178	2026-04-13 13:43:42.208896+00
-1080	nova_prijava_kvara	servisne_intervencije	INSERT	179	2026-04-13 13:43:42.208896+00
-1081	nova_prijava_kvara	servisne_intervencije	INSERT	180	2026-04-13 13:43:42.208896+00
-1082	nova_prijava_kvara	servisne_intervencije	INSERT	181	2026-04-13 13:43:42.208896+00
-1083	nova_prijava_kvara	servisne_intervencije	INSERT	182	2026-04-13 13:43:42.208896+00
-1084	nova_prijava_kvara	servisne_intervencije	INSERT	183	2026-04-13 13:43:42.208896+00
-1085	nova_prijava_kvara	servisne_intervencije	INSERT	184	2026-04-13 13:43:42.208896+00
-1086	nova_prijava_kvara	servisne_intervencije	INSERT	185	2026-04-13 13:43:42.208896+00
-1087	nova_prijava_kvara	servisne_intervencije	INSERT	186	2026-04-13 13:43:42.208896+00
-1088	nova_prijava_kvara	servisne_intervencije	INSERT	187	2026-04-13 13:43:42.208896+00
-1089	nova_prijava_kvara	servisne_intervencije	INSERT	188	2026-04-13 13:43:42.208896+00
-1090	nova_prijava_kvara	servisne_intervencije	INSERT	189	2026-04-13 13:43:42.208896+00
-1091	nova_prijava_kvara	servisne_intervencije	INSERT	190	2026-04-13 13:43:42.208896+00
-1092	nova_prijava_kvara	servisne_intervencije	INSERT	191	2026-04-13 13:43:42.208896+00
-1093	nova_prijava_kvara	servisne_intervencije	INSERT	192	2026-04-13 13:43:42.208896+00
-1094	nova_prijava_kvara	servisne_intervencije	INSERT	193	2026-04-13 13:43:42.208896+00
-1095	nova_prijava_kvara	servisne_intervencije	INSERT	194	2026-04-13 13:43:42.208896+00
-1096	nova_prijava_kvara	servisne_intervencije	INSERT	195	2026-04-13 13:43:42.208896+00
-1097	nova_prijava_kvara	servisne_intervencije	INSERT	196	2026-04-13 13:43:42.208896+00
-1098	nova_prijava_kvara	servisne_intervencije	INSERT	197	2026-04-13 13:43:42.208896+00
-1099	nova_prijava_kvara	servisne_intervencije	INSERT	198	2026-04-13 13:43:42.208896+00
-1100	nova_prijava_kvara	servisne_intervencije	INSERT	199	2026-04-13 13:43:42.208896+00
-1101	nova_prijava_kvara	servisne_intervencije	INSERT	200	2026-04-13 13:43:42.208896+00
-1102	nova_prijava_kvara	servisne_intervencije	INSERT	201	2026-04-13 13:43:42.208896+00
-1103	nova_prijava_kvara	servisne_intervencije	INSERT	202	2026-04-13 13:43:42.208896+00
-1104	nova_prijava_kvara	servisne_intervencije	INSERT	203	2026-04-13 13:43:42.208896+00
-1105	nova_prijava_kvara	servisne_intervencije	INSERT	204	2026-04-13 13:43:42.208896+00
-1106	nova_prijava_kvara	servisne_intervencije	INSERT	205	2026-04-13 13:43:42.208896+00
-1107	nova_prijava_kvara	servisne_intervencije	INSERT	206	2026-04-13 13:43:42.208896+00
-1108	nova_prijava_kvara	servisne_intervencije	INSERT	207	2026-04-13 13:43:42.208896+00
-1109	nova_prijava_kvara	servisne_intervencije	INSERT	208	2026-04-13 13:43:42.208896+00
-1110	nova_prijava_kvara	servisne_intervencije	INSERT	209	2026-04-13 13:43:42.208896+00
-1111	nova_prijava_kvara	servisne_intervencije	INSERT	210	2026-04-13 13:43:42.208896+00
-1112	nova_prijava_kvara	servisne_intervencije	INSERT	211	2026-04-13 13:43:42.208896+00
-1113	nova_prijava_kvara	servisne_intervencije	INSERT	212	2026-04-13 13:43:42.208896+00
-1114	nova_prijava_kvara	servisne_intervencije	INSERT	213	2026-04-13 13:43:42.208896+00
-1115	nova_prijava_kvara	servisne_intervencije	INSERT	214	2026-04-13 13:43:42.208896+00
-1116	nova_prijava_kvara	servisne_intervencije	INSERT	215	2026-04-13 13:43:42.208896+00
-1117	nova_prijava_kvara	servisne_intervencije	INSERT	216	2026-04-13 13:43:42.208896+00
-1118	nova_prijava_kvara	servisne_intervencije	INSERT	217	2026-04-13 13:43:42.208896+00
-1119	nova_prijava_kvara	servisne_intervencije	INSERT	218	2026-04-13 13:43:42.208896+00
-1120	nova_prijava_kvara	servisne_intervencije	INSERT	219	2026-04-13 13:43:42.208896+00
-1121	nova_prijava_kvara	servisne_intervencije	INSERT	220	2026-04-13 13:43:42.208896+00
-1122	nova_prijava_kvara	servisne_intervencije	INSERT	221	2026-04-13 13:43:42.208896+00
-1123	nova_prijava_kvara	servisne_intervencije	INSERT	222	2026-04-13 13:43:42.208896+00
-1124	nova_prijava_kvara	servisne_intervencije	INSERT	223	2026-04-13 13:43:42.208896+00
-1125	nova_prijava_kvara	servisne_intervencije	INSERT	224	2026-04-13 13:43:42.208896+00
-1126	nova_prijava_kvara	servisne_intervencije	INSERT	225	2026-04-13 13:43:42.208896+00
-1127	nova_prijava_kvara	servisne_intervencije	INSERT	226	2026-04-13 13:43:42.208896+00
-1128	nova_prijava_kvara	servisne_intervencije	INSERT	227	2026-04-13 13:43:42.208896+00
-1129	nova_prijava_kvara	servisne_intervencije	INSERT	228	2026-04-13 13:43:42.208896+00
-1130	nova_prijava_kvara	servisne_intervencije	INSERT	229	2026-04-13 13:43:42.208896+00
-1131	nova_prijava_kvara	servisne_intervencije	INSERT	230	2026-04-13 13:43:42.208896+00
-1132	nova_prijava_kvara	servisne_intervencije	INSERT	231	2026-04-13 13:43:42.208896+00
-1133	nova_prijava_kvara	servisne_intervencije	INSERT	232	2026-04-13 13:43:42.208896+00
-1134	nova_prijava_kvara	servisne_intervencije	INSERT	233	2026-04-13 13:43:42.208896+00
-1135	nova_prijava_kvara	servisne_intervencije	INSERT	234	2026-04-13 13:43:42.208896+00
-1136	nova_prijava_kvara	servisne_intervencije	INSERT	235	2026-04-13 13:43:42.208896+00
-1137	nova_prijava_kvara	servisne_intervencije	INSERT	236	2026-04-13 13:43:42.208896+00
-1138	nova_prijava_kvara	servisne_intervencije	INSERT	237	2026-04-13 13:43:42.208896+00
-1139	nova_prijava_kvara	servisne_intervencije	INSERT	238	2026-04-13 13:43:42.208896+00
-1140	nova_prijava_kvara	servisne_intervencije	INSERT	239	2026-04-13 13:43:42.208896+00
-1141	nova_prijava_kvara	servisne_intervencije	INSERT	240	2026-04-13 13:43:42.208896+00
-1142	nova_prijava_kvara	servisne_intervencije	INSERT	241	2026-04-13 13:43:42.208896+00
-1143	nova_prijava_kvara	servisne_intervencije	INSERT	242	2026-04-13 13:43:42.208896+00
-1144	nova_prijava_kvara	servisne_intervencije	INSERT	243	2026-04-13 13:43:42.208896+00
-1145	nova_prijava_kvara	servisne_intervencije	INSERT	244	2026-04-13 13:43:42.208896+00
-1146	nova_prijava_kvara	servisne_intervencije	INSERT	245	2026-04-13 13:43:42.208896+00
-1147	nova_prijava_kvara	servisne_intervencije	INSERT	246	2026-04-13 13:43:42.208896+00
-1148	nova_prijava_kvara	servisne_intervencije	INSERT	247	2026-04-13 13:43:42.208896+00
-1149	nova_prijava_kvara	servisne_intervencije	INSERT	248	2026-04-13 13:43:42.208896+00
-1150	nova_prijava_kvara	servisne_intervencije	INSERT	249	2026-04-13 13:43:42.208896+00
-1151	nova_prijava_kvara	servisne_intervencije	INSERT	250	2026-04-13 13:43:42.208896+00
-1152	nova_prijava_kvara	servisne_intervencije	INSERT	251	2026-04-13 13:43:42.208896+00
-1153	nova_prijava_kvara	servisne_intervencije	INSERT	252	2026-04-13 13:43:42.208896+00
-1154	nova_prijava_kvara	servisne_intervencije	INSERT	253	2026-04-13 13:43:42.208896+00
-1155	nova_prijava_kvara	servisne_intervencije	INSERT	254	2026-04-13 13:43:42.208896+00
-1156	nova_prijava_kvara	servisne_intervencije	INSERT	255	2026-04-13 13:43:42.208896+00
-1157	nova_prijava_kvara	servisne_intervencije	INSERT	256	2026-04-13 13:43:42.208896+00
-1158	nova_prijava_kvara	servisne_intervencije	INSERT	257	2026-04-13 13:43:42.208896+00
-1159	nova_prijava_kvara	servisne_intervencije	INSERT	258	2026-04-13 13:43:42.208896+00
-1160	nova_prijava_kvara	servisne_intervencije	INSERT	259	2026-04-13 13:43:42.208896+00
-1161	nova_prijava_kvara	servisne_intervencije	INSERT	260	2026-04-13 13:43:42.208896+00
-1162	nova_prijava_kvara	servisne_intervencije	INSERT	261	2026-04-13 13:43:42.208896+00
-1163	nova_prijava_kvara	servisne_intervencije	INSERT	262	2026-04-13 13:43:42.208896+00
-1164	nova_prijava_kvara	servisne_intervencije	INSERT	263	2026-04-13 13:43:42.208896+00
-1165	nova_prijava_kvara	servisne_intervencije	INSERT	264	2026-04-13 13:43:42.208896+00
-1166	nova_prijava_kvara	servisne_intervencije	INSERT	265	2026-04-13 13:43:42.208896+00
-1167	nova_prijava_kvara	servisne_intervencije	INSERT	266	2026-04-13 13:43:42.208896+00
-1168	nova_prijava_kvara	servisne_intervencije	INSERT	267	2026-04-13 13:43:42.208896+00
-1169	nova_prijava_kvara	servisne_intervencije	INSERT	268	2026-04-13 13:43:42.208896+00
-1170	nova_prijava_kvara	servisne_intervencije	INSERT	269	2026-04-13 13:43:42.208896+00
-1171	nova_prijava_kvara	servisne_intervencije	INSERT	270	2026-04-13 13:43:42.208896+00
-1172	nova_prijava_kvara	servisne_intervencije	INSERT	271	2026-04-13 13:43:42.208896+00
-1173	nova_prijava_kvara	servisne_intervencije	INSERT	272	2026-04-13 13:43:42.208896+00
-1174	nova_prijava_kvara	servisne_intervencije	INSERT	273	2026-04-13 13:43:42.208896+00
-1175	nova_prijava_kvara	servisne_intervencije	INSERT	274	2026-04-13 13:43:42.208896+00
-1176	nova_prijava_kvara	servisne_intervencije	INSERT	275	2026-04-13 13:43:42.208896+00
-1177	nova_prijava_kvara	servisne_intervencije	INSERT	276	2026-04-13 13:43:42.208896+00
-1178	nova_prijava_kvara	servisne_intervencije	INSERT	277	2026-04-13 13:43:42.208896+00
-1179	nova_prijava_kvara	servisne_intervencije	INSERT	278	2026-04-13 13:43:42.208896+00
-1180	nova_prijava_kvara	servisne_intervencije	INSERT	279	2026-04-13 13:43:42.208896+00
-1181	nova_prijava_kvara	servisne_intervencije	INSERT	280	2026-04-13 13:43:42.208896+00
-1182	nova_prijava_kvara	servisne_intervencije	INSERT	281	2026-04-13 13:43:42.208896+00
-1183	nova_prijava_kvara	servisne_intervencije	INSERT	282	2026-04-13 13:43:42.208896+00
-1184	nova_prijava_kvara	servisne_intervencije	INSERT	283	2026-04-13 13:43:42.208896+00
-1185	nova_prijava_kvara	servisne_intervencije	INSERT	284	2026-04-13 13:43:42.208896+00
-1186	nova_prijava_kvara	servisne_intervencije	INSERT	285	2026-04-13 13:43:42.208896+00
-1187	nova_prijava_kvara	servisne_intervencije	INSERT	286	2026-04-13 13:43:42.208896+00
-1188	nova_prijava_kvara	servisne_intervencije	INSERT	287	2026-04-13 13:43:42.208896+00
-1189	nova_prijava_kvara	servisne_intervencije	INSERT	288	2026-04-13 13:43:42.208896+00
-1190	nova_prijava_kvara	servisne_intervencije	INSERT	289	2026-04-13 13:43:42.208896+00
-1191	nova_prijava_kvara	servisne_intervencije	INSERT	290	2026-04-13 13:43:42.208896+00
-1192	nova_prijava_kvara	servisne_intervencije	INSERT	291	2026-04-13 13:43:42.208896+00
-1193	nova_prijava_kvara	servisne_intervencije	INSERT	292	2026-04-13 13:43:42.208896+00
-1194	nova_prijava_kvara	servisne_intervencije	INSERT	293	2026-04-13 13:43:42.208896+00
-1195	nova_prijava_kvara	servisne_intervencije	INSERT	294	2026-04-13 13:43:42.208896+00
-1196	nova_prijava_kvara	servisne_intervencije	INSERT	295	2026-04-13 13:43:42.208896+00
-1197	nova_prijava_kvara	servisne_intervencije	INSERT	296	2026-04-13 13:43:42.208896+00
-1198	nova_prijava_kvara	servisne_intervencije	INSERT	297	2026-04-13 13:43:42.208896+00
-1199	nova_prijava_kvara	servisne_intervencije	INSERT	298	2026-04-13 13:43:42.208896+00
-1200	nova_prijava_kvara	servisne_intervencije	INSERT	299	2026-04-13 13:43:42.208896+00
-1201	nova_prijava_kvara	servisne_intervencije	INSERT	300	2026-04-13 13:43:42.208896+00
-1202	nova_prijava_kvara	servisne_intervencije	INSERT	301	2026-04-13 13:43:42.208896+00
-1203	nova_prijava_kvara	servisne_intervencije	INSERT	302	2026-04-13 13:43:42.208896+00
-1204	nova_prijava_kvara	servisne_intervencije	INSERT	303	2026-04-13 13:43:42.208896+00
-1205	nova_prijava_kvara	servisne_intervencije	INSERT	304	2026-04-13 13:43:42.208896+00
-1206	nova_prijava_kvara	servisne_intervencije	INSERT	305	2026-04-13 13:43:42.208896+00
-1207	nova_prijava_kvara	servisne_intervencije	INSERT	306	2026-04-13 13:43:42.208896+00
-1208	nova_prijava_kvara	servisne_intervencije	INSERT	307	2026-04-13 13:43:42.208896+00
-1209	nova_prijava_kvara	servisne_intervencije	INSERT	308	2026-04-13 13:43:42.208896+00
-1210	nova_prijava_kvara	servisne_intervencije	INSERT	309	2026-04-13 13:43:42.208896+00
-1211	nova_prijava_kvara	servisne_intervencije	INSERT	310	2026-04-13 13:43:42.208896+00
-1212	nova_prijava_kvara	servisne_intervencije	INSERT	311	2026-04-13 13:43:42.208896+00
-1213	nova_prijava_kvara	servisne_intervencije	INSERT	312	2026-04-13 13:43:42.208896+00
-1214	nova_prijava_kvara	servisne_intervencije	INSERT	313	2026-04-13 13:43:42.208896+00
-1215	nova_prijava_kvara	servisne_intervencije	INSERT	314	2026-04-13 13:43:42.208896+00
-1216	nova_prijava_kvara	servisne_intervencije	INSERT	315	2026-04-13 13:43:42.208896+00
-1217	nova_prijava_kvara	servisne_intervencije	INSERT	316	2026-04-13 13:43:42.208896+00
-1218	nova_prijava_kvara	servisne_intervencije	INSERT	317	2026-04-13 13:43:42.208896+00
-1219	nova_prijava_kvara	servisne_intervencije	INSERT	318	2026-04-13 13:43:42.208896+00
-1220	nova_prijava_kvara	servisne_intervencije	INSERT	319	2026-04-13 13:43:42.208896+00
-1221	nova_prijava_kvara	servisne_intervencije	INSERT	320	2026-04-13 13:43:42.208896+00
-1222	nova_prijava_kvara	servisne_intervencije	INSERT	321	2026-04-13 13:43:42.208896+00
-1223	nova_prijava_kvara	servisne_intervencije	INSERT	322	2026-04-13 13:43:42.208896+00
-1224	nova_prijava_kvara	servisne_intervencije	INSERT	323	2026-04-13 13:43:42.208896+00
-1225	nova_prijava_kvara	servisne_intervencije	INSERT	324	2026-04-13 13:43:42.208896+00
-1226	nova_prijava_kvara	servisne_intervencije	INSERT	325	2026-04-13 13:43:42.208896+00
-1227	nova_prijava_kvara	servisne_intervencije	INSERT	326	2026-04-13 13:43:42.208896+00
-1228	nova_prijava_kvara	servisne_intervencije	INSERT	327	2026-04-13 13:43:42.208896+00
-1229	nova_prijava_kvara	servisne_intervencije	INSERT	328	2026-04-13 13:43:42.208896+00
-1230	nova_prijava_kvara	servisne_intervencije	INSERT	329	2026-04-13 13:43:42.208896+00
-1231	nova_prijava_kvara	servisne_intervencije	INSERT	330	2026-04-13 13:43:42.208896+00
-1232	nova_prijava_kvara	servisne_intervencije	INSERT	331	2026-04-13 13:43:42.208896+00
-1233	nova_prijava_kvara	servisne_intervencije	INSERT	332	2026-04-13 13:43:42.208896+00
-1234	nova_prijava_kvara	servisne_intervencije	INSERT	333	2026-04-13 13:43:42.208896+00
-1235	nova_prijava_kvara	servisne_intervencije	INSERT	334	2026-04-13 13:43:42.208896+00
-1236	nova_prijava_kvara	servisne_intervencije	INSERT	335	2026-04-13 13:43:42.208896+00
-1237	nova_prijava_kvara	servisne_intervencije	INSERT	336	2026-04-13 13:43:42.208896+00
-1238	nova_prijava_kvara	servisne_intervencije	INSERT	337	2026-04-13 13:43:42.208896+00
-1239	nova_prijava_kvara	servisne_intervencije	INSERT	338	2026-04-13 13:43:42.208896+00
-1240	nova_prijava_kvara	servisne_intervencije	INSERT	339	2026-04-13 13:43:42.208896+00
-1241	nova_prijava_kvara	servisne_intervencije	INSERT	340	2026-04-13 13:43:42.208896+00
-1242	nova_prijava_kvara	servisne_intervencije	INSERT	341	2026-04-13 13:43:42.208896+00
-1243	nova_prijava_kvara	servisne_intervencije	INSERT	342	2026-04-13 13:43:42.208896+00
-1244	nova_prijava_kvara	servisne_intervencije	INSERT	343	2026-04-13 13:43:42.208896+00
-1245	nova_prijava_kvara	servisne_intervencije	INSERT	344	2026-04-13 13:43:42.208896+00
-1246	nova_prijava_kvara	servisne_intervencije	INSERT	345	2026-04-13 13:43:42.208896+00
-1247	nova_prijava_kvara	servisne_intervencije	INSERT	346	2026-04-13 13:43:42.208896+00
-1248	nova_prijava_kvara	servisne_intervencije	INSERT	347	2026-04-13 13:43:42.208896+00
-1249	nova_prijava_kvara	servisne_intervencije	INSERT	348	2026-04-13 13:43:42.208896+00
-1250	nova_prijava_kvara	servisne_intervencije	INSERT	349	2026-04-13 13:43:42.208896+00
-1251	nova_prijava_kvara	servisne_intervencije	INSERT	350	2026-04-13 13:43:42.208896+00
-1252	nova_prijava_kvara	servisne_intervencije	INSERT	351	2026-04-13 13:43:42.208896+00
-1253	nova_prijava_kvara	servisne_intervencije	INSERT	352	2026-04-13 13:43:42.208896+00
-1254	nova_prijava_kvara	servisne_intervencije	INSERT	353	2026-04-13 13:43:42.208896+00
-1255	nova_prijava_kvara	servisne_intervencije	INSERT	354	2026-04-13 13:43:42.208896+00
-1256	nova_prijava_kvara	servisne_intervencije	INSERT	355	2026-04-13 13:43:42.208896+00
-1257	nova_prijava_kvara	servisne_intervencije	INSERT	356	2026-04-13 13:43:42.208896+00
-1258	nova_prijava_kvara	servisne_intervencije	INSERT	357	2026-04-13 13:43:42.208896+00
-1259	nova_prijava_kvara	servisne_intervencije	INSERT	358	2026-04-13 13:43:42.208896+00
-1260	nova_prijava_kvara	servisne_intervencije	INSERT	359	2026-04-13 13:43:42.208896+00
-1261	nova_prijava_kvara	servisne_intervencije	INSERT	360	2026-04-13 13:43:42.208896+00
-1262	nova_prijava_kvara	servisne_intervencije	INSERT	361	2026-04-13 13:43:42.208896+00
-1263	nova_prijava_kvara	servisne_intervencije	INSERT	362	2026-04-13 13:43:42.208896+00
-1264	nova_prijava_kvara	servisne_intervencije	INSERT	363	2026-04-13 13:43:42.208896+00
-1265	nova_prijava_kvara	servisne_intervencije	INSERT	364	2026-04-13 13:43:42.208896+00
-1266	nova_prijava_kvara	servisne_intervencije	INSERT	365	2026-04-13 13:43:42.208896+00
-1267	nova_prijava_kvara	servisne_intervencije	INSERT	366	2026-04-13 13:43:42.208896+00
-1268	nova_prijava_kvara	servisne_intervencije	INSERT	367	2026-04-13 13:43:42.208896+00
-1269	nova_prijava_kvara	servisne_intervencije	INSERT	368	2026-04-13 13:43:42.208896+00
-1270	nova_prijava_kvara	servisne_intervencije	INSERT	369	2026-04-13 13:43:42.208896+00
-1271	nova_prijava_kvara	servisne_intervencije	INSERT	370	2026-04-13 13:43:42.208896+00
-1272	nova_prijava_kvara	servisne_intervencije	INSERT	371	2026-04-13 13:43:42.208896+00
-1273	nova_prijava_kvara	servisne_intervencije	INSERT	372	2026-04-13 13:43:42.208896+00
-1274	nova_prijava_kvara	servisne_intervencije	INSERT	373	2026-04-13 13:43:42.208896+00
-1275	nova_prijava_kvara	servisne_intervencije	INSERT	374	2026-04-13 13:43:42.208896+00
-1276	nova_prijava_kvara	servisne_intervencije	INSERT	375	2026-04-13 13:43:42.208896+00
-1277	nova_prijava_kvara	servisne_intervencije	INSERT	376	2026-04-13 13:43:42.208896+00
-1278	nova_prijava_kvara	servisne_intervencije	INSERT	377	2026-04-13 13:43:42.208896+00
-1279	nova_prijava_kvara	servisne_intervencije	INSERT	378	2026-04-13 13:43:42.208896+00
-1280	nova_prijava_kvara	servisne_intervencije	INSERT	379	2026-04-13 13:43:42.208896+00
-1281	nova_prijava_kvara	servisne_intervencije	INSERT	380	2026-04-13 13:43:42.208896+00
-1282	nova_prijava_kvara	servisne_intervencije	INSERT	381	2026-04-13 13:43:42.208896+00
-1283	nova_prijava_kvara	servisne_intervencije	INSERT	382	2026-04-13 13:43:42.208896+00
-1284	nova_prijava_kvara	servisne_intervencije	INSERT	383	2026-04-13 13:43:42.208896+00
-1285	nova_prijava_kvara	servisne_intervencije	INSERT	384	2026-04-13 13:43:42.208896+00
-1286	nova_prijava_kvara	servisne_intervencije	INSERT	385	2026-04-13 13:43:42.208896+00
-1287	nova_prijava_kvara	servisne_intervencije	INSERT	386	2026-04-13 13:43:42.208896+00
-1288	nova_prijava_kvara	servisne_intervencije	INSERT	387	2026-04-13 13:43:42.208896+00
-1289	nova_prijava_kvara	servisne_intervencije	INSERT	388	2026-04-13 13:43:42.208896+00
-1290	nova_prijava_kvara	servisne_intervencije	INSERT	389	2026-04-13 13:43:42.208896+00
-1291	nova_prijava_kvara	servisne_intervencije	INSERT	390	2026-04-13 13:43:42.208896+00
-1292	nova_prijava_kvara	servisne_intervencije	INSERT	391	2026-04-13 13:43:42.208896+00
-1293	nova_prijava_kvara	servisne_intervencije	INSERT	392	2026-04-13 13:43:42.208896+00
-1294	nova_prijava_kvara	servisne_intervencije	INSERT	393	2026-04-13 13:43:42.208896+00
-1295	nova_prijava_kvara	servisne_intervencije	INSERT	394	2026-04-13 13:43:42.208896+00
-1296	nova_prijava_kvara	servisne_intervencije	INSERT	395	2026-04-13 13:43:42.208896+00
-1297	nova_prijava_kvara	servisne_intervencije	INSERT	396	2026-04-13 13:43:42.208896+00
-1298	nova_prijava_kvara	servisne_intervencije	INSERT	397	2026-04-13 13:43:42.208896+00
-1299	nova_prijava_kvara	servisne_intervencije	INSERT	398	2026-04-13 13:43:42.208896+00
-1300	nova_prijava_kvara	servisne_intervencije	INSERT	399	2026-04-13 13:43:42.208896+00
-1301	nova_prijava_kvara	servisne_intervencije	INSERT	400	2026-04-13 13:43:42.208896+00
-1302	nova_prijava_kvara	servisne_intervencije	INSERT	401	2026-04-13 13:43:42.208896+00
-1303	nova_prijava_kvara	servisne_intervencije	INSERT	402	2026-04-13 13:43:42.208896+00
-1304	nova_prijava_kvara	servisne_intervencije	INSERT	403	2026-04-13 13:43:42.208896+00
-1305	nova_prijava_kvara	servisne_intervencije	INSERT	404	2026-04-13 13:43:42.208896+00
-1306	nova_prijava_kvara	servisne_intervencije	INSERT	405	2026-04-13 13:43:42.208896+00
-1307	nova_prijava_kvara	servisne_intervencije	INSERT	406	2026-04-13 13:43:42.208896+00
-1308	nova_prijava_kvara	servisne_intervencije	INSERT	407	2026-04-13 13:43:42.208896+00
-1309	nova_prijava_kvara	servisne_intervencije	INSERT	408	2026-04-13 13:43:42.208896+00
-1310	nova_prijava_kvara	servisne_intervencije	INSERT	409	2026-04-13 13:43:42.208896+00
-1311	nova_prijava_kvara	servisne_intervencije	INSERT	410	2026-04-13 13:43:42.208896+00
-1312	nova_prijava_kvara	servisne_intervencije	INSERT	411	2026-04-13 13:43:42.208896+00
-1313	nova_prijava_kvara	servisne_intervencije	INSERT	412	2026-04-13 13:43:42.208896+00
-1314	nova_prijava_kvara	servisne_intervencije	INSERT	413	2026-04-13 13:43:42.208896+00
-1315	nova_prijava_kvara	servisne_intervencije	INSERT	414	2026-04-13 13:43:42.208896+00
-1316	nova_prijava_kvara	servisne_intervencije	INSERT	415	2026-04-13 13:43:42.208896+00
-1317	nova_prijava_kvara	servisne_intervencije	INSERT	416	2026-04-13 13:43:42.208896+00
-1318	nova_prijava_kvara	servisne_intervencije	INSERT	417	2026-04-13 13:43:42.208896+00
-1319	nova_prijava_kvara	servisne_intervencije	INSERT	418	2026-04-13 13:43:42.208896+00
-1320	nova_prijava_kvara	servisne_intervencije	INSERT	419	2026-04-13 13:43:42.208896+00
-1321	nova_prijava_kvara	servisne_intervencije	INSERT	420	2026-04-13 13:43:42.208896+00
-1322	nova_prijava_kvara	servisne_intervencije	INSERT	421	2026-04-13 13:43:42.208896+00
-1323	nova_prijava_kvara	servisne_intervencije	INSERT	422	2026-04-13 13:43:42.208896+00
-1324	nova_prijava_kvara	servisne_intervencije	INSERT	423	2026-04-13 13:43:42.208896+00
-1325	nova_prijava_kvara	servisne_intervencije	INSERT	424	2026-04-13 13:43:42.208896+00
-1326	nova_prijava_kvara	servisne_intervencije	INSERT	425	2026-04-13 13:43:42.208896+00
-1327	nova_prijava_kvara	servisne_intervencije	INSERT	426	2026-04-13 13:43:42.208896+00
-1328	nova_prijava_kvara	servisne_intervencije	INSERT	427	2026-04-13 13:43:42.208896+00
-1329	nova_prijava_kvara	servisne_intervencije	INSERT	428	2026-04-13 13:43:42.208896+00
-1330	nova_prijava_kvara	servisne_intervencije	INSERT	429	2026-04-13 13:43:42.208896+00
-1331	nova_prijava_kvara	servisne_intervencije	INSERT	430	2026-04-13 13:43:42.208896+00
-1332	nova_prijava_kvara	servisne_intervencije	INSERT	431	2026-04-13 13:43:42.208896+00
-1333	nova_prijava_kvara	servisne_intervencije	INSERT	432	2026-04-13 13:43:42.208896+00
-1334	nova_prijava_kvara	servisne_intervencije	INSERT	433	2026-04-13 13:43:42.208896+00
-1335	nova_prijava_kvara	servisne_intervencije	INSERT	434	2026-04-13 13:43:42.208896+00
-1336	nova_prijava_kvara	servisne_intervencije	INSERT	435	2026-04-13 13:43:42.208896+00
-1337	nova_prijava_kvara	servisne_intervencije	INSERT	436	2026-04-13 13:43:42.208896+00
-1338	nova_prijava_kvara	servisne_intervencije	INSERT	437	2026-04-13 13:43:42.208896+00
-1339	nova_prijava_kvara	servisne_intervencije	INSERT	438	2026-04-13 13:43:42.208896+00
-1340	nova_prijava_kvara	servisne_intervencije	INSERT	439	2026-04-13 13:43:42.208896+00
-1341	nova_prijava_kvara	servisne_intervencije	INSERT	440	2026-04-13 13:43:42.208896+00
-1372	unos_goriva	evidencija_goriva	UPDATE	79	2026-04-13 14:06:47.431729+00
-1373	unos_goriva	evidencija_goriva	UPDATE	80	2026-04-13 14:06:47.431729+00
-1374	unos_goriva	evidencija_goriva	UPDATE	81	2026-04-13 14:06:47.431729+00
-1375	unos_goriva	evidencija_goriva	UPDATE	82	2026-04-13 14:06:47.431729+00
-1376	unos_goriva	evidencija_goriva	UPDATE	83	2026-04-13 14:06:47.431729+00
-1377	unos_goriva	evidencija_goriva	UPDATE	84	2026-04-13 14:06:47.431729+00
-1378	unos_goriva	evidencija_goriva	UPDATE	85	2026-04-13 14:06:47.431729+00
-1379	unos_goriva	evidencija_goriva	UPDATE	86	2026-04-13 14:06:47.431729+00
-1380	unos_goriva	evidencija_goriva	UPDATE	87	2026-04-13 14:06:47.431729+00
-1381	unos_goriva	evidencija_goriva	UPDATE	88	2026-04-13 14:06:47.431729+00
-1382	unos_goriva	evidencija_goriva	UPDATE	89	2026-04-13 14:06:47.431729+00
-1383	unos_goriva	evidencija_goriva	UPDATE	90	2026-04-13 14:06:47.431729+00
-1384	unos_goriva	evidencija_goriva	UPDATE	91	2026-04-13 14:06:47.431729+00
-1385	unos_goriva	evidencija_goriva	UPDATE	92	2026-04-13 14:06:47.431729+00
-1386	unos_goriva	evidencija_goriva	UPDATE	93	2026-04-13 14:06:47.431729+00
-1387	unos_goriva	evidencija_goriva	UPDATE	94	2026-04-13 14:06:47.431729+00
-1388	unos_goriva	evidencija_goriva	UPDATE	95	2026-04-13 14:06:47.431729+00
-1389	unos_goriva	evidencija_goriva	UPDATE	96	2026-04-13 14:06:47.431729+00
-1390	unos_goriva	evidencija_goriva	UPDATE	97	2026-04-13 14:06:47.431729+00
-1391	unos_goriva	evidencija_goriva	UPDATE	98	2026-04-13 14:06:47.431729+00
-1392	unos_goriva	evidencija_goriva	UPDATE	99	2026-04-13 14:06:47.431729+00
-1393	unos_goriva	evidencija_goriva	UPDATE	100	2026-04-13 14:06:47.431729+00
-1394	unos_goriva	evidencija_goriva	UPDATE	101	2026-04-13 14:06:47.431729+00
-1395	unos_goriva	evidencija_goriva	UPDATE	102	2026-04-13 14:06:47.431729+00
-1396	unos_goriva	evidencija_goriva	UPDATE	103	2026-04-13 14:06:47.431729+00
-1397	unos_goriva	evidencija_goriva	UPDATE	104	2026-04-13 14:06:47.431729+00
-1398	unos_goriva	evidencija_goriva	UPDATE	105	2026-04-13 14:06:47.431729+00
-1399	unos_goriva	evidencija_goriva	UPDATE	106	2026-04-13 14:06:47.431729+00
-1400	unos_goriva	evidencija_goriva	UPDATE	107	2026-04-13 14:06:47.431729+00
-1401	unos_goriva	evidencija_goriva	UPDATE	108	2026-04-13 14:06:47.431729+00
-1402	unos_goriva	evidencija_goriva	UPDATE	109	2026-04-13 14:06:47.431729+00
-1403	unos_goriva	evidencija_goriva	UPDATE	110	2026-04-13 14:06:47.431729+00
-1404	unos_goriva	evidencija_goriva	UPDATE	111	2026-04-13 14:06:47.431729+00
-1405	unos_goriva	evidencija_goriva	UPDATE	112	2026-04-13 14:06:47.431729+00
-1406	unos_goriva	evidencija_goriva	UPDATE	113	2026-04-13 14:06:47.431729+00
-1407	unos_goriva	evidencija_goriva	UPDATE	114	2026-04-13 14:06:47.431729+00
-1408	unos_goriva	evidencija_goriva	UPDATE	115	2026-04-13 14:06:47.431729+00
-1409	unos_goriva	evidencija_goriva	UPDATE	116	2026-04-13 14:06:47.431729+00
-1410	unos_goriva	evidencija_goriva	UPDATE	117	2026-04-13 14:06:47.431729+00
-1411	unos_goriva	evidencija_goriva	UPDATE	118	2026-04-13 14:06:47.431729+00
-1412	unos_goriva	evidencija_goriva	UPDATE	119	2026-04-13 14:06:47.431729+00
-1413	unos_goriva	evidencija_goriva	UPDATE	120	2026-04-13 14:06:47.431729+00
-1414	unos_goriva	evidencija_goriva	UPDATE	121	2026-04-13 14:06:47.431729+00
-1415	unos_goriva	evidencija_goriva	UPDATE	122	2026-04-13 14:06:47.431729+00
-1416	unos_goriva	evidencija_goriva	UPDATE	123	2026-04-13 14:06:47.431729+00
-1417	unos_goriva	evidencija_goriva	UPDATE	124	2026-04-13 14:06:47.431729+00
-1418	unos_goriva	evidencija_goriva	UPDATE	125	2026-04-13 14:06:47.431729+00
-1419	unos_goriva	evidencija_goriva	UPDATE	126	2026-04-13 14:06:47.431729+00
-1420	unos_goriva	evidencija_goriva	UPDATE	127	2026-04-13 14:06:47.431729+00
-1421	unos_goriva	evidencija_goriva	UPDATE	128	2026-04-13 14:06:47.431729+00
-1422	unos_goriva	evidencija_goriva	UPDATE	129	2026-04-13 14:06:47.431729+00
-1423	unos_goriva	evidencija_goriva	UPDATE	130	2026-04-13 14:06:47.431729+00
-1424	unos_goriva	evidencija_goriva	UPDATE	131	2026-04-13 14:06:47.431729+00
-1425	unos_goriva	evidencija_goriva	UPDATE	132	2026-04-13 14:06:47.431729+00
-1426	unos_goriva	evidencija_goriva	UPDATE	133	2026-04-13 14:06:47.431729+00
-1427	unos_goriva	evidencija_goriva	UPDATE	134	2026-04-13 14:06:47.431729+00
-1428	unos_goriva	evidencija_goriva	UPDATE	135	2026-04-13 14:06:47.431729+00
-1429	unos_goriva	evidencija_goriva	UPDATE	136	2026-04-13 14:06:47.431729+00
-1430	unos_goriva	evidencija_goriva	UPDATE	137	2026-04-13 14:06:47.431729+00
-1431	unos_goriva	evidencija_goriva	UPDATE	138	2026-04-13 14:06:47.431729+00
-1432	unos_goriva	evidencija_goriva	UPDATE	139	2026-04-13 14:06:47.431729+00
-1433	unos_goriva	evidencija_goriva	UPDATE	140	2026-04-13 14:06:47.431729+00
-1434	unos_goriva	evidencija_goriva	UPDATE	141	2026-04-13 14:06:47.431729+00
-1435	unos_goriva	evidencija_goriva	UPDATE	142	2026-04-13 14:06:47.431729+00
-1436	unos_goriva	evidencija_goriva	UPDATE	143	2026-04-13 14:06:47.431729+00
-1437	unos_goriva	evidencija_goriva	UPDATE	144	2026-04-13 14:06:47.431729+00
-1438	unos_goriva	evidencija_goriva	UPDATE	145	2026-04-13 14:06:47.431729+00
-1439	unos_goriva	evidencija_goriva	UPDATE	146	2026-04-13 14:06:47.431729+00
-1440	unos_goriva	evidencija_goriva	UPDATE	147	2026-04-13 14:06:47.431729+00
-1441	unos_goriva	evidencija_goriva	UPDATE	148	2026-04-13 14:06:47.431729+00
-1442	unos_goriva	evidencija_goriva	UPDATE	149	2026-04-13 14:06:47.431729+00
-1443	unos_goriva	evidencija_goriva	UPDATE	150	2026-04-13 14:06:47.431729+00
-1444	unos_goriva	evidencija_goriva	UPDATE	151	2026-04-13 14:06:47.431729+00
-1445	unos_goriva	evidencija_goriva	UPDATE	152	2026-04-13 14:06:47.431729+00
-1446	unos_goriva	evidencija_goriva	UPDATE	153	2026-04-13 14:06:47.431729+00
-1447	unos_goriva	evidencija_goriva	UPDATE	154	2026-04-13 14:06:47.431729+00
-1448	unos_goriva	evidencija_goriva	UPDATE	155	2026-04-13 14:06:47.431729+00
-1449	unos_goriva	evidencija_goriva	UPDATE	156	2026-04-13 14:06:47.431729+00
-1450	unos_goriva	evidencija_goriva	UPDATE	157	2026-04-13 14:06:47.431729+00
-1451	unos_goriva	evidencija_goriva	UPDATE	158	2026-04-13 14:06:47.431729+00
-1452	unos_goriva	evidencija_goriva	UPDATE	159	2026-04-13 14:06:47.431729+00
-1453	unos_goriva	evidencija_goriva	UPDATE	160	2026-04-13 14:06:47.431729+00
-1454	unos_goriva	evidencija_goriva	UPDATE	161	2026-04-13 14:06:47.431729+00
-1455	unos_goriva	evidencija_goriva	UPDATE	162	2026-04-13 14:06:47.431729+00
-1456	unos_goriva	evidencija_goriva	UPDATE	163	2026-04-13 14:06:47.431729+00
-1457	unos_goriva	evidencija_goriva	UPDATE	164	2026-04-13 14:06:47.431729+00
-1458	unos_goriva	evidencija_goriva	UPDATE	165	2026-04-13 14:06:47.431729+00
-1459	unos_goriva	evidencija_goriva	UPDATE	166	2026-04-13 14:06:47.431729+00
-1460	unos_goriva	evidencija_goriva	UPDATE	167	2026-04-13 14:06:47.431729+00
-1461	unos_goriva	evidencija_goriva	UPDATE	168	2026-04-13 14:06:47.431729+00
-1462	unos_goriva	evidencija_goriva	UPDATE	169	2026-04-13 14:06:47.431729+00
-1463	unos_goriva	evidencija_goriva	UPDATE	170	2026-04-13 14:06:47.431729+00
-1464	unos_goriva	evidencija_goriva	UPDATE	171	2026-04-13 14:06:47.431729+00
-1465	unos_goriva	evidencija_goriva	UPDATE	172	2026-04-13 14:06:47.431729+00
-1466	unos_goriva	evidencija_goriva	UPDATE	173	2026-04-13 14:06:47.431729+00
-1467	unos_goriva	evidencija_goriva	UPDATE	174	2026-04-13 14:06:47.431729+00
-1468	unos_goriva	evidencija_goriva	UPDATE	175	2026-04-13 14:06:47.431729+00
-1469	unos_goriva	evidencija_goriva	UPDATE	176	2026-04-13 14:06:47.431729+00
-1470	unos_goriva	evidencija_goriva	UPDATE	177	2026-04-13 14:06:47.431729+00
-1471	unos_goriva	evidencija_goriva	UPDATE	178	2026-04-13 14:06:47.431729+00
-1472	unos_goriva	evidencija_goriva	UPDATE	179	2026-04-13 14:06:47.431729+00
-1473	unos_goriva	evidencija_goriva	UPDATE	180	2026-04-13 14:06:47.431729+00
-1474	unos_goriva	evidencija_goriva	UPDATE	181	2026-04-13 14:06:47.431729+00
-1475	unos_goriva	evidencija_goriva	UPDATE	182	2026-04-13 14:06:47.431729+00
-1476	unos_goriva	evidencija_goriva	UPDATE	183	2026-04-13 14:06:47.431729+00
-1477	unos_goriva	evidencija_goriva	UPDATE	184	2026-04-13 14:06:47.431729+00
-1478	unos_goriva	evidencija_goriva	UPDATE	185	2026-04-13 14:06:47.431729+00
-1479	unos_goriva	evidencija_goriva	UPDATE	186	2026-04-13 14:06:47.431729+00
-1480	unos_goriva	evidencija_goriva	UPDATE	187	2026-04-13 14:06:47.431729+00
-1481	unos_goriva	evidencija_goriva	UPDATE	188	2026-04-13 14:06:47.431729+00
-1482	unos_goriva	evidencija_goriva	UPDATE	189	2026-04-13 14:06:47.431729+00
-1483	unos_goriva	evidencija_goriva	UPDATE	190	2026-04-13 14:06:47.431729+00
-1484	unos_goriva	evidencija_goriva	UPDATE	191	2026-04-13 14:06:47.431729+00
-1485	unos_goriva	evidencija_goriva	UPDATE	192	2026-04-13 14:06:47.431729+00
-1486	unos_goriva	evidencija_goriva	UPDATE	193	2026-04-13 14:06:47.431729+00
-1487	unos_goriva	evidencija_goriva	UPDATE	194	2026-04-13 14:06:47.431729+00
-1488	unos_goriva	evidencija_goriva	UPDATE	195	2026-04-13 14:06:47.431729+00
-1489	unos_goriva	evidencija_goriva	UPDATE	196	2026-04-13 14:06:47.431729+00
-1490	unos_goriva	evidencija_goriva	UPDATE	197	2026-04-13 14:06:47.431729+00
-1491	unos_goriva	evidencija_goriva	UPDATE	198	2026-04-13 14:06:47.431729+00
-1492	unos_goriva	evidencija_goriva	UPDATE	199	2026-04-13 14:06:47.431729+00
-1493	unos_goriva	evidencija_goriva	UPDATE	200	2026-04-13 14:06:47.431729+00
-1494	unos_goriva	evidencija_goriva	UPDATE	201	2026-04-13 14:06:47.431729+00
-1495	unos_goriva	evidencija_goriva	UPDATE	202	2026-04-13 14:06:47.431729+00
-1496	unos_goriva	evidencija_goriva	UPDATE	203	2026-04-13 14:06:47.431729+00
-1497	unos_goriva	evidencija_goriva	UPDATE	204	2026-04-13 14:06:47.431729+00
-1498	unos_goriva	evidencija_goriva	UPDATE	205	2026-04-13 14:06:47.431729+00
-1499	unos_goriva	evidencija_goriva	UPDATE	206	2026-04-13 14:06:47.431729+00
-1500	unos_goriva	evidencija_goriva	UPDATE	207	2026-04-13 14:06:47.431729+00
-1501	unos_goriva	evidencija_goriva	UPDATE	208	2026-04-13 14:06:47.431729+00
-1502	unos_goriva	evidencija_goriva	UPDATE	209	2026-04-13 14:06:47.431729+00
-1503	unos_goriva	evidencija_goriva	UPDATE	210	2026-04-13 14:06:47.431729+00
-1504	unos_goriva	evidencija_goriva	UPDATE	211	2026-04-13 14:06:47.431729+00
-1505	unos_goriva	evidencija_goriva	UPDATE	212	2026-04-13 14:06:47.431729+00
-1506	unos_goriva	evidencija_goriva	UPDATE	213	2026-04-13 14:06:47.431729+00
-1507	unos_goriva	evidencija_goriva	UPDATE	214	2026-04-13 14:06:47.431729+00
-1508	unos_goriva	evidencija_goriva	UPDATE	215	2026-04-13 14:06:47.431729+00
-1509	unos_goriva	evidencija_goriva	UPDATE	216	2026-04-13 14:06:47.431729+00
-1510	unos_goriva	evidencija_goriva	UPDATE	217	2026-04-13 14:06:47.431729+00
-1511	unos_goriva	evidencija_goriva	UPDATE	218	2026-04-13 14:06:47.431729+00
-1512	unos_goriva	evidencija_goriva	UPDATE	219	2026-04-13 14:06:47.431729+00
-1513	unos_goriva	evidencija_goriva	UPDATE	220	2026-04-13 14:06:47.431729+00
-1514	unos_goriva	evidencija_goriva	UPDATE	221	2026-04-13 14:06:47.431729+00
-1515	unos_goriva	evidencija_goriva	UPDATE	222	2026-04-13 14:06:47.431729+00
-1516	unos_goriva	evidencija_goriva	UPDATE	223	2026-04-13 14:06:47.431729+00
-1517	unos_goriva	evidencija_goriva	UPDATE	224	2026-04-13 14:06:47.431729+00
-1518	unos_goriva	evidencija_goriva	UPDATE	225	2026-04-13 14:06:47.431729+00
-1519	unos_goriva	evidencija_goriva	UPDATE	226	2026-04-13 14:06:47.431729+00
-1520	unos_goriva	evidencija_goriva	UPDATE	227	2026-04-13 14:06:47.431729+00
-1521	unos_goriva	evidencija_goriva	UPDATE	228	2026-04-13 14:06:47.431729+00
-1522	unos_goriva	evidencija_goriva	UPDATE	229	2026-04-13 14:06:47.431729+00
-1523	unos_goriva	evidencija_goriva	UPDATE	230	2026-04-13 14:06:47.431729+00
-1524	unos_goriva	evidencija_goriva	UPDATE	231	2026-04-13 14:06:47.431729+00
-1525	unos_goriva	evidencija_goriva	UPDATE	232	2026-04-13 14:06:47.431729+00
-1526	unos_goriva	evidencija_goriva	UPDATE	233	2026-04-13 14:06:47.431729+00
-1527	unos_goriva	evidencija_goriva	UPDATE	234	2026-04-13 14:06:47.431729+00
-1528	unos_goriva	evidencija_goriva	UPDATE	235	2026-04-13 14:06:47.431729+00
-1529	unos_goriva	evidencija_goriva	UPDATE	236	2026-04-13 14:06:47.431729+00
-1530	unos_goriva	evidencija_goriva	UPDATE	237	2026-04-13 14:06:47.431729+00
-1531	unos_goriva	evidencija_goriva	UPDATE	238	2026-04-13 14:06:47.431729+00
-1532	unos_goriva	evidencija_goriva	UPDATE	239	2026-04-13 14:06:47.431729+00
-1533	unos_goriva	evidencija_goriva	UPDATE	240	2026-04-13 14:06:47.431729+00
-1534	unos_goriva	evidencija_goriva	UPDATE	241	2026-04-13 14:06:47.431729+00
-1535	unos_goriva	evidencija_goriva	UPDATE	242	2026-04-13 14:06:47.431729+00
-1536	unos_goriva	evidencija_goriva	UPDATE	243	2026-04-13 14:06:47.431729+00
-1537	unos_goriva	evidencija_goriva	UPDATE	244	2026-04-13 14:06:47.431729+00
-1538	unos_goriva	evidencija_goriva	UPDATE	245	2026-04-13 14:06:47.431729+00
-1539	unos_goriva	evidencija_goriva	UPDATE	246	2026-04-13 14:06:47.431729+00
-1540	unos_goriva	evidencija_goriva	UPDATE	247	2026-04-13 14:06:47.431729+00
-1541	unos_goriva	evidencija_goriva	UPDATE	248	2026-04-13 14:06:47.431729+00
-1542	unos_goriva	evidencija_goriva	UPDATE	249	2026-04-13 14:06:47.431729+00
-1543	unos_goriva	evidencija_goriva	UPDATE	250	2026-04-13 14:06:47.431729+00
-1544	unos_goriva	evidencija_goriva	UPDATE	251	2026-04-13 14:06:47.431729+00
-1545	unos_goriva	evidencija_goriva	UPDATE	252	2026-04-13 14:06:47.431729+00
-1546	unos_goriva	evidencija_goriva	UPDATE	253	2026-04-13 14:06:47.431729+00
-1547	unos_goriva	evidencija_goriva	UPDATE	254	2026-04-13 14:06:47.431729+00
-1548	unos_goriva	evidencija_goriva	UPDATE	255	2026-04-13 14:06:47.431729+00
-1549	unos_goriva	evidencija_goriva	UPDATE	256	2026-04-13 14:06:47.431729+00
-1550	unos_goriva	evidencija_goriva	UPDATE	257	2026-04-13 14:06:47.431729+00
-1551	unos_goriva	evidencija_goriva	UPDATE	258	2026-04-13 14:06:47.431729+00
-1552	unos_goriva	evidencija_goriva	UPDATE	259	2026-04-13 14:06:47.431729+00
-1553	unos_goriva	evidencija_goriva	UPDATE	260	2026-04-13 14:06:47.431729+00
-1554	unos_goriva	evidencija_goriva	UPDATE	261	2026-04-13 14:06:47.431729+00
-1555	unos_goriva	evidencija_goriva	UPDATE	262	2026-04-13 14:06:47.431729+00
-1556	unos_goriva	evidencija_goriva	UPDATE	263	2026-04-13 14:06:47.431729+00
-1557	unos_goriva	evidencija_goriva	UPDATE	264	2026-04-13 14:06:47.431729+00
-1558	unos_goriva	evidencija_goriva	UPDATE	265	2026-04-13 14:06:47.431729+00
-1559	unos_goriva	evidencija_goriva	UPDATE	266	2026-04-13 14:06:47.431729+00
-1560	unos_goriva	evidencija_goriva	UPDATE	267	2026-04-13 14:06:47.431729+00
-1561	unos_goriva	evidencija_goriva	UPDATE	268	2026-04-13 14:06:47.431729+00
-1562	unos_goriva	evidencija_goriva	UPDATE	269	2026-04-13 14:06:47.431729+00
-1563	unos_goriva	evidencija_goriva	UPDATE	270	2026-04-13 14:06:47.431729+00
-1564	unos_goriva	evidencija_goriva	UPDATE	271	2026-04-13 14:06:47.431729+00
-1565	unos_goriva	evidencija_goriva	UPDATE	272	2026-04-13 14:06:47.431729+00
-1566	unos_goriva	evidencija_goriva	UPDATE	273	2026-04-13 14:06:47.431729+00
-1567	unos_goriva	evidencija_goriva	UPDATE	274	2026-04-13 14:06:47.431729+00
-1568	unos_goriva	evidencija_goriva	UPDATE	275	2026-04-13 14:06:47.431729+00
-1569	unos_goriva	evidencija_goriva	UPDATE	276	2026-04-13 14:06:47.431729+00
-1570	unos_goriva	evidencija_goriva	UPDATE	277	2026-04-13 14:06:47.431729+00
-1571	unos_goriva	evidencija_goriva	UPDATE	278	2026-04-13 14:06:47.431729+00
-1572	unos_goriva	evidencija_goriva	UPDATE	279	2026-04-13 14:06:47.431729+00
-1573	unos_goriva	evidencija_goriva	UPDATE	280	2026-04-13 14:06:47.431729+00
-1574	unos_goriva	evidencija_goriva	UPDATE	281	2026-04-13 14:06:47.431729+00
-1575	unos_goriva	evidencija_goriva	UPDATE	282	2026-04-13 14:06:47.431729+00
-1576	unos_goriva	evidencija_goriva	UPDATE	283	2026-04-13 14:06:47.431729+00
-1577	unos_goriva	evidencija_goriva	UPDATE	284	2026-04-13 14:06:47.431729+00
-1578	unos_goriva	evidencija_goriva	UPDATE	285	2026-04-13 14:06:47.431729+00
-1579	unos_goriva	evidencija_goriva	UPDATE	286	2026-04-13 14:06:47.431729+00
-1580	unos_goriva	evidencija_goriva	UPDATE	287	2026-04-13 14:06:47.431729+00
-1581	unos_goriva	evidencija_goriva	UPDATE	288	2026-04-13 14:06:47.431729+00
-1582	unos_goriva	evidencija_goriva	UPDATE	289	2026-04-13 14:06:47.431729+00
-1583	unos_goriva	evidencija_goriva	UPDATE	290	2026-04-13 14:06:47.431729+00
-1584	unos_goriva	evidencija_goriva	UPDATE	291	2026-04-13 14:06:47.431729+00
-1585	unos_goriva	evidencija_goriva	UPDATE	292	2026-04-13 14:06:47.431729+00
-1586	unos_goriva	evidencija_goriva	UPDATE	293	2026-04-13 14:06:47.431729+00
-1587	unos_goriva	evidencija_goriva	UPDATE	294	2026-04-13 14:06:47.431729+00
-1588	unos_goriva	evidencija_goriva	UPDATE	295	2026-04-13 14:06:47.431729+00
-1589	unos_goriva	evidencija_goriva	UPDATE	296	2026-04-13 14:06:47.431729+00
-1590	unos_goriva	evidencija_goriva	UPDATE	297	2026-04-13 14:06:47.431729+00
-1591	unos_goriva	evidencija_goriva	UPDATE	298	2026-04-13 14:06:47.431729+00
-1592	unos_goriva	evidencija_goriva	UPDATE	299	2026-04-13 14:06:47.431729+00
-1593	unos_goriva	evidencija_goriva	UPDATE	300	2026-04-13 14:06:47.431729+00
-1594	unos_goriva	evidencija_goriva	UPDATE	301	2026-04-13 14:06:47.431729+00
-1595	unos_goriva	evidencija_goriva	UPDATE	302	2026-04-13 14:06:47.431729+00
-1596	unos_goriva	evidencija_goriva	UPDATE	303	2026-04-13 14:06:47.431729+00
-1597	unos_goriva	evidencija_goriva	UPDATE	304	2026-04-13 14:06:47.431729+00
-1598	unos_goriva	evidencija_goriva	UPDATE	305	2026-04-13 14:06:47.431729+00
-1599	unos_goriva	evidencija_goriva	UPDATE	306	2026-04-13 14:06:47.431729+00
-1600	unos_goriva	evidencija_goriva	UPDATE	307	2026-04-13 14:06:47.431729+00
-1601	unos_goriva	evidencija_goriva	UPDATE	308	2026-04-13 14:06:47.431729+00
-1602	unos_goriva	evidencija_goriva	UPDATE	309	2026-04-13 14:06:47.431729+00
-1603	unos_goriva	evidencija_goriva	UPDATE	310	2026-04-13 14:06:47.431729+00
-1604	unos_goriva	evidencija_goriva	UPDATE	311	2026-04-13 14:06:47.431729+00
-1605	unos_goriva	evidencija_goriva	UPDATE	312	2026-04-13 14:06:47.431729+00
-1606	unos_goriva	evidencija_goriva	UPDATE	313	2026-04-13 14:06:47.431729+00
-1607	unos_goriva	evidencija_goriva	UPDATE	314	2026-04-13 14:06:47.431729+00
-1608	unos_goriva	evidencija_goriva	UPDATE	315	2026-04-13 14:06:47.431729+00
-1609	unos_goriva	evidencija_goriva	UPDATE	316	2026-04-13 14:06:47.431729+00
-1610	unos_goriva	evidencija_goriva	UPDATE	317	2026-04-13 14:06:47.431729+00
-1611	unos_goriva	evidencija_goriva	UPDATE	318	2026-04-13 14:06:47.431729+00
-1612	unos_goriva	evidencija_goriva	UPDATE	319	2026-04-13 14:06:47.431729+00
-1613	unos_goriva	evidencija_goriva	UPDATE	320	2026-04-13 14:06:47.431729+00
-1614	unos_goriva	evidencija_goriva	UPDATE	321	2026-04-13 14:06:47.431729+00
-1615	unos_goriva	evidencija_goriva	UPDATE	322	2026-04-13 14:06:47.431729+00
-1616	unos_goriva	evidencija_goriva	UPDATE	323	2026-04-13 14:06:47.431729+00
-1617	unos_goriva	evidencija_goriva	UPDATE	324	2026-04-13 14:06:47.431729+00
-1618	unos_goriva	evidencija_goriva	UPDATE	325	2026-04-13 14:06:47.431729+00
-1619	unos_goriva	evidencija_goriva	UPDATE	326	2026-04-13 14:06:47.431729+00
-1620	unos_goriva	evidencija_goriva	UPDATE	327	2026-04-13 14:06:47.431729+00
-1621	unos_goriva	evidencija_goriva	UPDATE	328	2026-04-13 14:06:47.431729+00
-1622	unos_goriva	evidencija_goriva	UPDATE	329	2026-04-13 14:06:47.431729+00
-1623	unos_goriva	evidencija_goriva	UPDATE	330	2026-04-13 14:06:47.431729+00
-1624	unos_goriva	evidencija_goriva	UPDATE	331	2026-04-13 14:06:47.431729+00
-1625	unos_goriva	evidencija_goriva	UPDATE	332	2026-04-13 14:06:47.431729+00
-1626	unos_goriva	evidencija_goriva	UPDATE	333	2026-04-13 14:06:47.431729+00
-1627	unos_goriva	evidencija_goriva	UPDATE	334	2026-04-13 14:06:47.431729+00
-1628	unos_goriva	evidencija_goriva	UPDATE	335	2026-04-13 14:06:47.431729+00
-1629	unos_goriva	evidencija_goriva	UPDATE	336	2026-04-13 14:06:47.431729+00
-1630	unos_goriva	evidencija_goriva	UPDATE	337	2026-04-13 14:06:47.431729+00
-1631	unos_goriva	evidencija_goriva	UPDATE	338	2026-04-13 14:06:47.431729+00
-1632	unos_goriva	evidencija_goriva	UPDATE	339	2026-04-13 14:06:47.431729+00
-1633	unos_goriva	evidencija_goriva	UPDATE	340	2026-04-13 14:06:47.431729+00
-1634	unos_goriva	evidencija_goriva	UPDATE	341	2026-04-13 14:06:47.431729+00
-1635	unos_goriva	evidencija_goriva	UPDATE	342	2026-04-13 14:06:47.431729+00
-1636	unos_goriva	evidencija_goriva	UPDATE	343	2026-04-13 14:06:47.431729+00
-1637	unos_goriva	evidencija_goriva	UPDATE	344	2026-04-13 14:06:47.431729+00
-1638	unos_goriva	evidencija_goriva	UPDATE	345	2026-04-13 14:06:47.431729+00
-1639	unos_goriva	evidencija_goriva	UPDATE	346	2026-04-13 14:06:47.431729+00
-1640	unos_goriva	evidencija_goriva	UPDATE	347	2026-04-13 14:06:47.431729+00
-1641	unos_goriva	evidencija_goriva	UPDATE	348	2026-04-13 14:06:47.431729+00
-1642	unos_goriva	evidencija_goriva	UPDATE	349	2026-04-13 14:06:47.431729+00
-1643	unos_goriva	evidencija_goriva	UPDATE	350	2026-04-13 14:06:47.431729+00
-1644	unos_goriva	evidencija_goriva	UPDATE	351	2026-04-13 14:06:47.431729+00
-1645	unos_goriva	evidencija_goriva	UPDATE	352	2026-04-13 14:06:47.431729+00
-1646	unos_goriva	evidencija_goriva	UPDATE	353	2026-04-13 14:06:47.431729+00
-1647	unos_goriva	evidencija_goriva	UPDATE	354	2026-04-13 14:06:47.431729+00
-1648	unos_goriva	evidencija_goriva	UPDATE	355	2026-04-13 14:06:47.431729+00
-1649	unos_goriva	evidencija_goriva	UPDATE	356	2026-04-13 14:06:47.431729+00
-1650	unos_goriva	evidencija_goriva	UPDATE	357	2026-04-13 14:06:47.431729+00
-1651	unos_goriva	evidencija_goriva	UPDATE	358	2026-04-13 14:06:47.431729+00
-1652	unos_goriva	evidencija_goriva	UPDATE	359	2026-04-13 14:06:47.431729+00
-1653	unos_goriva	evidencija_goriva	UPDATE	360	2026-04-13 14:06:47.431729+00
-1654	unos_goriva	evidencija_goriva	UPDATE	361	2026-04-13 14:06:47.431729+00
-1655	unos_goriva	evidencija_goriva	UPDATE	362	2026-04-13 14:06:47.431729+00
-1656	unos_goriva	evidencija_goriva	UPDATE	363	2026-04-13 14:06:47.431729+00
-1657	unos_goriva	evidencija_goriva	UPDATE	364	2026-04-13 14:06:47.431729+00
-1658	unos_goriva	evidencija_goriva	UPDATE	365	2026-04-13 14:06:47.431729+00
-1659	unos_goriva	evidencija_goriva	UPDATE	366	2026-04-13 14:06:47.431729+00
-1660	unos_goriva	evidencija_goriva	UPDATE	367	2026-04-13 14:06:47.431729+00
-1661	unos_goriva	evidencija_goriva	UPDATE	368	2026-04-13 14:06:47.431729+00
-1662	unos_goriva	evidencija_goriva	UPDATE	369	2026-04-13 14:06:47.431729+00
-1663	unos_goriva	evidencija_goriva	UPDATE	370	2026-04-13 14:06:47.431729+00
-1664	unos_goriva	evidencija_goriva	UPDATE	371	2026-04-13 14:06:47.431729+00
-1665	unos_goriva	evidencija_goriva	UPDATE	372	2026-04-13 14:06:47.431729+00
-1666	unos_goriva	evidencija_goriva	UPDATE	373	2026-04-13 14:06:47.431729+00
-1667	unos_goriva	evidencija_goriva	UPDATE	374	2026-04-13 14:06:47.431729+00
-1668	unos_goriva	evidencija_goriva	UPDATE	375	2026-04-13 14:06:47.431729+00
-1669	unos_goriva	evidencija_goriva	UPDATE	376	2026-04-13 14:06:47.431729+00
-1670	unos_goriva	evidencija_goriva	UPDATE	377	2026-04-13 14:06:47.431729+00
-1671	unos_goriva	evidencija_goriva	UPDATE	378	2026-04-13 14:06:47.431729+00
-1672	unos_goriva	evidencija_goriva	UPDATE	379	2026-04-13 14:06:47.431729+00
-1673	unos_goriva	evidencija_goriva	UPDATE	380	2026-04-13 14:06:47.431729+00
-1674	unos_goriva	evidencija_goriva	UPDATE	381	2026-04-13 14:06:47.431729+00
-1675	unos_goriva	evidencija_goriva	UPDATE	382	2026-04-13 14:06:47.431729+00
-1676	unos_goriva	evidencija_goriva	UPDATE	383	2026-04-13 14:06:47.431729+00
-1677	unos_goriva	evidencija_goriva	UPDATE	384	2026-04-13 14:06:47.431729+00
-1678	unos_goriva	evidencija_goriva	UPDATE	385	2026-04-13 14:06:47.431729+00
-1679	unos_goriva	evidencija_goriva	UPDATE	386	2026-04-13 14:06:47.431729+00
-1680	unos_goriva	evidencija_goriva	UPDATE	387	2026-04-13 14:06:47.431729+00
-1681	unos_goriva	evidencija_goriva	UPDATE	388	2026-04-13 14:06:47.431729+00
-1682	unos_goriva	evidencija_goriva	UPDATE	389	2026-04-13 14:06:47.431729+00
-1683	unos_goriva	evidencija_goriva	UPDATE	390	2026-04-13 14:06:47.431729+00
-1684	unos_goriva	evidencija_goriva	UPDATE	391	2026-04-13 14:06:47.431729+00
-1685	unos_goriva	evidencija_goriva	UPDATE	392	2026-04-13 14:06:47.431729+00
-1686	unos_goriva	evidencija_goriva	UPDATE	393	2026-04-13 14:06:47.431729+00
-1687	unos_goriva	evidencija_goriva	UPDATE	394	2026-04-13 14:06:47.431729+00
-1688	unos_goriva	evidencija_goriva	UPDATE	395	2026-04-13 14:06:47.431729+00
-1689	unos_goriva	evidencija_goriva	UPDATE	396	2026-04-13 14:06:47.431729+00
-1690	unos_goriva	evidencija_goriva	UPDATE	397	2026-04-13 14:06:47.431729+00
-1691	unos_goriva	evidencija_goriva	UPDATE	398	2026-04-13 14:06:47.431729+00
-1692	unos_goriva	evidencija_goriva	UPDATE	399	2026-04-13 14:06:47.431729+00
-1693	unos_goriva	evidencija_goriva	UPDATE	400	2026-04-13 14:06:47.431729+00
-1694	unos_goriva	evidencija_goriva	UPDATE	401	2026-04-13 14:06:47.431729+00
-1695	unos_goriva	evidencija_goriva	UPDATE	402	2026-04-13 14:06:47.431729+00
-1696	unos_goriva	evidencija_goriva	UPDATE	403	2026-04-13 14:06:47.431729+00
-1697	unos_goriva	evidencija_goriva	UPDATE	404	2026-04-13 14:06:47.431729+00
-1698	unos_goriva	evidencija_goriva	UPDATE	405	2026-04-13 14:06:47.431729+00
-1699	unos_goriva	evidencija_goriva	UPDATE	406	2026-04-13 14:06:47.431729+00
-1700	unos_goriva	evidencija_goriva	UPDATE	407	2026-04-13 14:06:47.431729+00
-1701	unos_goriva	evidencija_goriva	UPDATE	408	2026-04-13 14:06:47.431729+00
-1702	unos_goriva	evidencija_goriva	UPDATE	409	2026-04-13 14:06:47.431729+00
-1703	unos_goriva	evidencija_goriva	UPDATE	410	2026-04-13 14:06:47.431729+00
-1704	unos_goriva	evidencija_goriva	UPDATE	411	2026-04-13 14:06:47.431729+00
-1705	unos_goriva	evidencija_goriva	UPDATE	412	2026-04-13 14:06:47.431729+00
-1706	unos_goriva	evidencija_goriva	UPDATE	413	2026-04-13 14:06:47.431729+00
-1707	unos_goriva	evidencija_goriva	UPDATE	414	2026-04-13 14:06:47.431729+00
-1708	unos_goriva	evidencija_goriva	UPDATE	415	2026-04-13 14:06:47.431729+00
-1709	unos_goriva	evidencija_goriva	UPDATE	416	2026-04-13 14:06:47.431729+00
-1710	unos_goriva	evidencija_goriva	UPDATE	417	2026-04-13 14:06:47.431729+00
-1711	unos_goriva	evidencija_goriva	UPDATE	418	2026-04-13 14:06:47.431729+00
-1712	unos_goriva	evidencija_goriva	UPDATE	419	2026-04-13 14:06:47.431729+00
-1713	unos_goriva	evidencija_goriva	UPDATE	420	2026-04-13 14:06:47.431729+00
-1714	unos_goriva	evidencija_goriva	UPDATE	421	2026-04-13 14:06:47.431729+00
-1715	unos_goriva	evidencija_goriva	UPDATE	422	2026-04-13 14:06:47.431729+00
-1716	unos_goriva	evidencija_goriva	UPDATE	423	2026-04-13 14:06:47.431729+00
-1717	unos_goriva	evidencija_goriva	UPDATE	424	2026-04-13 14:06:47.431729+00
-1718	unos_goriva	evidencija_goriva	UPDATE	425	2026-04-13 14:06:47.431729+00
-1719	unos_goriva	evidencija_goriva	UPDATE	426	2026-04-13 14:06:47.431729+00
-1720	unos_goriva	evidencija_goriva	UPDATE	427	2026-04-13 14:06:47.431729+00
-1721	unos_goriva	evidencija_goriva	UPDATE	428	2026-04-13 14:06:47.431729+00
-1722	unos_goriva	evidencija_goriva	UPDATE	429	2026-04-13 14:06:47.431729+00
-1723	unos_goriva	evidencija_goriva	UPDATE	430	2026-04-13 14:06:47.431729+00
-1724	unos_goriva	evidencija_goriva	UPDATE	431	2026-04-13 14:06:47.431729+00
-1725	unos_goriva	evidencija_goriva	UPDATE	432	2026-04-13 14:06:47.431729+00
-1726	unos_goriva	evidencija_goriva	UPDATE	433	2026-04-13 14:06:47.431729+00
-1727	unos_goriva	evidencija_goriva	UPDATE	434	2026-04-13 14:06:47.431729+00
-1728	unos_goriva	evidencija_goriva	UPDATE	435	2026-04-13 14:06:47.431729+00
-1729	unos_goriva	evidencija_goriva	UPDATE	436	2026-04-13 14:06:47.431729+00
-1730	unos_goriva	evidencija_goriva	UPDATE	437	2026-04-13 14:06:47.431729+00
-1731	unos_goriva	evidencija_goriva	UPDATE	438	2026-04-13 14:06:47.431729+00
-1732	unos_goriva	evidencija_goriva	UPDATE	439	2026-04-13 14:06:47.431729+00
-1733	unos_goriva	evidencija_goriva	UPDATE	440	2026-04-13 14:06:47.431729+00
-1734	unos_goriva	evidencija_goriva	UPDATE	441	2026-04-13 14:06:47.431729+00
-1735	unos_goriva	evidencija_goriva	UPDATE	442	2026-04-13 14:06:47.431729+00
-1736	unos_goriva	evidencija_goriva	UPDATE	443	2026-04-13 14:06:47.431729+00
-1737	unos_goriva	evidencija_goriva	UPDATE	444	2026-04-13 14:06:47.431729+00
-1738	unos_goriva	evidencija_goriva	UPDATE	445	2026-04-13 14:06:47.431729+00
-1739	unos_goriva	evidencija_goriva	UPDATE	446	2026-04-13 14:06:47.431729+00
-1740	unos_goriva	evidencija_goriva	UPDATE	447	2026-04-13 14:06:47.431729+00
-1741	unos_goriva	evidencija_goriva	UPDATE	448	2026-04-13 14:06:47.431729+00
-1742	status_promjena	servisne_intervencije	UPDATE	50	2026-05-05 13:26:56.813844+00
+1743	vehicle_changed	vozila	UPDATE	54	2026-05-12 14:40:35.877925+00
+1744	service_completed	servisne_intervencije	UPDATE	80	2026-05-12 14:40:36.058235+00
+1745	service_intervention_changed	servisne_intervencije	UPDATE	420	2026-05-12 15:42:34.887065+00
+2	fuel_changed	evidencija_goriva	INSERT	37	2026-03-30 16:46:30.887019+00
+1342	fuel_changed	evidencija_goriva	UPDATE	49	2026-04-13 14:06:47.431729+00
+1343	fuel_changed	evidencija_goriva	UPDATE	50	2026-04-13 14:06:47.431729+00
+1344	fuel_changed	evidencija_goriva	UPDATE	51	2026-04-13 14:06:47.431729+00
+1345	fuel_changed	evidencija_goriva	UPDATE	52	2026-04-13 14:06:47.431729+00
+1346	fuel_changed	evidencija_goriva	UPDATE	53	2026-04-13 14:06:47.431729+00
+8	assignment_created	zaduzenja	INSERT	71	2026-03-31 08:29:15.802293+00
+9	assignment_closed	zaduzenja	UPDATE	71	2026-03-31 08:29:20.744182+00
+10	assignment_created	zaduzenja	INSERT	72	2026-03-31 08:34:42.682662+00
+1347	fuel_changed	evidencija_goriva	UPDATE	54	2026-04-13 14:06:47.431729+00
+1348	fuel_changed	evidencija_goriva	UPDATE	55	2026-04-13 14:06:47.431729+00
+1349	fuel_changed	evidencija_goriva	UPDATE	56	2026-04-13 14:06:47.431729+00
+1350	fuel_changed	evidencija_goriva	UPDATE	57	2026-04-13 14:06:47.431729+00
+1351	fuel_changed	evidencija_goriva	UPDATE	58	2026-04-13 14:06:47.431729+00
+1352	fuel_changed	evidencija_goriva	UPDATE	59	2026-04-13 14:06:47.431729+00
+1353	fuel_changed	evidencija_goriva	UPDATE	60	2026-04-13 14:06:47.431729+00
+1354	fuel_changed	evidencija_goriva	UPDATE	61	2026-04-13 14:06:47.431729+00
+19	assignment_closed	zaduzenja	UPDATE	36	2026-03-31 19:59:47.298029+00
+20	assignment_created	zaduzenja	INSERT	73	2026-03-31 19:59:55.398317+00
+21	assignment_closed	zaduzenja	UPDATE	73	2026-03-31 19:59:58.692445+00
+1355	fuel_changed	evidencija_goriva	UPDATE	62	2026-04-13 14:06:47.431729+00
+1356	fuel_changed	evidencija_goriva	UPDATE	63	2026-04-13 14:06:47.431729+00
+1357	fuel_changed	evidencija_goriva	UPDATE	64	2026-04-13 14:06:47.431729+00
+1358	fuel_changed	evidencija_goriva	UPDATE	65	2026-04-13 14:06:47.431729+00
+1359	fuel_changed	evidencija_goriva	UPDATE	66	2026-04-13 14:06:47.431729+00
+27	assignment_created	zaduzenja	INSERT	74	2026-03-31 20:30:45.416348+00
+28	assignment_closed	zaduzenja	UPDATE	74	2026-03-31 20:30:47.365408+00
+29	assignment_created	zaduzenja	INSERT	75	2026-03-31 20:32:12.046908+00
+30	assignment_closed	zaduzenja	UPDATE	75	2026-03-31 20:32:13.30894+00
+31	assignment_created	zaduzenja	INSERT	76	2026-03-31 20:34:39.509521+00
+32	assignment_closed	zaduzenja	UPDATE	76	2026-03-31 20:34:41.368602+00
+1360	fuel_changed	evidencija_goriva	UPDATE	67	2026-04-13 14:06:47.431729+00
+1361	fuel_changed	evidencija_goriva	UPDATE	68	2026-04-13 14:06:47.431729+00
+35	assignment_created	zaduzenja	INSERT	77	2026-03-31 20:38:13.72881+00
+36	assignment_closed	zaduzenja	UPDATE	77	2026-03-31 20:38:15.695163+00
+37	assignment_created	zaduzenja	INSERT	78	2026-03-31 20:38:28.192893+00
+38	assignment_closed	zaduzenja	UPDATE	78	2026-03-31 20:38:29.817162+00
+39	assignment_created	zaduzenja	INSERT	79	2026-03-31 20:41:36.900295+00
+40	assignment_closed	zaduzenja	UPDATE	79	2026-03-31 20:41:40.565724+00
+41	assignment_created	zaduzenja	INSERT	80	2026-03-31 20:42:07.766656+00
+42	assignment_closed	zaduzenja	UPDATE	80	2026-03-31 20:42:10.236727+00
+43	assignment_created	zaduzenja	INSERT	81	2026-03-31 20:42:40.165215+00
+44	assignment_closed	zaduzenja	UPDATE	81	2026-03-31 20:42:42.790907+00
+45	assignment_created	zaduzenja	INSERT	82	2026-03-31 20:46:08.662103+00
+46	assignment_closed	zaduzenja	UPDATE	82	2026-03-31 20:46:10.178067+00
+47	assignment_created	zaduzenja	INSERT	83	2026-03-31 20:46:52.040532+00
+48	assignment_closed	zaduzenja	UPDATE	83	2026-03-31 20:47:12.014325+00
+49	assignment_created	zaduzenja	INSERT	84	2026-03-31 20:49:09.89056+00
+50	assignment_closed	zaduzenja	UPDATE	84	2026-03-31 20:49:12.150757+00
+51	assignment_created	zaduzenja	INSERT	85	2026-03-31 20:51:36.348132+00
+52	assignment_closed	zaduzenja	UPDATE	85	2026-03-31 20:51:38.357445+00
+53	assignment_created	zaduzenja	INSERT	86	2026-03-31 20:55:20.900208+00
+54	assignment_closed	zaduzenja	UPDATE	86	2026-03-31 20:55:22.824678+00
+55	assignment_created	zaduzenja	INSERT	87	2026-03-31 20:55:58.973518+00
+56	fuel_changed	evidencija_goriva	INSERT	38	2026-03-31 20:56:07.273969+00
+57	assignment_closed	zaduzenja	UPDATE	87	2026-03-31 20:56:10.075753+00
+58	assignment_created	zaduzenja	INSERT	88	2026-03-31 21:05:30.449787+00
+59	assignment_closed	zaduzenja	UPDATE	88	2026-03-31 21:05:33.59895+00
+60	assignment_created	zaduzenja	INSERT	89	2026-03-31 21:06:10.862316+00
+1362	fuel_changed	evidencija_goriva	UPDATE	69	2026-04-13 14:06:47.431729+00
+1363	fuel_changed	evidencija_goriva	UPDATE	70	2026-04-13 14:06:47.431729+00
+1364	fuel_changed	evidencija_goriva	UPDATE	71	2026-04-13 14:06:47.431729+00
+64	fuel_changed	evidencija_goriva	INSERT	39	2026-03-31 22:36:49.097974+00
+65	fuel_changed	evidencija_goriva	INSERT	40	2026-03-31 22:37:15.506671+00
+66	fuel_changed	evidencija_goriva	INSERT	41	2026-03-31 22:37:29.058185+00
+67	assignment_closed	zaduzenja	UPDATE	50	2026-03-31 22:37:31.081738+00
+68	assignment_created	zaduzenja	INSERT	90	2026-03-31 22:37:40.028283+00
+69	assignment_closed	zaduzenja	UPDATE	90	2026-03-31 22:37:44.906056+00
+70	assignment_created	zaduzenja	INSERT	91	2026-03-31 22:38:03.306329+00
+71	fuel_changed	evidencija_goriva	INSERT	42	2026-03-31 22:38:12.451282+00
+72	assignment_closed	zaduzenja	UPDATE	91	2026-03-31 22:38:14.504382+00
+1365	fuel_changed	evidencija_goriva	UPDATE	72	2026-04-13 14:06:47.431729+00
+1366	fuel_changed	evidencija_goriva	UPDATE	73	2026-04-13 14:06:47.431729+00
+1367	fuel_changed	evidencija_goriva	UPDATE	74	2026-04-13 14:06:47.431729+00
+1368	fuel_changed	evidencija_goriva	UPDATE	75	2026-04-13 14:06:47.431729+00
+1369	fuel_changed	evidencija_goriva	UPDATE	76	2026-04-13 14:06:47.431729+00
+1370	fuel_changed	evidencija_goriva	UPDATE	77	2026-04-13 14:06:47.431729+00
+79	assignment_created	zaduzenja	INSERT	92	2026-03-31 23:55:21.694158+00
+3	service_intervention_created	servisne_intervencije	INSERT	29	2026-03-30 16:46:59.248713+00
+4	service_status_changed	servisne_intervencije	UPDATE	8	2026-03-30 18:36:55.841873+00
+5	service_status_changed	servisne_intervencije	UPDATE	8	2026-03-30 18:36:59.910341+00
+6	service_status_changed	servisne_intervencije	UPDATE	8	2026-03-30 18:37:01.7936+00
+7	service_status_changed	servisne_intervencije	UPDATE	8	2026-03-30 18:37:03.274016+00
+11	service_status_changed	servisne_intervencije	UPDATE	25	2026-03-31 16:09:59.17271+00
+12	service_status_changed	servisne_intervencije	UPDATE	27	2026-03-31 16:10:54.248799+00
+13	service_status_changed	servisne_intervencije	UPDATE	21	2026-03-31 18:10:32.499047+00
+14	service_status_changed	servisne_intervencije	UPDATE	26	2026-03-31 18:12:46.877281+00
+15	service_status_changed	servisne_intervencije	UPDATE	26	2026-03-31 18:12:55.519287+00
+16	service_status_changed	servisne_intervencije	UPDATE	20	2026-03-31 18:47:07.020521+00
+17	service_status_changed	servisne_intervencije	UPDATE	19	2026-03-31 18:57:05.920081+00
+1371	fuel_changed	evidencija_goriva	UPDATE	78	2026-04-13 14:06:47.431729+00
+18	service_status_changed	servisne_intervencije	UPDATE	29	2026-03-31 18:57:12.026072+00
+22	service_intervention_created	servisne_intervencije	INSERT	30	2026-03-31 20:27:57.013647+00
+23	service_intervention_created	servisne_intervencije	INSERT	31	2026-03-31 20:27:57.191524+00
+24	service_status_changed	servisne_intervencije	UPDATE	31	2026-03-31 20:29:10.284293+00
+25	service_status_changed	servisne_intervencije	UPDATE	30	2026-03-31 20:29:19.796754+00
+26	service_status_changed	servisne_intervencije	UPDATE	29	2026-03-31 20:29:42.869824+00
+33	service_status_changed	servisne_intervencije	UPDATE	31	2026-03-31 20:35:47.357379+00
+34	service_status_changed	servisne_intervencije	UPDATE	31	2026-03-31 20:36:34.573773+00
+61	service_intervention_created	servisne_intervencije	INSERT	32	2026-03-31 22:34:16.694471+00
+62	service_status_changed	servisne_intervencije	UPDATE	32	2026-03-31 22:34:21.301477+00
+63	service_status_changed	servisne_intervencije	UPDATE	32	2026-03-31 22:34:27.3248+00
+73	service_intervention_created	servisne_intervencije	INSERT	33	2026-03-31 22:38:14.955551+00
+74	service_status_changed	servisne_intervencije	UPDATE	33	2026-03-31 22:41:45.717058+00
+75	service_status_changed	servisne_intervencije	UPDATE	33	2026-03-31 22:42:04.257833+00
+76	service_status_changed	servisne_intervencije	UPDATE	24	2026-03-31 22:49:53.530043+00
+77	service_status_changed	servisne_intervencije	UPDATE	23	2026-03-31 22:49:54.480866+00
+78	service_status_changed	servisne_intervencije	UPDATE	28	2026-03-31 22:49:55.14962+00
+81	service_intervention_created	servisne_intervencije	INSERT	35	2026-03-31 23:58:55.826446+00
+82	assignment_closed	zaduzenja	UPDATE	92	2026-03-31 23:59:15.126711+00
+83	assignment_created	zaduzenja	INSERT	93	2026-03-31 23:59:48.919738+00
+84	assignment_closed	zaduzenja	UPDATE	93	2026-03-31 23:59:52.694116+00
+85	assignment_created	zaduzenja	INSERT	94	2026-03-31 23:59:58.611811+00
+86	fuel_changed	evidencija_goriva	INSERT	43	2026-04-01 00:00:11.742702+00
+87	assignment_closed	zaduzenja	UPDATE	94	2026-04-01 00:00:16.045048+00
+88	assignment_created	zaduzenja	INSERT	95	2026-04-01 00:00:21.689963+00
+89	service_intervention_created	servisne_intervencije	INSERT	36	2026-04-01 00:00:47.82751+00
+90	assignment_closed	zaduzenja	UPDATE	95	2026-04-01 00:00:58.144414+00
+91	service_status_changed	servisne_intervencije	UPDATE	36	2026-04-01 00:02:29.23087+00
+92	service_status_changed	servisne_intervencije	UPDATE	35	2026-04-01 00:02:36.443024+00
+93	service_status_changed	servisne_intervencije	UPDATE	33	2026-04-01 00:02:45.028076+00
+94	service_status_changed	servisne_intervencije	UPDATE	32	2026-04-01 00:03:27.364116+00
+95	service_status_changed	servisne_intervencije	UPDATE	30	2026-04-01 00:03:35.522293+00
+96	service_status_changed	servisne_intervencije	UPDATE	29	2026-04-01 00:03:38.078383+00
+97	service_status_changed	servisne_intervencije	UPDATE	25	2026-04-01 00:03:41.133387+00
+98	service_status_changed	servisne_intervencije	UPDATE	24	2026-04-01 00:03:44.761295+00
+99	service_status_changed	servisne_intervencije	UPDATE	23	2026-04-01 00:03:47.77594+00
+100	service_status_changed	servisne_intervencije	UPDATE	22	2026-04-01 00:03:51.47304+00
+101	service_status_changed	servisne_intervencije	UPDATE	21	2026-04-01 00:03:55.80766+00
+102	service_status_changed	servisne_intervencije	UPDATE	20	2026-04-01 00:03:59.040104+00
+103	service_status_changed	servisne_intervencije	UPDATE	19	2026-04-01 00:04:01.95019+00
+104	service_status_changed	servisne_intervencije	UPDATE	18	2026-04-01 00:04:17.967638+00
+105	service_status_changed	servisne_intervencije	UPDATE	17	2026-04-01 00:04:25.213305+00
+106	service_status_changed	servisne_intervencije	UPDATE	27	2026-04-01 00:04:35.509533+00
+107	service_status_changed	servisne_intervencije	UPDATE	15	2026-04-01 00:04:49.772868+00
+108	service_status_changed	servisne_intervencije	UPDATE	14	2026-04-01 00:04:52.992343+00
+109	service_status_changed	servisne_intervencije	UPDATE	13	2026-04-01 00:04:58.083492+00
+110	service_status_changed	servisne_intervencije	UPDATE	12	2026-04-01 00:05:01.422682+00
+111	service_status_changed	servisne_intervencije	UPDATE	11	2026-04-01 00:05:06.287618+00
+112	service_status_changed	servisne_intervencije	UPDATE	10	2026-04-01 00:05:12.229956+00
+113	service_status_changed	servisne_intervencije	UPDATE	9	2026-04-01 00:05:17.98711+00
+114	service_status_changed	servisne_intervencije	UPDATE	8	2026-04-01 00:05:23.120367+00
+115	service_status_changed	servisne_intervencije	UPDATE	35	2026-04-01 14:15:54.469009+00
+116	service_status_changed	servisne_intervencije	UPDATE	35	2026-04-01 15:16:47.158021+00
+117	service_status_changed	servisne_intervencije	UPDATE	35	2026-04-01 15:19:10.342906+00
+118	service_status_changed	servisne_intervencije	UPDATE	35	2026-04-01 15:19:12.381838+00
+119	service_status_changed	servisne_intervencije	UPDATE	2	2026-04-11 13:41:17.958376+00
+120	service_status_changed	servisne_intervencije	UPDATE	2	2026-04-11 14:29:57.187771+00
+121	service_intervention_created	servisne_intervencije	INSERT	37	2026-04-11 14:30:29.273664+00
+122	service_intervention_created	servisne_intervencije	INSERT	38	2026-04-11 14:33:43.577723+00
+123	assignment_closed	zaduzenja	UPDATE	89	2026-04-11 14:54:49.179999+00
+124	assignment_created	zaduzenja	INSERT	96	2026-04-11 14:55:11.564259+00
+125	fuel_changed	evidencija_goriva	INSERT	44	2026-04-11 16:06:19.683059+00
+126	fuel_changed	evidencija_goriva	INSERT	45	2026-04-11 16:12:35.266712+00
+127	service_status_changed	servisne_intervencije	UPDATE	4	2026-04-11 17:33:05.097891+00
+128	service_status_changed	servisne_intervencije	UPDATE	1	2026-04-11 17:33:05.476216+00
+129	service_status_changed	servisne_intervencije	UPDATE	4	2026-04-11 19:41:12.188102+00
+130	service_intervention_created	servisne_intervencije	INSERT	39	2026-04-11 19:42:54.453314+00
+131	service_status_changed	servisne_intervencije	UPDATE	39	2026-04-11 19:43:09.313096+00
+132	service_intervention_created	servisne_intervencije	INSERT	40	2026-04-12 09:50:07.28492+00
+133	service_status_changed	servisne_intervencije	UPDATE	40	2026-04-12 09:52:03.626884+00
+134	service_status_changed	servisne_intervencije	UPDATE	1	2026-04-12 09:52:24.278493+00
+135	fuel_changed	evidencija_goriva	INSERT	46	2026-04-12 10:10:54.803407+00
+136	assignment_closed	zaduzenja	UPDATE	96	2026-04-12 10:16:23.414383+00
+137	assignment_created	zaduzenja	INSERT	97	2026-04-12 10:27:20.134005+00
+138	fuel_changed	evidencija_goriva	INSERT	47	2026-04-12 10:28:10.329259+00
+139	fuel_changed	evidencija_goriva	INSERT	48	2026-04-12 10:29:55.197057+00
+140	assignment_closed	zaduzenja	UPDATE	34	2026-04-12 10:40:30.886837+00
+141	service_status_changed	servisne_intervencije	UPDATE	2	2026-04-12 10:43:05.740718+00
+142	assignment_created	zaduzenja	INSERT	98	2026-04-13 13:43:42.208896+00
+143	assignment_created	zaduzenja	INSERT	99	2026-04-13 13:43:42.208896+00
+144	assignment_created	zaduzenja	INSERT	100	2026-04-13 13:43:42.208896+00
+145	assignment_created	zaduzenja	INSERT	101	2026-04-13 13:43:42.208896+00
+146	assignment_created	zaduzenja	INSERT	102	2026-04-13 13:43:42.208896+00
+147	assignment_created	zaduzenja	INSERT	103	2026-04-13 13:43:42.208896+00
+148	assignment_created	zaduzenja	INSERT	104	2026-04-13 13:43:42.208896+00
+149	assignment_created	zaduzenja	INSERT	105	2026-04-13 13:43:42.208896+00
+150	assignment_created	zaduzenja	INSERT	106	2026-04-13 13:43:42.208896+00
+151	assignment_created	zaduzenja	INSERT	107	2026-04-13 13:43:42.208896+00
+152	assignment_created	zaduzenja	INSERT	108	2026-04-13 13:43:42.208896+00
+153	assignment_created	zaduzenja	INSERT	109	2026-04-13 13:43:42.208896+00
+154	assignment_created	zaduzenja	INSERT	110	2026-04-13 13:43:42.208896+00
+155	assignment_created	zaduzenja	INSERT	111	2026-04-13 13:43:42.208896+00
+156	assignment_created	zaduzenja	INSERT	112	2026-04-13 13:43:42.208896+00
+157	assignment_created	zaduzenja	INSERT	113	2026-04-13 13:43:42.208896+00
+158	assignment_created	zaduzenja	INSERT	114	2026-04-13 13:43:42.208896+00
+159	assignment_created	zaduzenja	INSERT	115	2026-04-13 13:43:42.208896+00
+160	assignment_created	zaduzenja	INSERT	116	2026-04-13 13:43:42.208896+00
+161	assignment_created	zaduzenja	INSERT	117	2026-04-13 13:43:42.208896+00
+162	assignment_created	zaduzenja	INSERT	118	2026-04-13 13:43:42.208896+00
+163	assignment_created	zaduzenja	INSERT	119	2026-04-13 13:43:42.208896+00
+164	assignment_created	zaduzenja	INSERT	120	2026-04-13 13:43:42.208896+00
+165	assignment_created	zaduzenja	INSERT	121	2026-04-13 13:43:42.208896+00
+166	assignment_created	zaduzenja	INSERT	122	2026-04-13 13:43:42.208896+00
+167	assignment_created	zaduzenja	INSERT	123	2026-04-13 13:43:42.208896+00
+168	assignment_created	zaduzenja	INSERT	124	2026-04-13 13:43:42.208896+00
+169	assignment_created	zaduzenja	INSERT	125	2026-04-13 13:43:42.208896+00
+170	assignment_created	zaduzenja	INSERT	126	2026-04-13 13:43:42.208896+00
+171	assignment_created	zaduzenja	INSERT	127	2026-04-13 13:43:42.208896+00
+172	assignment_created	zaduzenja	INSERT	128	2026-04-13 13:43:42.208896+00
+173	assignment_created	zaduzenja	INSERT	129	2026-04-13 13:43:42.208896+00
+174	assignment_created	zaduzenja	INSERT	130	2026-04-13 13:43:42.208896+00
+175	assignment_created	zaduzenja	INSERT	131	2026-04-13 13:43:42.208896+00
+176	assignment_created	zaduzenja	INSERT	132	2026-04-13 13:43:42.208896+00
+177	assignment_created	zaduzenja	INSERT	133	2026-04-13 13:43:42.208896+00
+178	assignment_created	zaduzenja	INSERT	134	2026-04-13 13:43:42.208896+00
+179	assignment_created	zaduzenja	INSERT	135	2026-04-13 13:43:42.208896+00
+180	assignment_created	zaduzenja	INSERT	136	2026-04-13 13:43:42.208896+00
+181	assignment_created	zaduzenja	INSERT	137	2026-04-13 13:43:42.208896+00
+182	assignment_created	zaduzenja	INSERT	138	2026-04-13 13:43:42.208896+00
+183	assignment_created	zaduzenja	INSERT	139	2026-04-13 13:43:42.208896+00
+184	assignment_created	zaduzenja	INSERT	140	2026-04-13 13:43:42.208896+00
+185	assignment_created	zaduzenja	INSERT	141	2026-04-13 13:43:42.208896+00
+186	assignment_created	zaduzenja	INSERT	142	2026-04-13 13:43:42.208896+00
+187	assignment_created	zaduzenja	INSERT	143	2026-04-13 13:43:42.208896+00
+188	assignment_created	zaduzenja	INSERT	144	2026-04-13 13:43:42.208896+00
+189	assignment_created	zaduzenja	INSERT	145	2026-04-13 13:43:42.208896+00
+190	assignment_created	zaduzenja	INSERT	146	2026-04-13 13:43:42.208896+00
+191	assignment_created	zaduzenja	INSERT	147	2026-04-13 13:43:42.208896+00
+192	assignment_created	zaduzenja	INSERT	148	2026-04-13 13:43:42.208896+00
+193	assignment_created	zaduzenja	INSERT	149	2026-04-13 13:43:42.208896+00
+194	assignment_created	zaduzenja	INSERT	150	2026-04-13 13:43:42.208896+00
+195	assignment_created	zaduzenja	INSERT	151	2026-04-13 13:43:42.208896+00
+196	assignment_created	zaduzenja	INSERT	152	2026-04-13 13:43:42.208896+00
+197	assignment_created	zaduzenja	INSERT	153	2026-04-13 13:43:42.208896+00
+198	assignment_created	zaduzenja	INSERT	154	2026-04-13 13:43:42.208896+00
+199	assignment_created	zaduzenja	INSERT	155	2026-04-13 13:43:42.208896+00
+200	assignment_created	zaduzenja	INSERT	156	2026-04-13 13:43:42.208896+00
+201	assignment_created	zaduzenja	INSERT	157	2026-04-13 13:43:42.208896+00
+202	assignment_created	zaduzenja	INSERT	158	2026-04-13 13:43:42.208896+00
+203	assignment_created	zaduzenja	INSERT	159	2026-04-13 13:43:42.208896+00
+204	assignment_created	zaduzenja	INSERT	160	2026-04-13 13:43:42.208896+00
+205	assignment_created	zaduzenja	INSERT	161	2026-04-13 13:43:42.208896+00
+206	assignment_created	zaduzenja	INSERT	162	2026-04-13 13:43:42.208896+00
+207	assignment_created	zaduzenja	INSERT	163	2026-04-13 13:43:42.208896+00
+208	assignment_created	zaduzenja	INSERT	164	2026-04-13 13:43:42.208896+00
+209	assignment_created	zaduzenja	INSERT	165	2026-04-13 13:43:42.208896+00
+210	assignment_created	zaduzenja	INSERT	166	2026-04-13 13:43:42.208896+00
+211	assignment_created	zaduzenja	INSERT	167	2026-04-13 13:43:42.208896+00
+212	assignment_created	zaduzenja	INSERT	168	2026-04-13 13:43:42.208896+00
+213	assignment_created	zaduzenja	INSERT	169	2026-04-13 13:43:42.208896+00
+214	assignment_created	zaduzenja	INSERT	170	2026-04-13 13:43:42.208896+00
+215	assignment_created	zaduzenja	INSERT	171	2026-04-13 13:43:42.208896+00
+216	assignment_created	zaduzenja	INSERT	172	2026-04-13 13:43:42.208896+00
+217	assignment_created	zaduzenja	INSERT	173	2026-04-13 13:43:42.208896+00
+218	assignment_created	zaduzenja	INSERT	174	2026-04-13 13:43:42.208896+00
+219	assignment_created	zaduzenja	INSERT	175	2026-04-13 13:43:42.208896+00
+220	assignment_created	zaduzenja	INSERT	176	2026-04-13 13:43:42.208896+00
+221	assignment_created	zaduzenja	INSERT	177	2026-04-13 13:43:42.208896+00
+222	assignment_created	zaduzenja	INSERT	178	2026-04-13 13:43:42.208896+00
+223	assignment_created	zaduzenja	INSERT	179	2026-04-13 13:43:42.208896+00
+224	assignment_created	zaduzenja	INSERT	180	2026-04-13 13:43:42.208896+00
+225	assignment_created	zaduzenja	INSERT	181	2026-04-13 13:43:42.208896+00
+226	assignment_created	zaduzenja	INSERT	182	2026-04-13 13:43:42.208896+00
+227	assignment_created	zaduzenja	INSERT	183	2026-04-13 13:43:42.208896+00
+228	assignment_created	zaduzenja	INSERT	184	2026-04-13 13:43:42.208896+00
+229	assignment_created	zaduzenja	INSERT	185	2026-04-13 13:43:42.208896+00
+230	assignment_created	zaduzenja	INSERT	186	2026-04-13 13:43:42.208896+00
+231	assignment_created	zaduzenja	INSERT	187	2026-04-13 13:43:42.208896+00
+232	assignment_created	zaduzenja	INSERT	188	2026-04-13 13:43:42.208896+00
+233	assignment_created	zaduzenja	INSERT	189	2026-04-13 13:43:42.208896+00
+234	assignment_created	zaduzenja	INSERT	190	2026-04-13 13:43:42.208896+00
+235	assignment_created	zaduzenja	INSERT	191	2026-04-13 13:43:42.208896+00
+236	assignment_created	zaduzenja	INSERT	192	2026-04-13 13:43:42.208896+00
+237	assignment_created	zaduzenja	INSERT	193	2026-04-13 13:43:42.208896+00
+238	assignment_created	zaduzenja	INSERT	194	2026-04-13 13:43:42.208896+00
+239	assignment_created	zaduzenja	INSERT	195	2026-04-13 13:43:42.208896+00
+240	assignment_created	zaduzenja	INSERT	196	2026-04-13 13:43:42.208896+00
+241	assignment_created	zaduzenja	INSERT	197	2026-04-13 13:43:42.208896+00
+242	assignment_created	zaduzenja	INSERT	198	2026-04-13 13:43:42.208896+00
+243	assignment_created	zaduzenja	INSERT	199	2026-04-13 13:43:42.208896+00
+244	assignment_created	zaduzenja	INSERT	200	2026-04-13 13:43:42.208896+00
+245	assignment_created	zaduzenja	INSERT	201	2026-04-13 13:43:42.208896+00
+246	assignment_created	zaduzenja	INSERT	202	2026-04-13 13:43:42.208896+00
+247	assignment_created	zaduzenja	INSERT	203	2026-04-13 13:43:42.208896+00
+248	assignment_created	zaduzenja	INSERT	204	2026-04-13 13:43:42.208896+00
+249	assignment_created	zaduzenja	INSERT	205	2026-04-13 13:43:42.208896+00
+250	assignment_created	zaduzenja	INSERT	206	2026-04-13 13:43:42.208896+00
+251	assignment_created	zaduzenja	INSERT	207	2026-04-13 13:43:42.208896+00
+252	assignment_created	zaduzenja	INSERT	208	2026-04-13 13:43:42.208896+00
+253	assignment_created	zaduzenja	INSERT	209	2026-04-13 13:43:42.208896+00
+254	assignment_created	zaduzenja	INSERT	210	2026-04-13 13:43:42.208896+00
+255	assignment_created	zaduzenja	INSERT	211	2026-04-13 13:43:42.208896+00
+256	assignment_created	zaduzenja	INSERT	212	2026-04-13 13:43:42.208896+00
+257	assignment_created	zaduzenja	INSERT	213	2026-04-13 13:43:42.208896+00
+258	assignment_created	zaduzenja	INSERT	214	2026-04-13 13:43:42.208896+00
+259	assignment_created	zaduzenja	INSERT	215	2026-04-13 13:43:42.208896+00
+260	assignment_created	zaduzenja	INSERT	216	2026-04-13 13:43:42.208896+00
+261	assignment_created	zaduzenja	INSERT	217	2026-04-13 13:43:42.208896+00
+262	assignment_created	zaduzenja	INSERT	218	2026-04-13 13:43:42.208896+00
+263	assignment_created	zaduzenja	INSERT	219	2026-04-13 13:43:42.208896+00
+264	assignment_created	zaduzenja	INSERT	220	2026-04-13 13:43:42.208896+00
+265	assignment_created	zaduzenja	INSERT	221	2026-04-13 13:43:42.208896+00
+266	assignment_created	zaduzenja	INSERT	222	2026-04-13 13:43:42.208896+00
+267	assignment_created	zaduzenja	INSERT	223	2026-04-13 13:43:42.208896+00
+268	assignment_created	zaduzenja	INSERT	224	2026-04-13 13:43:42.208896+00
+269	assignment_created	zaduzenja	INSERT	225	2026-04-13 13:43:42.208896+00
+270	assignment_created	zaduzenja	INSERT	226	2026-04-13 13:43:42.208896+00
+271	assignment_created	zaduzenja	INSERT	227	2026-04-13 13:43:42.208896+00
+272	assignment_created	zaduzenja	INSERT	228	2026-04-13 13:43:42.208896+00
+273	assignment_created	zaduzenja	INSERT	229	2026-04-13 13:43:42.208896+00
+274	assignment_created	zaduzenja	INSERT	230	2026-04-13 13:43:42.208896+00
+275	assignment_created	zaduzenja	INSERT	231	2026-04-13 13:43:42.208896+00
+276	assignment_created	zaduzenja	INSERT	232	2026-04-13 13:43:42.208896+00
+277	assignment_created	zaduzenja	INSERT	233	2026-04-13 13:43:42.208896+00
+278	assignment_created	zaduzenja	INSERT	234	2026-04-13 13:43:42.208896+00
+279	assignment_created	zaduzenja	INSERT	235	2026-04-13 13:43:42.208896+00
+280	assignment_created	zaduzenja	INSERT	236	2026-04-13 13:43:42.208896+00
+281	assignment_created	zaduzenja	INSERT	237	2026-04-13 13:43:42.208896+00
+282	assignment_created	zaduzenja	INSERT	238	2026-04-13 13:43:42.208896+00
+283	assignment_created	zaduzenja	INSERT	239	2026-04-13 13:43:42.208896+00
+284	assignment_created	zaduzenja	INSERT	240	2026-04-13 13:43:42.208896+00
+285	assignment_created	zaduzenja	INSERT	241	2026-04-13 13:43:42.208896+00
+286	assignment_created	zaduzenja	INSERT	242	2026-04-13 13:43:42.208896+00
+287	assignment_created	zaduzenja	INSERT	243	2026-04-13 13:43:42.208896+00
+288	assignment_created	zaduzenja	INSERT	244	2026-04-13 13:43:42.208896+00
+289	assignment_created	zaduzenja	INSERT	245	2026-04-13 13:43:42.208896+00
+290	assignment_created	zaduzenja	INSERT	246	2026-04-13 13:43:42.208896+00
+291	assignment_created	zaduzenja	INSERT	247	2026-04-13 13:43:42.208896+00
+292	assignment_created	zaduzenja	INSERT	248	2026-04-13 13:43:42.208896+00
+293	assignment_created	zaduzenja	INSERT	249	2026-04-13 13:43:42.208896+00
+294	assignment_created	zaduzenja	INSERT	250	2026-04-13 13:43:42.208896+00
+295	assignment_created	zaduzenja	INSERT	251	2026-04-13 13:43:42.208896+00
+296	assignment_created	zaduzenja	INSERT	252	2026-04-13 13:43:42.208896+00
+297	assignment_created	zaduzenja	INSERT	253	2026-04-13 13:43:42.208896+00
+298	assignment_created	zaduzenja	INSERT	254	2026-04-13 13:43:42.208896+00
+299	assignment_created	zaduzenja	INSERT	255	2026-04-13 13:43:42.208896+00
+300	assignment_created	zaduzenja	INSERT	256	2026-04-13 13:43:42.208896+00
+301	assignment_created	zaduzenja	INSERT	257	2026-04-13 13:43:42.208896+00
+302	assignment_created	zaduzenja	INSERT	258	2026-04-13 13:43:42.208896+00
+303	assignment_created	zaduzenja	INSERT	259	2026-04-13 13:43:42.208896+00
+304	assignment_created	zaduzenja	INSERT	260	2026-04-13 13:43:42.208896+00
+305	assignment_created	zaduzenja	INSERT	261	2026-04-13 13:43:42.208896+00
+306	assignment_created	zaduzenja	INSERT	262	2026-04-13 13:43:42.208896+00
+307	assignment_created	zaduzenja	INSERT	263	2026-04-13 13:43:42.208896+00
+308	assignment_created	zaduzenja	INSERT	264	2026-04-13 13:43:42.208896+00
+309	assignment_created	zaduzenja	INSERT	265	2026-04-13 13:43:42.208896+00
+310	assignment_created	zaduzenja	INSERT	266	2026-04-13 13:43:42.208896+00
+311	assignment_created	zaduzenja	INSERT	267	2026-04-13 13:43:42.208896+00
+312	assignment_created	zaduzenja	INSERT	268	2026-04-13 13:43:42.208896+00
+313	assignment_created	zaduzenja	INSERT	269	2026-04-13 13:43:42.208896+00
+314	assignment_created	zaduzenja	INSERT	270	2026-04-13 13:43:42.208896+00
+315	assignment_created	zaduzenja	INSERT	271	2026-04-13 13:43:42.208896+00
+316	assignment_created	zaduzenja	INSERT	272	2026-04-13 13:43:42.208896+00
+317	assignment_created	zaduzenja	INSERT	273	2026-04-13 13:43:42.208896+00
+318	assignment_created	zaduzenja	INSERT	274	2026-04-13 13:43:42.208896+00
+319	assignment_created	zaduzenja	INSERT	275	2026-04-13 13:43:42.208896+00
+320	assignment_created	zaduzenja	INSERT	276	2026-04-13 13:43:42.208896+00
+321	assignment_created	zaduzenja	INSERT	277	2026-04-13 13:43:42.208896+00
+322	assignment_created	zaduzenja	INSERT	278	2026-04-13 13:43:42.208896+00
+323	assignment_created	zaduzenja	INSERT	279	2026-04-13 13:43:42.208896+00
+324	assignment_created	zaduzenja	INSERT	280	2026-04-13 13:43:42.208896+00
+325	assignment_created	zaduzenja	INSERT	281	2026-04-13 13:43:42.208896+00
+326	assignment_created	zaduzenja	INSERT	282	2026-04-13 13:43:42.208896+00
+327	assignment_created	zaduzenja	INSERT	283	2026-04-13 13:43:42.208896+00
+328	assignment_created	zaduzenja	INSERT	284	2026-04-13 13:43:42.208896+00
+329	assignment_created	zaduzenja	INSERT	285	2026-04-13 13:43:42.208896+00
+330	assignment_created	zaduzenja	INSERT	286	2026-04-13 13:43:42.208896+00
+331	assignment_created	zaduzenja	INSERT	287	2026-04-13 13:43:42.208896+00
+332	assignment_created	zaduzenja	INSERT	288	2026-04-13 13:43:42.208896+00
+333	assignment_created	zaduzenja	INSERT	289	2026-04-13 13:43:42.208896+00
+334	assignment_created	zaduzenja	INSERT	290	2026-04-13 13:43:42.208896+00
+335	assignment_created	zaduzenja	INSERT	291	2026-04-13 13:43:42.208896+00
+336	assignment_created	zaduzenja	INSERT	292	2026-04-13 13:43:42.208896+00
+337	assignment_created	zaduzenja	INSERT	293	2026-04-13 13:43:42.208896+00
+338	assignment_created	zaduzenja	INSERT	294	2026-04-13 13:43:42.208896+00
+339	assignment_created	zaduzenja	INSERT	295	2026-04-13 13:43:42.208896+00
+340	assignment_created	zaduzenja	INSERT	296	2026-04-13 13:43:42.208896+00
+341	assignment_created	zaduzenja	INSERT	297	2026-04-13 13:43:42.208896+00
+342	assignment_created	zaduzenja	INSERT	298	2026-04-13 13:43:42.208896+00
+343	assignment_created	zaduzenja	INSERT	299	2026-04-13 13:43:42.208896+00
+344	assignment_created	zaduzenja	INSERT	300	2026-04-13 13:43:42.208896+00
+345	assignment_created	zaduzenja	INSERT	301	2026-04-13 13:43:42.208896+00
+346	assignment_created	zaduzenja	INSERT	302	2026-04-13 13:43:42.208896+00
+347	assignment_created	zaduzenja	INSERT	303	2026-04-13 13:43:42.208896+00
+348	assignment_created	zaduzenja	INSERT	304	2026-04-13 13:43:42.208896+00
+349	assignment_created	zaduzenja	INSERT	305	2026-04-13 13:43:42.208896+00
+350	assignment_created	zaduzenja	INSERT	306	2026-04-13 13:43:42.208896+00
+351	assignment_created	zaduzenja	INSERT	307	2026-04-13 13:43:42.208896+00
+352	assignment_created	zaduzenja	INSERT	308	2026-04-13 13:43:42.208896+00
+353	assignment_created	zaduzenja	INSERT	309	2026-04-13 13:43:42.208896+00
+354	assignment_created	zaduzenja	INSERT	310	2026-04-13 13:43:42.208896+00
+355	assignment_created	zaduzenja	INSERT	311	2026-04-13 13:43:42.208896+00
+356	assignment_created	zaduzenja	INSERT	312	2026-04-13 13:43:42.208896+00
+357	assignment_created	zaduzenja	INSERT	313	2026-04-13 13:43:42.208896+00
+358	assignment_created	zaduzenja	INSERT	314	2026-04-13 13:43:42.208896+00
+359	assignment_created	zaduzenja	INSERT	315	2026-04-13 13:43:42.208896+00
+360	assignment_created	zaduzenja	INSERT	316	2026-04-13 13:43:42.208896+00
+361	assignment_created	zaduzenja	INSERT	317	2026-04-13 13:43:42.208896+00
+362	assignment_created	zaduzenja	INSERT	318	2026-04-13 13:43:42.208896+00
+363	assignment_created	zaduzenja	INSERT	319	2026-04-13 13:43:42.208896+00
+364	assignment_created	zaduzenja	INSERT	320	2026-04-13 13:43:42.208896+00
+365	assignment_created	zaduzenja	INSERT	321	2026-04-13 13:43:42.208896+00
+366	assignment_created	zaduzenja	INSERT	322	2026-04-13 13:43:42.208896+00
+367	assignment_created	zaduzenja	INSERT	323	2026-04-13 13:43:42.208896+00
+368	assignment_created	zaduzenja	INSERT	324	2026-04-13 13:43:42.208896+00
+369	assignment_created	zaduzenja	INSERT	325	2026-04-13 13:43:42.208896+00
+370	assignment_created	zaduzenja	INSERT	326	2026-04-13 13:43:42.208896+00
+371	assignment_created	zaduzenja	INSERT	327	2026-04-13 13:43:42.208896+00
+372	assignment_created	zaduzenja	INSERT	328	2026-04-13 13:43:42.208896+00
+373	assignment_created	zaduzenja	INSERT	329	2026-04-13 13:43:42.208896+00
+374	assignment_created	zaduzenja	INSERT	330	2026-04-13 13:43:42.208896+00
+375	assignment_created	zaduzenja	INSERT	331	2026-04-13 13:43:42.208896+00
+376	assignment_created	zaduzenja	INSERT	332	2026-04-13 13:43:42.208896+00
+377	assignment_created	zaduzenja	INSERT	333	2026-04-13 13:43:42.208896+00
+378	assignment_created	zaduzenja	INSERT	334	2026-04-13 13:43:42.208896+00
+379	assignment_created	zaduzenja	INSERT	335	2026-04-13 13:43:42.208896+00
+380	assignment_created	zaduzenja	INSERT	336	2026-04-13 13:43:42.208896+00
+381	assignment_created	zaduzenja	INSERT	337	2026-04-13 13:43:42.208896+00
+382	assignment_created	zaduzenja	INSERT	338	2026-04-13 13:43:42.208896+00
+383	assignment_created	zaduzenja	INSERT	339	2026-04-13 13:43:42.208896+00
+384	assignment_created	zaduzenja	INSERT	340	2026-04-13 13:43:42.208896+00
+385	assignment_created	zaduzenja	INSERT	341	2026-04-13 13:43:42.208896+00
+386	assignment_created	zaduzenja	INSERT	342	2026-04-13 13:43:42.208896+00
+387	assignment_created	zaduzenja	INSERT	343	2026-04-13 13:43:42.208896+00
+388	assignment_created	zaduzenja	INSERT	344	2026-04-13 13:43:42.208896+00
+389	assignment_created	zaduzenja	INSERT	345	2026-04-13 13:43:42.208896+00
+390	assignment_created	zaduzenja	INSERT	346	2026-04-13 13:43:42.208896+00
+391	assignment_created	zaduzenja	INSERT	347	2026-04-13 13:43:42.208896+00
+392	assignment_created	zaduzenja	INSERT	348	2026-04-13 13:43:42.208896+00
+393	assignment_created	zaduzenja	INSERT	349	2026-04-13 13:43:42.208896+00
+394	assignment_created	zaduzenja	INSERT	350	2026-04-13 13:43:42.208896+00
+395	assignment_created	zaduzenja	INSERT	351	2026-04-13 13:43:42.208896+00
+396	assignment_created	zaduzenja	INSERT	352	2026-04-13 13:43:42.208896+00
+397	assignment_created	zaduzenja	INSERT	353	2026-04-13 13:43:42.208896+00
+398	assignment_created	zaduzenja	INSERT	354	2026-04-13 13:43:42.208896+00
+399	assignment_created	zaduzenja	INSERT	355	2026-04-13 13:43:42.208896+00
+400	assignment_created	zaduzenja	INSERT	356	2026-04-13 13:43:42.208896+00
+401	assignment_created	zaduzenja	INSERT	357	2026-04-13 13:43:42.208896+00
+402	assignment_created	zaduzenja	INSERT	358	2026-04-13 13:43:42.208896+00
+403	assignment_created	zaduzenja	INSERT	359	2026-04-13 13:43:42.208896+00
+404	assignment_created	zaduzenja	INSERT	360	2026-04-13 13:43:42.208896+00
+405	assignment_created	zaduzenja	INSERT	361	2026-04-13 13:43:42.208896+00
+406	assignment_created	zaduzenja	INSERT	362	2026-04-13 13:43:42.208896+00
+407	assignment_created	zaduzenja	INSERT	363	2026-04-13 13:43:42.208896+00
+408	assignment_created	zaduzenja	INSERT	364	2026-04-13 13:43:42.208896+00
+409	assignment_created	zaduzenja	INSERT	365	2026-04-13 13:43:42.208896+00
+410	assignment_created	zaduzenja	INSERT	366	2026-04-13 13:43:42.208896+00
+411	assignment_created	zaduzenja	INSERT	367	2026-04-13 13:43:42.208896+00
+412	assignment_created	zaduzenja	INSERT	368	2026-04-13 13:43:42.208896+00
+413	assignment_created	zaduzenja	INSERT	369	2026-04-13 13:43:42.208896+00
+414	assignment_created	zaduzenja	INSERT	370	2026-04-13 13:43:42.208896+00
+415	assignment_created	zaduzenja	INSERT	371	2026-04-13 13:43:42.208896+00
+416	assignment_created	zaduzenja	INSERT	372	2026-04-13 13:43:42.208896+00
+417	assignment_created	zaduzenja	INSERT	373	2026-04-13 13:43:42.208896+00
+418	assignment_created	zaduzenja	INSERT	374	2026-04-13 13:43:42.208896+00
+419	assignment_created	zaduzenja	INSERT	375	2026-04-13 13:43:42.208896+00
+420	assignment_created	zaduzenja	INSERT	376	2026-04-13 13:43:42.208896+00
+421	assignment_created	zaduzenja	INSERT	377	2026-04-13 13:43:42.208896+00
+422	assignment_created	zaduzenja	INSERT	378	2026-04-13 13:43:42.208896+00
+423	assignment_created	zaduzenja	INSERT	379	2026-04-13 13:43:42.208896+00
+424	assignment_created	zaduzenja	INSERT	380	2026-04-13 13:43:42.208896+00
+425	assignment_created	zaduzenja	INSERT	381	2026-04-13 13:43:42.208896+00
+426	assignment_created	zaduzenja	INSERT	382	2026-04-13 13:43:42.208896+00
+427	assignment_created	zaduzenja	INSERT	383	2026-04-13 13:43:42.208896+00
+428	assignment_created	zaduzenja	INSERT	384	2026-04-13 13:43:42.208896+00
+429	assignment_created	zaduzenja	INSERT	385	2026-04-13 13:43:42.208896+00
+430	assignment_created	zaduzenja	INSERT	386	2026-04-13 13:43:42.208896+00
+431	assignment_created	zaduzenja	INSERT	387	2026-04-13 13:43:42.208896+00
+432	assignment_created	zaduzenja	INSERT	388	2026-04-13 13:43:42.208896+00
+433	assignment_created	zaduzenja	INSERT	389	2026-04-13 13:43:42.208896+00
+434	assignment_created	zaduzenja	INSERT	390	2026-04-13 13:43:42.208896+00
+435	assignment_created	zaduzenja	INSERT	391	2026-04-13 13:43:42.208896+00
+436	assignment_created	zaduzenja	INSERT	392	2026-04-13 13:43:42.208896+00
+437	assignment_created	zaduzenja	INSERT	393	2026-04-13 13:43:42.208896+00
+438	assignment_created	zaduzenja	INSERT	394	2026-04-13 13:43:42.208896+00
+439	assignment_created	zaduzenja	INSERT	395	2026-04-13 13:43:42.208896+00
+440	assignment_created	zaduzenja	INSERT	396	2026-04-13 13:43:42.208896+00
+441	assignment_created	zaduzenja	INSERT	397	2026-04-13 13:43:42.208896+00
+442	assignment_created	zaduzenja	INSERT	398	2026-04-13 13:43:42.208896+00
+443	assignment_created	zaduzenja	INSERT	399	2026-04-13 13:43:42.208896+00
+444	assignment_created	zaduzenja	INSERT	400	2026-04-13 13:43:42.208896+00
+445	assignment_created	zaduzenja	INSERT	401	2026-04-13 13:43:42.208896+00
+446	assignment_created	zaduzenja	INSERT	402	2026-04-13 13:43:42.208896+00
+447	assignment_created	zaduzenja	INSERT	403	2026-04-13 13:43:42.208896+00
+448	assignment_created	zaduzenja	INSERT	404	2026-04-13 13:43:42.208896+00
+449	assignment_created	zaduzenja	INSERT	405	2026-04-13 13:43:42.208896+00
+450	assignment_created	zaduzenja	INSERT	406	2026-04-13 13:43:42.208896+00
+451	assignment_created	zaduzenja	INSERT	407	2026-04-13 13:43:42.208896+00
+452	assignment_created	zaduzenja	INSERT	408	2026-04-13 13:43:42.208896+00
+453	assignment_created	zaduzenja	INSERT	409	2026-04-13 13:43:42.208896+00
+454	assignment_created	zaduzenja	INSERT	410	2026-04-13 13:43:42.208896+00
+455	assignment_created	zaduzenja	INSERT	411	2026-04-13 13:43:42.208896+00
+456	assignment_created	zaduzenja	INSERT	412	2026-04-13 13:43:42.208896+00
+457	assignment_created	zaduzenja	INSERT	413	2026-04-13 13:43:42.208896+00
+458	assignment_created	zaduzenja	INSERT	414	2026-04-13 13:43:42.208896+00
+459	assignment_created	zaduzenja	INSERT	415	2026-04-13 13:43:42.208896+00
+460	assignment_created	zaduzenja	INSERT	416	2026-04-13 13:43:42.208896+00
+461	assignment_created	zaduzenja	INSERT	417	2026-04-13 13:43:42.208896+00
+462	assignment_created	zaduzenja	INSERT	418	2026-04-13 13:43:42.208896+00
+463	assignment_created	zaduzenja	INSERT	419	2026-04-13 13:43:42.208896+00
+464	assignment_created	zaduzenja	INSERT	420	2026-04-13 13:43:42.208896+00
+465	assignment_created	zaduzenja	INSERT	421	2026-04-13 13:43:42.208896+00
+466	assignment_created	zaduzenja	INSERT	422	2026-04-13 13:43:42.208896+00
+467	assignment_created	zaduzenja	INSERT	423	2026-04-13 13:43:42.208896+00
+468	assignment_created	zaduzenja	INSERT	424	2026-04-13 13:43:42.208896+00
+469	assignment_created	zaduzenja	INSERT	425	2026-04-13 13:43:42.208896+00
+470	assignment_created	zaduzenja	INSERT	426	2026-04-13 13:43:42.208896+00
+471	assignment_created	zaduzenja	INSERT	427	2026-04-13 13:43:42.208896+00
+472	assignment_created	zaduzenja	INSERT	428	2026-04-13 13:43:42.208896+00
+473	assignment_created	zaduzenja	INSERT	429	2026-04-13 13:43:42.208896+00
+474	assignment_created	zaduzenja	INSERT	430	2026-04-13 13:43:42.208896+00
+475	assignment_created	zaduzenja	INSERT	431	2026-04-13 13:43:42.208896+00
+476	assignment_created	zaduzenja	INSERT	432	2026-04-13 13:43:42.208896+00
+477	assignment_created	zaduzenja	INSERT	433	2026-04-13 13:43:42.208896+00
+478	assignment_created	zaduzenja	INSERT	434	2026-04-13 13:43:42.208896+00
+479	assignment_created	zaduzenja	INSERT	435	2026-04-13 13:43:42.208896+00
+480	assignment_created	zaduzenja	INSERT	436	2026-04-13 13:43:42.208896+00
+481	assignment_created	zaduzenja	INSERT	437	2026-04-13 13:43:42.208896+00
+482	assignment_created	zaduzenja	INSERT	438	2026-04-13 13:43:42.208896+00
+483	assignment_created	zaduzenja	INSERT	439	2026-04-13 13:43:42.208896+00
+484	assignment_created	zaduzenja	INSERT	440	2026-04-13 13:43:42.208896+00
+485	assignment_created	zaduzenja	INSERT	441	2026-04-13 13:43:42.208896+00
+486	assignment_created	zaduzenja	INSERT	442	2026-04-13 13:43:42.208896+00
+487	assignment_created	zaduzenja	INSERT	443	2026-04-13 13:43:42.208896+00
+488	assignment_created	zaduzenja	INSERT	444	2026-04-13 13:43:42.208896+00
+489	assignment_created	zaduzenja	INSERT	445	2026-04-13 13:43:42.208896+00
+490	assignment_created	zaduzenja	INSERT	446	2026-04-13 13:43:42.208896+00
+491	assignment_created	zaduzenja	INSERT	447	2026-04-13 13:43:42.208896+00
+492	assignment_created	zaduzenja	INSERT	448	2026-04-13 13:43:42.208896+00
+493	assignment_created	zaduzenja	INSERT	449	2026-04-13 13:43:42.208896+00
+494	assignment_created	zaduzenja	INSERT	450	2026-04-13 13:43:42.208896+00
+495	assignment_created	zaduzenja	INSERT	451	2026-04-13 13:43:42.208896+00
+496	assignment_created	zaduzenja	INSERT	452	2026-04-13 13:43:42.208896+00
+497	assignment_created	zaduzenja	INSERT	453	2026-04-13 13:43:42.208896+00
+498	assignment_created	zaduzenja	INSERT	454	2026-04-13 13:43:42.208896+00
+499	assignment_created	zaduzenja	INSERT	455	2026-04-13 13:43:42.208896+00
+500	assignment_created	zaduzenja	INSERT	456	2026-04-13 13:43:42.208896+00
+501	assignment_created	zaduzenja	INSERT	457	2026-04-13 13:43:42.208896+00
+502	assignment_created	zaduzenja	INSERT	458	2026-04-13 13:43:42.208896+00
+503	assignment_created	zaduzenja	INSERT	459	2026-04-13 13:43:42.208896+00
+504	assignment_created	zaduzenja	INSERT	460	2026-04-13 13:43:42.208896+00
+505	assignment_created	zaduzenja	INSERT	461	2026-04-13 13:43:42.208896+00
+506	assignment_created	zaduzenja	INSERT	462	2026-04-13 13:43:42.208896+00
+507	assignment_created	zaduzenja	INSERT	463	2026-04-13 13:43:42.208896+00
+508	assignment_created	zaduzenja	INSERT	464	2026-04-13 13:43:42.208896+00
+509	assignment_created	zaduzenja	INSERT	465	2026-04-13 13:43:42.208896+00
+510	assignment_created	zaduzenja	INSERT	466	2026-04-13 13:43:42.208896+00
+511	assignment_created	zaduzenja	INSERT	467	2026-04-13 13:43:42.208896+00
+512	assignment_created	zaduzenja	INSERT	468	2026-04-13 13:43:42.208896+00
+513	assignment_created	zaduzenja	INSERT	469	2026-04-13 13:43:42.208896+00
+514	assignment_created	zaduzenja	INSERT	470	2026-04-13 13:43:42.208896+00
+515	assignment_created	zaduzenja	INSERT	471	2026-04-13 13:43:42.208896+00
+516	assignment_created	zaduzenja	INSERT	472	2026-04-13 13:43:42.208896+00
+517	assignment_created	zaduzenja	INSERT	473	2026-04-13 13:43:42.208896+00
+518	assignment_created	zaduzenja	INSERT	474	2026-04-13 13:43:42.208896+00
+519	assignment_created	zaduzenja	INSERT	475	2026-04-13 13:43:42.208896+00
+520	assignment_created	zaduzenja	INSERT	476	2026-04-13 13:43:42.208896+00
+521	assignment_created	zaduzenja	INSERT	477	2026-04-13 13:43:42.208896+00
+522	assignment_created	zaduzenja	INSERT	478	2026-04-13 13:43:42.208896+00
+523	assignment_created	zaduzenja	INSERT	479	2026-04-13 13:43:42.208896+00
+524	assignment_created	zaduzenja	INSERT	480	2026-04-13 13:43:42.208896+00
+525	assignment_created	zaduzenja	INSERT	481	2026-04-13 13:43:42.208896+00
+526	assignment_created	zaduzenja	INSERT	482	2026-04-13 13:43:42.208896+00
+527	assignment_created	zaduzenja	INSERT	483	2026-04-13 13:43:42.208896+00
+528	assignment_created	zaduzenja	INSERT	484	2026-04-13 13:43:42.208896+00
+529	assignment_created	zaduzenja	INSERT	485	2026-04-13 13:43:42.208896+00
+530	assignment_created	zaduzenja	INSERT	486	2026-04-13 13:43:42.208896+00
+531	assignment_created	zaduzenja	INSERT	487	2026-04-13 13:43:42.208896+00
+532	assignment_created	zaduzenja	INSERT	488	2026-04-13 13:43:42.208896+00
+533	assignment_created	zaduzenja	INSERT	489	2026-04-13 13:43:42.208896+00
+534	assignment_created	zaduzenja	INSERT	490	2026-04-13 13:43:42.208896+00
+535	assignment_created	zaduzenja	INSERT	491	2026-04-13 13:43:42.208896+00
+536	assignment_created	zaduzenja	INSERT	492	2026-04-13 13:43:42.208896+00
+537	assignment_created	zaduzenja	INSERT	493	2026-04-13 13:43:42.208896+00
+538	assignment_created	zaduzenja	INSERT	494	2026-04-13 13:43:42.208896+00
+539	assignment_created	zaduzenja	INSERT	495	2026-04-13 13:43:42.208896+00
+540	assignment_created	zaduzenja	INSERT	496	2026-04-13 13:43:42.208896+00
+541	assignment_created	zaduzenja	INSERT	497	2026-04-13 13:43:42.208896+00
+542	fuel_changed	evidencija_goriva	INSERT	49	2026-04-13 13:43:42.208896+00
+543	fuel_changed	evidencija_goriva	INSERT	50	2026-04-13 13:43:42.208896+00
+544	fuel_changed	evidencija_goriva	INSERT	51	2026-04-13 13:43:42.208896+00
+545	fuel_changed	evidencija_goriva	INSERT	52	2026-04-13 13:43:42.208896+00
+546	fuel_changed	evidencija_goriva	INSERT	53	2026-04-13 13:43:42.208896+00
+547	fuel_changed	evidencija_goriva	INSERT	54	2026-04-13 13:43:42.208896+00
+548	fuel_changed	evidencija_goriva	INSERT	55	2026-04-13 13:43:42.208896+00
+549	fuel_changed	evidencija_goriva	INSERT	56	2026-04-13 13:43:42.208896+00
+550	fuel_changed	evidencija_goriva	INSERT	57	2026-04-13 13:43:42.208896+00
+551	fuel_changed	evidencija_goriva	INSERT	58	2026-04-13 13:43:42.208896+00
+552	fuel_changed	evidencija_goriva	INSERT	59	2026-04-13 13:43:42.208896+00
+553	fuel_changed	evidencija_goriva	INSERT	60	2026-04-13 13:43:42.208896+00
+554	fuel_changed	evidencija_goriva	INSERT	61	2026-04-13 13:43:42.208896+00
+555	fuel_changed	evidencija_goriva	INSERT	62	2026-04-13 13:43:42.208896+00
+556	fuel_changed	evidencija_goriva	INSERT	63	2026-04-13 13:43:42.208896+00
+557	fuel_changed	evidencija_goriva	INSERT	64	2026-04-13 13:43:42.208896+00
+558	fuel_changed	evidencija_goriva	INSERT	65	2026-04-13 13:43:42.208896+00
+559	fuel_changed	evidencija_goriva	INSERT	66	2026-04-13 13:43:42.208896+00
+560	fuel_changed	evidencija_goriva	INSERT	67	2026-04-13 13:43:42.208896+00
+561	fuel_changed	evidencija_goriva	INSERT	68	2026-04-13 13:43:42.208896+00
+562	fuel_changed	evidencija_goriva	INSERT	69	2026-04-13 13:43:42.208896+00
+563	fuel_changed	evidencija_goriva	INSERT	70	2026-04-13 13:43:42.208896+00
+564	fuel_changed	evidencija_goriva	INSERT	71	2026-04-13 13:43:42.208896+00
+565	fuel_changed	evidencija_goriva	INSERT	72	2026-04-13 13:43:42.208896+00
+566	fuel_changed	evidencija_goriva	INSERT	73	2026-04-13 13:43:42.208896+00
+567	fuel_changed	evidencija_goriva	INSERT	74	2026-04-13 13:43:42.208896+00
+568	fuel_changed	evidencija_goriva	INSERT	75	2026-04-13 13:43:42.208896+00
+569	fuel_changed	evidencija_goriva	INSERT	76	2026-04-13 13:43:42.208896+00
+570	fuel_changed	evidencija_goriva	INSERT	77	2026-04-13 13:43:42.208896+00
+571	fuel_changed	evidencija_goriva	INSERT	78	2026-04-13 13:43:42.208896+00
+572	fuel_changed	evidencija_goriva	INSERT	79	2026-04-13 13:43:42.208896+00
+573	fuel_changed	evidencija_goriva	INSERT	80	2026-04-13 13:43:42.208896+00
+574	fuel_changed	evidencija_goriva	INSERT	81	2026-04-13 13:43:42.208896+00
+575	fuel_changed	evidencija_goriva	INSERT	82	2026-04-13 13:43:42.208896+00
+576	fuel_changed	evidencija_goriva	INSERT	83	2026-04-13 13:43:42.208896+00
+577	fuel_changed	evidencija_goriva	INSERT	84	2026-04-13 13:43:42.208896+00
+578	fuel_changed	evidencija_goriva	INSERT	85	2026-04-13 13:43:42.208896+00
+579	fuel_changed	evidencija_goriva	INSERT	86	2026-04-13 13:43:42.208896+00
+580	fuel_changed	evidencija_goriva	INSERT	87	2026-04-13 13:43:42.208896+00
+581	fuel_changed	evidencija_goriva	INSERT	88	2026-04-13 13:43:42.208896+00
+582	fuel_changed	evidencija_goriva	INSERT	89	2026-04-13 13:43:42.208896+00
+583	fuel_changed	evidencija_goriva	INSERT	90	2026-04-13 13:43:42.208896+00
+584	fuel_changed	evidencija_goriva	INSERT	91	2026-04-13 13:43:42.208896+00
+585	fuel_changed	evidencija_goriva	INSERT	92	2026-04-13 13:43:42.208896+00
+586	fuel_changed	evidencija_goriva	INSERT	93	2026-04-13 13:43:42.208896+00
+587	fuel_changed	evidencija_goriva	INSERT	94	2026-04-13 13:43:42.208896+00
+588	fuel_changed	evidencija_goriva	INSERT	95	2026-04-13 13:43:42.208896+00
+589	fuel_changed	evidencija_goriva	INSERT	96	2026-04-13 13:43:42.208896+00
+590	fuel_changed	evidencija_goriva	INSERT	97	2026-04-13 13:43:42.208896+00
+591	fuel_changed	evidencija_goriva	INSERT	98	2026-04-13 13:43:42.208896+00
+592	fuel_changed	evidencija_goriva	INSERT	99	2026-04-13 13:43:42.208896+00
+593	fuel_changed	evidencija_goriva	INSERT	100	2026-04-13 13:43:42.208896+00
+594	fuel_changed	evidencija_goriva	INSERT	101	2026-04-13 13:43:42.208896+00
+595	fuel_changed	evidencija_goriva	INSERT	102	2026-04-13 13:43:42.208896+00
+596	fuel_changed	evidencija_goriva	INSERT	103	2026-04-13 13:43:42.208896+00
+597	fuel_changed	evidencija_goriva	INSERT	104	2026-04-13 13:43:42.208896+00
+598	fuel_changed	evidencija_goriva	INSERT	105	2026-04-13 13:43:42.208896+00
+599	fuel_changed	evidencija_goriva	INSERT	106	2026-04-13 13:43:42.208896+00
+600	fuel_changed	evidencija_goriva	INSERT	107	2026-04-13 13:43:42.208896+00
+601	fuel_changed	evidencija_goriva	INSERT	108	2026-04-13 13:43:42.208896+00
+602	fuel_changed	evidencija_goriva	INSERT	109	2026-04-13 13:43:42.208896+00
+603	fuel_changed	evidencija_goriva	INSERT	110	2026-04-13 13:43:42.208896+00
+604	fuel_changed	evidencija_goriva	INSERT	111	2026-04-13 13:43:42.208896+00
+605	fuel_changed	evidencija_goriva	INSERT	112	2026-04-13 13:43:42.208896+00
+606	fuel_changed	evidencija_goriva	INSERT	113	2026-04-13 13:43:42.208896+00
+607	fuel_changed	evidencija_goriva	INSERT	114	2026-04-13 13:43:42.208896+00
+608	fuel_changed	evidencija_goriva	INSERT	115	2026-04-13 13:43:42.208896+00
+609	fuel_changed	evidencija_goriva	INSERT	116	2026-04-13 13:43:42.208896+00
+610	fuel_changed	evidencija_goriva	INSERT	117	2026-04-13 13:43:42.208896+00
+611	fuel_changed	evidencija_goriva	INSERT	118	2026-04-13 13:43:42.208896+00
+612	fuel_changed	evidencija_goriva	INSERT	119	2026-04-13 13:43:42.208896+00
+613	fuel_changed	evidencija_goriva	INSERT	120	2026-04-13 13:43:42.208896+00
+614	fuel_changed	evidencija_goriva	INSERT	121	2026-04-13 13:43:42.208896+00
+615	fuel_changed	evidencija_goriva	INSERT	122	2026-04-13 13:43:42.208896+00
+616	fuel_changed	evidencija_goriva	INSERT	123	2026-04-13 13:43:42.208896+00
+617	fuel_changed	evidencija_goriva	INSERT	124	2026-04-13 13:43:42.208896+00
+618	fuel_changed	evidencija_goriva	INSERT	125	2026-04-13 13:43:42.208896+00
+619	fuel_changed	evidencija_goriva	INSERT	126	2026-04-13 13:43:42.208896+00
+620	fuel_changed	evidencija_goriva	INSERT	127	2026-04-13 13:43:42.208896+00
+621	fuel_changed	evidencija_goriva	INSERT	128	2026-04-13 13:43:42.208896+00
+622	fuel_changed	evidencija_goriva	INSERT	129	2026-04-13 13:43:42.208896+00
+623	fuel_changed	evidencija_goriva	INSERT	130	2026-04-13 13:43:42.208896+00
+624	fuel_changed	evidencija_goriva	INSERT	131	2026-04-13 13:43:42.208896+00
+625	fuel_changed	evidencija_goriva	INSERT	132	2026-04-13 13:43:42.208896+00
+626	fuel_changed	evidencija_goriva	INSERT	133	2026-04-13 13:43:42.208896+00
+627	fuel_changed	evidencija_goriva	INSERT	134	2026-04-13 13:43:42.208896+00
+628	fuel_changed	evidencija_goriva	INSERT	135	2026-04-13 13:43:42.208896+00
+629	fuel_changed	evidencija_goriva	INSERT	136	2026-04-13 13:43:42.208896+00
+630	fuel_changed	evidencija_goriva	INSERT	137	2026-04-13 13:43:42.208896+00
+631	fuel_changed	evidencija_goriva	INSERT	138	2026-04-13 13:43:42.208896+00
+632	fuel_changed	evidencija_goriva	INSERT	139	2026-04-13 13:43:42.208896+00
+633	fuel_changed	evidencija_goriva	INSERT	140	2026-04-13 13:43:42.208896+00
+634	fuel_changed	evidencija_goriva	INSERT	141	2026-04-13 13:43:42.208896+00
+635	fuel_changed	evidencija_goriva	INSERT	142	2026-04-13 13:43:42.208896+00
+636	fuel_changed	evidencija_goriva	INSERT	143	2026-04-13 13:43:42.208896+00
+637	fuel_changed	evidencija_goriva	INSERT	144	2026-04-13 13:43:42.208896+00
+638	fuel_changed	evidencija_goriva	INSERT	145	2026-04-13 13:43:42.208896+00
+639	fuel_changed	evidencija_goriva	INSERT	146	2026-04-13 13:43:42.208896+00
+640	fuel_changed	evidencija_goriva	INSERT	147	2026-04-13 13:43:42.208896+00
+641	fuel_changed	evidencija_goriva	INSERT	148	2026-04-13 13:43:42.208896+00
+642	fuel_changed	evidencija_goriva	INSERT	149	2026-04-13 13:43:42.208896+00
+643	fuel_changed	evidencija_goriva	INSERT	150	2026-04-13 13:43:42.208896+00
+644	fuel_changed	evidencija_goriva	INSERT	151	2026-04-13 13:43:42.208896+00
+645	fuel_changed	evidencija_goriva	INSERT	152	2026-04-13 13:43:42.208896+00
+646	fuel_changed	evidencija_goriva	INSERT	153	2026-04-13 13:43:42.208896+00
+647	fuel_changed	evidencija_goriva	INSERT	154	2026-04-13 13:43:42.208896+00
+648	fuel_changed	evidencija_goriva	INSERT	155	2026-04-13 13:43:42.208896+00
+649	fuel_changed	evidencija_goriva	INSERT	156	2026-04-13 13:43:42.208896+00
+650	fuel_changed	evidencija_goriva	INSERT	157	2026-04-13 13:43:42.208896+00
+651	fuel_changed	evidencija_goriva	INSERT	158	2026-04-13 13:43:42.208896+00
+652	fuel_changed	evidencija_goriva	INSERT	159	2026-04-13 13:43:42.208896+00
+653	fuel_changed	evidencija_goriva	INSERT	160	2026-04-13 13:43:42.208896+00
+654	fuel_changed	evidencija_goriva	INSERT	161	2026-04-13 13:43:42.208896+00
+655	fuel_changed	evidencija_goriva	INSERT	162	2026-04-13 13:43:42.208896+00
+656	fuel_changed	evidencija_goriva	INSERT	163	2026-04-13 13:43:42.208896+00
+657	fuel_changed	evidencija_goriva	INSERT	164	2026-04-13 13:43:42.208896+00
+658	fuel_changed	evidencija_goriva	INSERT	165	2026-04-13 13:43:42.208896+00
+659	fuel_changed	evidencija_goriva	INSERT	166	2026-04-13 13:43:42.208896+00
+660	fuel_changed	evidencija_goriva	INSERT	167	2026-04-13 13:43:42.208896+00
+661	fuel_changed	evidencija_goriva	INSERT	168	2026-04-13 13:43:42.208896+00
+662	fuel_changed	evidencija_goriva	INSERT	169	2026-04-13 13:43:42.208896+00
+663	fuel_changed	evidencija_goriva	INSERT	170	2026-04-13 13:43:42.208896+00
+664	fuel_changed	evidencija_goriva	INSERT	171	2026-04-13 13:43:42.208896+00
+665	fuel_changed	evidencija_goriva	INSERT	172	2026-04-13 13:43:42.208896+00
+666	fuel_changed	evidencija_goriva	INSERT	173	2026-04-13 13:43:42.208896+00
+667	fuel_changed	evidencija_goriva	INSERT	174	2026-04-13 13:43:42.208896+00
+668	fuel_changed	evidencija_goriva	INSERT	175	2026-04-13 13:43:42.208896+00
+669	fuel_changed	evidencija_goriva	INSERT	176	2026-04-13 13:43:42.208896+00
+670	fuel_changed	evidencija_goriva	INSERT	177	2026-04-13 13:43:42.208896+00
+671	fuel_changed	evidencija_goriva	INSERT	178	2026-04-13 13:43:42.208896+00
+672	fuel_changed	evidencija_goriva	INSERT	179	2026-04-13 13:43:42.208896+00
+673	fuel_changed	evidencija_goriva	INSERT	180	2026-04-13 13:43:42.208896+00
+674	fuel_changed	evidencija_goriva	INSERT	181	2026-04-13 13:43:42.208896+00
+675	fuel_changed	evidencija_goriva	INSERT	182	2026-04-13 13:43:42.208896+00
+676	fuel_changed	evidencija_goriva	INSERT	183	2026-04-13 13:43:42.208896+00
+677	fuel_changed	evidencija_goriva	INSERT	184	2026-04-13 13:43:42.208896+00
+678	fuel_changed	evidencija_goriva	INSERT	185	2026-04-13 13:43:42.208896+00
+679	fuel_changed	evidencija_goriva	INSERT	186	2026-04-13 13:43:42.208896+00
+680	fuel_changed	evidencija_goriva	INSERT	187	2026-04-13 13:43:42.208896+00
+681	fuel_changed	evidencija_goriva	INSERT	188	2026-04-13 13:43:42.208896+00
+682	fuel_changed	evidencija_goriva	INSERT	189	2026-04-13 13:43:42.208896+00
+683	fuel_changed	evidencija_goriva	INSERT	190	2026-04-13 13:43:42.208896+00
+684	fuel_changed	evidencija_goriva	INSERT	191	2026-04-13 13:43:42.208896+00
+685	fuel_changed	evidencija_goriva	INSERT	192	2026-04-13 13:43:42.208896+00
+686	fuel_changed	evidencija_goriva	INSERT	193	2026-04-13 13:43:42.208896+00
+687	fuel_changed	evidencija_goriva	INSERT	194	2026-04-13 13:43:42.208896+00
+688	fuel_changed	evidencija_goriva	INSERT	195	2026-04-13 13:43:42.208896+00
+689	fuel_changed	evidencija_goriva	INSERT	196	2026-04-13 13:43:42.208896+00
+690	fuel_changed	evidencija_goriva	INSERT	197	2026-04-13 13:43:42.208896+00
+691	fuel_changed	evidencija_goriva	INSERT	198	2026-04-13 13:43:42.208896+00
+692	fuel_changed	evidencija_goriva	INSERT	199	2026-04-13 13:43:42.208896+00
+693	fuel_changed	evidencija_goriva	INSERT	200	2026-04-13 13:43:42.208896+00
+694	fuel_changed	evidencija_goriva	INSERT	201	2026-04-13 13:43:42.208896+00
+695	fuel_changed	evidencija_goriva	INSERT	202	2026-04-13 13:43:42.208896+00
+696	fuel_changed	evidencija_goriva	INSERT	203	2026-04-13 13:43:42.208896+00
+697	fuel_changed	evidencija_goriva	INSERT	204	2026-04-13 13:43:42.208896+00
+698	fuel_changed	evidencija_goriva	INSERT	205	2026-04-13 13:43:42.208896+00
+699	fuel_changed	evidencija_goriva	INSERT	206	2026-04-13 13:43:42.208896+00
+700	fuel_changed	evidencija_goriva	INSERT	207	2026-04-13 13:43:42.208896+00
+701	fuel_changed	evidencija_goriva	INSERT	208	2026-04-13 13:43:42.208896+00
+702	fuel_changed	evidencija_goriva	INSERT	209	2026-04-13 13:43:42.208896+00
+703	fuel_changed	evidencija_goriva	INSERT	210	2026-04-13 13:43:42.208896+00
+704	fuel_changed	evidencija_goriva	INSERT	211	2026-04-13 13:43:42.208896+00
+705	fuel_changed	evidencija_goriva	INSERT	212	2026-04-13 13:43:42.208896+00
+706	fuel_changed	evidencija_goriva	INSERT	213	2026-04-13 13:43:42.208896+00
+707	fuel_changed	evidencija_goriva	INSERT	214	2026-04-13 13:43:42.208896+00
+708	fuel_changed	evidencija_goriva	INSERT	215	2026-04-13 13:43:42.208896+00
+709	fuel_changed	evidencija_goriva	INSERT	216	2026-04-13 13:43:42.208896+00
+710	fuel_changed	evidencija_goriva	INSERT	217	2026-04-13 13:43:42.208896+00
+711	fuel_changed	evidencija_goriva	INSERT	218	2026-04-13 13:43:42.208896+00
+712	fuel_changed	evidencija_goriva	INSERT	219	2026-04-13 13:43:42.208896+00
+713	fuel_changed	evidencija_goriva	INSERT	220	2026-04-13 13:43:42.208896+00
+714	fuel_changed	evidencija_goriva	INSERT	221	2026-04-13 13:43:42.208896+00
+715	fuel_changed	evidencija_goriva	INSERT	222	2026-04-13 13:43:42.208896+00
+716	fuel_changed	evidencija_goriva	INSERT	223	2026-04-13 13:43:42.208896+00
+717	fuel_changed	evidencija_goriva	INSERT	224	2026-04-13 13:43:42.208896+00
+718	fuel_changed	evidencija_goriva	INSERT	225	2026-04-13 13:43:42.208896+00
+719	fuel_changed	evidencija_goriva	INSERT	226	2026-04-13 13:43:42.208896+00
+720	fuel_changed	evidencija_goriva	INSERT	227	2026-04-13 13:43:42.208896+00
+721	fuel_changed	evidencija_goriva	INSERT	228	2026-04-13 13:43:42.208896+00
+722	fuel_changed	evidencija_goriva	INSERT	229	2026-04-13 13:43:42.208896+00
+723	fuel_changed	evidencija_goriva	INSERT	230	2026-04-13 13:43:42.208896+00
+724	fuel_changed	evidencija_goriva	INSERT	231	2026-04-13 13:43:42.208896+00
+725	fuel_changed	evidencija_goriva	INSERT	232	2026-04-13 13:43:42.208896+00
+726	fuel_changed	evidencija_goriva	INSERT	233	2026-04-13 13:43:42.208896+00
+727	fuel_changed	evidencija_goriva	INSERT	234	2026-04-13 13:43:42.208896+00
+728	fuel_changed	evidencija_goriva	INSERT	235	2026-04-13 13:43:42.208896+00
+729	fuel_changed	evidencija_goriva	INSERT	236	2026-04-13 13:43:42.208896+00
+730	fuel_changed	evidencija_goriva	INSERT	237	2026-04-13 13:43:42.208896+00
+731	fuel_changed	evidencija_goriva	INSERT	238	2026-04-13 13:43:42.208896+00
+732	fuel_changed	evidencija_goriva	INSERT	239	2026-04-13 13:43:42.208896+00
+733	fuel_changed	evidencija_goriva	INSERT	240	2026-04-13 13:43:42.208896+00
+734	fuel_changed	evidencija_goriva	INSERT	241	2026-04-13 13:43:42.208896+00
+735	fuel_changed	evidencija_goriva	INSERT	242	2026-04-13 13:43:42.208896+00
+736	fuel_changed	evidencija_goriva	INSERT	243	2026-04-13 13:43:42.208896+00
+737	fuel_changed	evidencija_goriva	INSERT	244	2026-04-13 13:43:42.208896+00
+738	fuel_changed	evidencija_goriva	INSERT	245	2026-04-13 13:43:42.208896+00
+739	fuel_changed	evidencija_goriva	INSERT	246	2026-04-13 13:43:42.208896+00
+740	fuel_changed	evidencija_goriva	INSERT	247	2026-04-13 13:43:42.208896+00
+741	fuel_changed	evidencija_goriva	INSERT	248	2026-04-13 13:43:42.208896+00
+742	fuel_changed	evidencija_goriva	INSERT	249	2026-04-13 13:43:42.208896+00
+743	fuel_changed	evidencija_goriva	INSERT	250	2026-04-13 13:43:42.208896+00
+744	fuel_changed	evidencija_goriva	INSERT	251	2026-04-13 13:43:42.208896+00
+745	fuel_changed	evidencija_goriva	INSERT	252	2026-04-13 13:43:42.208896+00
+746	fuel_changed	evidencija_goriva	INSERT	253	2026-04-13 13:43:42.208896+00
+747	fuel_changed	evidencija_goriva	INSERT	254	2026-04-13 13:43:42.208896+00
+748	fuel_changed	evidencija_goriva	INSERT	255	2026-04-13 13:43:42.208896+00
+749	fuel_changed	evidencija_goriva	INSERT	256	2026-04-13 13:43:42.208896+00
+750	fuel_changed	evidencija_goriva	INSERT	257	2026-04-13 13:43:42.208896+00
+751	fuel_changed	evidencija_goriva	INSERT	258	2026-04-13 13:43:42.208896+00
+752	fuel_changed	evidencija_goriva	INSERT	259	2026-04-13 13:43:42.208896+00
+753	fuel_changed	evidencija_goriva	INSERT	260	2026-04-13 13:43:42.208896+00
+754	fuel_changed	evidencija_goriva	INSERT	261	2026-04-13 13:43:42.208896+00
+755	fuel_changed	evidencija_goriva	INSERT	262	2026-04-13 13:43:42.208896+00
+756	fuel_changed	evidencija_goriva	INSERT	263	2026-04-13 13:43:42.208896+00
+757	fuel_changed	evidencija_goriva	INSERT	264	2026-04-13 13:43:42.208896+00
+758	fuel_changed	evidencija_goriva	INSERT	265	2026-04-13 13:43:42.208896+00
+759	fuel_changed	evidencija_goriva	INSERT	266	2026-04-13 13:43:42.208896+00
+760	fuel_changed	evidencija_goriva	INSERT	267	2026-04-13 13:43:42.208896+00
+761	fuel_changed	evidencija_goriva	INSERT	268	2026-04-13 13:43:42.208896+00
+762	fuel_changed	evidencija_goriva	INSERT	269	2026-04-13 13:43:42.208896+00
+763	fuel_changed	evidencija_goriva	INSERT	270	2026-04-13 13:43:42.208896+00
+764	fuel_changed	evidencija_goriva	INSERT	271	2026-04-13 13:43:42.208896+00
+765	fuel_changed	evidencija_goriva	INSERT	272	2026-04-13 13:43:42.208896+00
+766	fuel_changed	evidencija_goriva	INSERT	273	2026-04-13 13:43:42.208896+00
+767	fuel_changed	evidencija_goriva	INSERT	274	2026-04-13 13:43:42.208896+00
+768	fuel_changed	evidencija_goriva	INSERT	275	2026-04-13 13:43:42.208896+00
+769	fuel_changed	evidencija_goriva	INSERT	276	2026-04-13 13:43:42.208896+00
+770	fuel_changed	evidencija_goriva	INSERT	277	2026-04-13 13:43:42.208896+00
+771	fuel_changed	evidencija_goriva	INSERT	278	2026-04-13 13:43:42.208896+00
+772	fuel_changed	evidencija_goriva	INSERT	279	2026-04-13 13:43:42.208896+00
+773	fuel_changed	evidencija_goriva	INSERT	280	2026-04-13 13:43:42.208896+00
+774	fuel_changed	evidencija_goriva	INSERT	281	2026-04-13 13:43:42.208896+00
+775	fuel_changed	evidencija_goriva	INSERT	282	2026-04-13 13:43:42.208896+00
+776	fuel_changed	evidencija_goriva	INSERT	283	2026-04-13 13:43:42.208896+00
+777	fuel_changed	evidencija_goriva	INSERT	284	2026-04-13 13:43:42.208896+00
+778	fuel_changed	evidencija_goriva	INSERT	285	2026-04-13 13:43:42.208896+00
+779	fuel_changed	evidencija_goriva	INSERT	286	2026-04-13 13:43:42.208896+00
+780	fuel_changed	evidencija_goriva	INSERT	287	2026-04-13 13:43:42.208896+00
+781	fuel_changed	evidencija_goriva	INSERT	288	2026-04-13 13:43:42.208896+00
+782	fuel_changed	evidencija_goriva	INSERT	289	2026-04-13 13:43:42.208896+00
+783	fuel_changed	evidencija_goriva	INSERT	290	2026-04-13 13:43:42.208896+00
+784	fuel_changed	evidencija_goriva	INSERT	291	2026-04-13 13:43:42.208896+00
+785	fuel_changed	evidencija_goriva	INSERT	292	2026-04-13 13:43:42.208896+00
+786	fuel_changed	evidencija_goriva	INSERT	293	2026-04-13 13:43:42.208896+00
+787	fuel_changed	evidencija_goriva	INSERT	294	2026-04-13 13:43:42.208896+00
+788	fuel_changed	evidencija_goriva	INSERT	295	2026-04-13 13:43:42.208896+00
+789	fuel_changed	evidencija_goriva	INSERT	296	2026-04-13 13:43:42.208896+00
+790	fuel_changed	evidencija_goriva	INSERT	297	2026-04-13 13:43:42.208896+00
+791	fuel_changed	evidencija_goriva	INSERT	298	2026-04-13 13:43:42.208896+00
+792	fuel_changed	evidencija_goriva	INSERT	299	2026-04-13 13:43:42.208896+00
+793	fuel_changed	evidencija_goriva	INSERT	300	2026-04-13 13:43:42.208896+00
+794	fuel_changed	evidencija_goriva	INSERT	301	2026-04-13 13:43:42.208896+00
+795	fuel_changed	evidencija_goriva	INSERT	302	2026-04-13 13:43:42.208896+00
+796	fuel_changed	evidencija_goriva	INSERT	303	2026-04-13 13:43:42.208896+00
+797	fuel_changed	evidencija_goriva	INSERT	304	2026-04-13 13:43:42.208896+00
+798	fuel_changed	evidencija_goriva	INSERT	305	2026-04-13 13:43:42.208896+00
+799	fuel_changed	evidencija_goriva	INSERT	306	2026-04-13 13:43:42.208896+00
+800	fuel_changed	evidencija_goriva	INSERT	307	2026-04-13 13:43:42.208896+00
+801	fuel_changed	evidencija_goriva	INSERT	308	2026-04-13 13:43:42.208896+00
+802	fuel_changed	evidencija_goriva	INSERT	309	2026-04-13 13:43:42.208896+00
+803	fuel_changed	evidencija_goriva	INSERT	310	2026-04-13 13:43:42.208896+00
+804	fuel_changed	evidencija_goriva	INSERT	311	2026-04-13 13:43:42.208896+00
+805	fuel_changed	evidencija_goriva	INSERT	312	2026-04-13 13:43:42.208896+00
+806	fuel_changed	evidencija_goriva	INSERT	313	2026-04-13 13:43:42.208896+00
+807	fuel_changed	evidencija_goriva	INSERT	314	2026-04-13 13:43:42.208896+00
+808	fuel_changed	evidencija_goriva	INSERT	315	2026-04-13 13:43:42.208896+00
+809	fuel_changed	evidencija_goriva	INSERT	316	2026-04-13 13:43:42.208896+00
+810	fuel_changed	evidencija_goriva	INSERT	317	2026-04-13 13:43:42.208896+00
+811	fuel_changed	evidencija_goriva	INSERT	318	2026-04-13 13:43:42.208896+00
+812	fuel_changed	evidencija_goriva	INSERT	319	2026-04-13 13:43:42.208896+00
+813	fuel_changed	evidencija_goriva	INSERT	320	2026-04-13 13:43:42.208896+00
+814	fuel_changed	evidencija_goriva	INSERT	321	2026-04-13 13:43:42.208896+00
+815	fuel_changed	evidencija_goriva	INSERT	322	2026-04-13 13:43:42.208896+00
+816	fuel_changed	evidencija_goriva	INSERT	323	2026-04-13 13:43:42.208896+00
+817	fuel_changed	evidencija_goriva	INSERT	324	2026-04-13 13:43:42.208896+00
+818	fuel_changed	evidencija_goriva	INSERT	325	2026-04-13 13:43:42.208896+00
+819	fuel_changed	evidencija_goriva	INSERT	326	2026-04-13 13:43:42.208896+00
+820	fuel_changed	evidencija_goriva	INSERT	327	2026-04-13 13:43:42.208896+00
+821	fuel_changed	evidencija_goriva	INSERT	328	2026-04-13 13:43:42.208896+00
+822	fuel_changed	evidencija_goriva	INSERT	329	2026-04-13 13:43:42.208896+00
+823	fuel_changed	evidencija_goriva	INSERT	330	2026-04-13 13:43:42.208896+00
+824	fuel_changed	evidencija_goriva	INSERT	331	2026-04-13 13:43:42.208896+00
+825	fuel_changed	evidencija_goriva	INSERT	332	2026-04-13 13:43:42.208896+00
+826	fuel_changed	evidencija_goriva	INSERT	333	2026-04-13 13:43:42.208896+00
+827	fuel_changed	evidencija_goriva	INSERT	334	2026-04-13 13:43:42.208896+00
+828	fuel_changed	evidencija_goriva	INSERT	335	2026-04-13 13:43:42.208896+00
+829	fuel_changed	evidencija_goriva	INSERT	336	2026-04-13 13:43:42.208896+00
+830	fuel_changed	evidencija_goriva	INSERT	337	2026-04-13 13:43:42.208896+00
+831	fuel_changed	evidencija_goriva	INSERT	338	2026-04-13 13:43:42.208896+00
+832	fuel_changed	evidencija_goriva	INSERT	339	2026-04-13 13:43:42.208896+00
+833	fuel_changed	evidencija_goriva	INSERT	340	2026-04-13 13:43:42.208896+00
+834	fuel_changed	evidencija_goriva	INSERT	341	2026-04-13 13:43:42.208896+00
+835	fuel_changed	evidencija_goriva	INSERT	342	2026-04-13 13:43:42.208896+00
+836	fuel_changed	evidencija_goriva	INSERT	343	2026-04-13 13:43:42.208896+00
+837	fuel_changed	evidencija_goriva	INSERT	344	2026-04-13 13:43:42.208896+00
+838	fuel_changed	evidencija_goriva	INSERT	345	2026-04-13 13:43:42.208896+00
+839	fuel_changed	evidencija_goriva	INSERT	346	2026-04-13 13:43:42.208896+00
+840	fuel_changed	evidencija_goriva	INSERT	347	2026-04-13 13:43:42.208896+00
+841	fuel_changed	evidencija_goriva	INSERT	348	2026-04-13 13:43:42.208896+00
+842	fuel_changed	evidencija_goriva	INSERT	349	2026-04-13 13:43:42.208896+00
+843	fuel_changed	evidencija_goriva	INSERT	350	2026-04-13 13:43:42.208896+00
+844	fuel_changed	evidencija_goriva	INSERT	351	2026-04-13 13:43:42.208896+00
+845	fuel_changed	evidencija_goriva	INSERT	352	2026-04-13 13:43:42.208896+00
+846	fuel_changed	evidencija_goriva	INSERT	353	2026-04-13 13:43:42.208896+00
+847	fuel_changed	evidencija_goriva	INSERT	354	2026-04-13 13:43:42.208896+00
+848	fuel_changed	evidencija_goriva	INSERT	355	2026-04-13 13:43:42.208896+00
+849	fuel_changed	evidencija_goriva	INSERT	356	2026-04-13 13:43:42.208896+00
+850	fuel_changed	evidencija_goriva	INSERT	357	2026-04-13 13:43:42.208896+00
+851	fuel_changed	evidencija_goriva	INSERT	358	2026-04-13 13:43:42.208896+00
+852	fuel_changed	evidencija_goriva	INSERT	359	2026-04-13 13:43:42.208896+00
+853	fuel_changed	evidencija_goriva	INSERT	360	2026-04-13 13:43:42.208896+00
+854	fuel_changed	evidencija_goriva	INSERT	361	2026-04-13 13:43:42.208896+00
+855	fuel_changed	evidencija_goriva	INSERT	362	2026-04-13 13:43:42.208896+00
+856	fuel_changed	evidencija_goriva	INSERT	363	2026-04-13 13:43:42.208896+00
+857	fuel_changed	evidencija_goriva	INSERT	364	2026-04-13 13:43:42.208896+00
+858	fuel_changed	evidencija_goriva	INSERT	365	2026-04-13 13:43:42.208896+00
+859	fuel_changed	evidencija_goriva	INSERT	366	2026-04-13 13:43:42.208896+00
+860	fuel_changed	evidencija_goriva	INSERT	367	2026-04-13 13:43:42.208896+00
+861	fuel_changed	evidencija_goriva	INSERT	368	2026-04-13 13:43:42.208896+00
+862	fuel_changed	evidencija_goriva	INSERT	369	2026-04-13 13:43:42.208896+00
+863	fuel_changed	evidencija_goriva	INSERT	370	2026-04-13 13:43:42.208896+00
+864	fuel_changed	evidencija_goriva	INSERT	371	2026-04-13 13:43:42.208896+00
+865	fuel_changed	evidencija_goriva	INSERT	372	2026-04-13 13:43:42.208896+00
+866	fuel_changed	evidencija_goriva	INSERT	373	2026-04-13 13:43:42.208896+00
+867	fuel_changed	evidencija_goriva	INSERT	374	2026-04-13 13:43:42.208896+00
+868	fuel_changed	evidencija_goriva	INSERT	375	2026-04-13 13:43:42.208896+00
+869	fuel_changed	evidencija_goriva	INSERT	376	2026-04-13 13:43:42.208896+00
+870	fuel_changed	evidencija_goriva	INSERT	377	2026-04-13 13:43:42.208896+00
+871	fuel_changed	evidencija_goriva	INSERT	378	2026-04-13 13:43:42.208896+00
+872	fuel_changed	evidencija_goriva	INSERT	379	2026-04-13 13:43:42.208896+00
+873	fuel_changed	evidencija_goriva	INSERT	380	2026-04-13 13:43:42.208896+00
+874	fuel_changed	evidencija_goriva	INSERT	381	2026-04-13 13:43:42.208896+00
+875	fuel_changed	evidencija_goriva	INSERT	382	2026-04-13 13:43:42.208896+00
+876	fuel_changed	evidencija_goriva	INSERT	383	2026-04-13 13:43:42.208896+00
+877	fuel_changed	evidencija_goriva	INSERT	384	2026-04-13 13:43:42.208896+00
+878	fuel_changed	evidencija_goriva	INSERT	385	2026-04-13 13:43:42.208896+00
+879	fuel_changed	evidencija_goriva	INSERT	386	2026-04-13 13:43:42.208896+00
+880	fuel_changed	evidencija_goriva	INSERT	387	2026-04-13 13:43:42.208896+00
+881	fuel_changed	evidencija_goriva	INSERT	388	2026-04-13 13:43:42.208896+00
+882	fuel_changed	evidencija_goriva	INSERT	389	2026-04-13 13:43:42.208896+00
+883	fuel_changed	evidencija_goriva	INSERT	390	2026-04-13 13:43:42.208896+00
+884	fuel_changed	evidencija_goriva	INSERT	391	2026-04-13 13:43:42.208896+00
+885	fuel_changed	evidencija_goriva	INSERT	392	2026-04-13 13:43:42.208896+00
+886	fuel_changed	evidencija_goriva	INSERT	393	2026-04-13 13:43:42.208896+00
+887	fuel_changed	evidencija_goriva	INSERT	394	2026-04-13 13:43:42.208896+00
+888	fuel_changed	evidencija_goriva	INSERT	395	2026-04-13 13:43:42.208896+00
+889	fuel_changed	evidencija_goriva	INSERT	396	2026-04-13 13:43:42.208896+00
+890	fuel_changed	evidencija_goriva	INSERT	397	2026-04-13 13:43:42.208896+00
+891	fuel_changed	evidencija_goriva	INSERT	398	2026-04-13 13:43:42.208896+00
+892	fuel_changed	evidencija_goriva	INSERT	399	2026-04-13 13:43:42.208896+00
+893	fuel_changed	evidencija_goriva	INSERT	400	2026-04-13 13:43:42.208896+00
+894	fuel_changed	evidencija_goriva	INSERT	401	2026-04-13 13:43:42.208896+00
+895	fuel_changed	evidencija_goriva	INSERT	402	2026-04-13 13:43:42.208896+00
+896	fuel_changed	evidencija_goriva	INSERT	403	2026-04-13 13:43:42.208896+00
+897	fuel_changed	evidencija_goriva	INSERT	404	2026-04-13 13:43:42.208896+00
+898	fuel_changed	evidencija_goriva	INSERT	405	2026-04-13 13:43:42.208896+00
+899	fuel_changed	evidencija_goriva	INSERT	406	2026-04-13 13:43:42.208896+00
+900	fuel_changed	evidencija_goriva	INSERT	407	2026-04-13 13:43:42.208896+00
+901	fuel_changed	evidencija_goriva	INSERT	408	2026-04-13 13:43:42.208896+00
+902	fuel_changed	evidencija_goriva	INSERT	409	2026-04-13 13:43:42.208896+00
+903	fuel_changed	evidencija_goriva	INSERT	410	2026-04-13 13:43:42.208896+00
+904	fuel_changed	evidencija_goriva	INSERT	411	2026-04-13 13:43:42.208896+00
+905	fuel_changed	evidencija_goriva	INSERT	412	2026-04-13 13:43:42.208896+00
+906	fuel_changed	evidencija_goriva	INSERT	413	2026-04-13 13:43:42.208896+00
+907	fuel_changed	evidencija_goriva	INSERT	414	2026-04-13 13:43:42.208896+00
+908	fuel_changed	evidencija_goriva	INSERT	415	2026-04-13 13:43:42.208896+00
+909	fuel_changed	evidencija_goriva	INSERT	416	2026-04-13 13:43:42.208896+00
+910	fuel_changed	evidencija_goriva	INSERT	417	2026-04-13 13:43:42.208896+00
+911	fuel_changed	evidencija_goriva	INSERT	418	2026-04-13 13:43:42.208896+00
+912	fuel_changed	evidencija_goriva	INSERT	419	2026-04-13 13:43:42.208896+00
+913	fuel_changed	evidencija_goriva	INSERT	420	2026-04-13 13:43:42.208896+00
+914	fuel_changed	evidencija_goriva	INSERT	421	2026-04-13 13:43:42.208896+00
+915	fuel_changed	evidencija_goriva	INSERT	422	2026-04-13 13:43:42.208896+00
+916	fuel_changed	evidencija_goriva	INSERT	423	2026-04-13 13:43:42.208896+00
+917	fuel_changed	evidencija_goriva	INSERT	424	2026-04-13 13:43:42.208896+00
+918	fuel_changed	evidencija_goriva	INSERT	425	2026-04-13 13:43:42.208896+00
+919	fuel_changed	evidencija_goriva	INSERT	426	2026-04-13 13:43:42.208896+00
+920	fuel_changed	evidencija_goriva	INSERT	427	2026-04-13 13:43:42.208896+00
+921	fuel_changed	evidencija_goriva	INSERT	428	2026-04-13 13:43:42.208896+00
+922	fuel_changed	evidencija_goriva	INSERT	429	2026-04-13 13:43:42.208896+00
+923	fuel_changed	evidencija_goriva	INSERT	430	2026-04-13 13:43:42.208896+00
+924	fuel_changed	evidencija_goriva	INSERT	431	2026-04-13 13:43:42.208896+00
+925	fuel_changed	evidencija_goriva	INSERT	432	2026-04-13 13:43:42.208896+00
+926	fuel_changed	evidencija_goriva	INSERT	433	2026-04-13 13:43:42.208896+00
+927	fuel_changed	evidencija_goriva	INSERT	434	2026-04-13 13:43:42.208896+00
+928	fuel_changed	evidencija_goriva	INSERT	435	2026-04-13 13:43:42.208896+00
+929	fuel_changed	evidencija_goriva	INSERT	436	2026-04-13 13:43:42.208896+00
+930	fuel_changed	evidencija_goriva	INSERT	437	2026-04-13 13:43:42.208896+00
+931	fuel_changed	evidencija_goriva	INSERT	438	2026-04-13 13:43:42.208896+00
+932	fuel_changed	evidencija_goriva	INSERT	439	2026-04-13 13:43:42.208896+00
+933	fuel_changed	evidencija_goriva	INSERT	440	2026-04-13 13:43:42.208896+00
+934	fuel_changed	evidencija_goriva	INSERT	441	2026-04-13 13:43:42.208896+00
+935	fuel_changed	evidencija_goriva	INSERT	442	2026-04-13 13:43:42.208896+00
+936	fuel_changed	evidencija_goriva	INSERT	443	2026-04-13 13:43:42.208896+00
+937	fuel_changed	evidencija_goriva	INSERT	444	2026-04-13 13:43:42.208896+00
+938	fuel_changed	evidencija_goriva	INSERT	445	2026-04-13 13:43:42.208896+00
+939	fuel_changed	evidencija_goriva	INSERT	446	2026-04-13 13:43:42.208896+00
+940	fuel_changed	evidencija_goriva	INSERT	447	2026-04-13 13:43:42.208896+00
+941	fuel_changed	evidencija_goriva	INSERT	448	2026-04-13 13:43:42.208896+00
+942	service_intervention_created	servisne_intervencije	INSERT	41	2026-04-13 13:43:42.208896+00
+943	service_intervention_created	servisne_intervencije	INSERT	42	2026-04-13 13:43:42.208896+00
+944	service_intervention_created	servisne_intervencije	INSERT	43	2026-04-13 13:43:42.208896+00
+945	service_intervention_created	servisne_intervencije	INSERT	44	2026-04-13 13:43:42.208896+00
+946	service_intervention_created	servisne_intervencije	INSERT	45	2026-04-13 13:43:42.208896+00
+947	service_intervention_created	servisne_intervencije	INSERT	46	2026-04-13 13:43:42.208896+00
+948	service_intervention_created	servisne_intervencije	INSERT	47	2026-04-13 13:43:42.208896+00
+949	service_intervention_created	servisne_intervencije	INSERT	48	2026-04-13 13:43:42.208896+00
+950	service_intervention_created	servisne_intervencije	INSERT	49	2026-04-13 13:43:42.208896+00
+951	service_intervention_created	servisne_intervencije	INSERT	50	2026-04-13 13:43:42.208896+00
+952	service_intervention_created	servisne_intervencije	INSERT	51	2026-04-13 13:43:42.208896+00
+953	service_intervention_created	servisne_intervencije	INSERT	52	2026-04-13 13:43:42.208896+00
+954	service_intervention_created	servisne_intervencije	INSERT	53	2026-04-13 13:43:42.208896+00
+955	service_intervention_created	servisne_intervencije	INSERT	54	2026-04-13 13:43:42.208896+00
+956	service_intervention_created	servisne_intervencije	INSERT	55	2026-04-13 13:43:42.208896+00
+957	service_intervention_created	servisne_intervencije	INSERT	56	2026-04-13 13:43:42.208896+00
+958	service_intervention_created	servisne_intervencije	INSERT	57	2026-04-13 13:43:42.208896+00
+959	service_intervention_created	servisne_intervencije	INSERT	58	2026-04-13 13:43:42.208896+00
+960	service_intervention_created	servisne_intervencije	INSERT	59	2026-04-13 13:43:42.208896+00
+961	service_intervention_created	servisne_intervencije	INSERT	60	2026-04-13 13:43:42.208896+00
+962	service_intervention_created	servisne_intervencije	INSERT	61	2026-04-13 13:43:42.208896+00
+963	service_intervention_created	servisne_intervencije	INSERT	62	2026-04-13 13:43:42.208896+00
+964	service_intervention_created	servisne_intervencije	INSERT	63	2026-04-13 13:43:42.208896+00
+965	service_intervention_created	servisne_intervencije	INSERT	64	2026-04-13 13:43:42.208896+00
+966	service_intervention_created	servisne_intervencije	INSERT	65	2026-04-13 13:43:42.208896+00
+967	service_intervention_created	servisne_intervencije	INSERT	66	2026-04-13 13:43:42.208896+00
+968	service_intervention_created	servisne_intervencije	INSERT	67	2026-04-13 13:43:42.208896+00
+969	service_intervention_created	servisne_intervencije	INSERT	68	2026-04-13 13:43:42.208896+00
+970	service_intervention_created	servisne_intervencije	INSERT	69	2026-04-13 13:43:42.208896+00
+971	service_intervention_created	servisne_intervencije	INSERT	70	2026-04-13 13:43:42.208896+00
+972	service_intervention_created	servisne_intervencije	INSERT	71	2026-04-13 13:43:42.208896+00
+973	service_intervention_created	servisne_intervencije	INSERT	72	2026-04-13 13:43:42.208896+00
+974	service_intervention_created	servisne_intervencije	INSERT	73	2026-04-13 13:43:42.208896+00
+975	service_intervention_created	servisne_intervencije	INSERT	74	2026-04-13 13:43:42.208896+00
+976	service_intervention_created	servisne_intervencije	INSERT	75	2026-04-13 13:43:42.208896+00
+977	service_intervention_created	servisne_intervencije	INSERT	76	2026-04-13 13:43:42.208896+00
+978	service_intervention_created	servisne_intervencije	INSERT	77	2026-04-13 13:43:42.208896+00
+979	service_intervention_created	servisne_intervencije	INSERT	78	2026-04-13 13:43:42.208896+00
+980	service_intervention_created	servisne_intervencije	INSERT	79	2026-04-13 13:43:42.208896+00
+981	service_intervention_created	servisne_intervencije	INSERT	80	2026-04-13 13:43:42.208896+00
+982	service_intervention_created	servisne_intervencije	INSERT	81	2026-04-13 13:43:42.208896+00
+983	service_intervention_created	servisne_intervencije	INSERT	82	2026-04-13 13:43:42.208896+00
+984	service_intervention_created	servisne_intervencije	INSERT	83	2026-04-13 13:43:42.208896+00
+985	service_intervention_created	servisne_intervencije	INSERT	84	2026-04-13 13:43:42.208896+00
+986	service_intervention_created	servisne_intervencije	INSERT	85	2026-04-13 13:43:42.208896+00
+987	service_intervention_created	servisne_intervencije	INSERT	86	2026-04-13 13:43:42.208896+00
+988	service_intervention_created	servisne_intervencije	INSERT	87	2026-04-13 13:43:42.208896+00
+989	service_intervention_created	servisne_intervencije	INSERT	88	2026-04-13 13:43:42.208896+00
+990	service_intervention_created	servisne_intervencije	INSERT	89	2026-04-13 13:43:42.208896+00
+991	service_intervention_created	servisne_intervencije	INSERT	90	2026-04-13 13:43:42.208896+00
+992	service_intervention_created	servisne_intervencije	INSERT	91	2026-04-13 13:43:42.208896+00
+993	service_intervention_created	servisne_intervencije	INSERT	92	2026-04-13 13:43:42.208896+00
+994	service_intervention_created	servisne_intervencije	INSERT	93	2026-04-13 13:43:42.208896+00
+995	service_intervention_created	servisne_intervencije	INSERT	94	2026-04-13 13:43:42.208896+00
+996	service_intervention_created	servisne_intervencije	INSERT	95	2026-04-13 13:43:42.208896+00
+997	service_intervention_created	servisne_intervencije	INSERT	96	2026-04-13 13:43:42.208896+00
+998	service_intervention_created	servisne_intervencije	INSERT	97	2026-04-13 13:43:42.208896+00
+999	service_intervention_created	servisne_intervencije	INSERT	98	2026-04-13 13:43:42.208896+00
+1000	service_intervention_created	servisne_intervencije	INSERT	99	2026-04-13 13:43:42.208896+00
+1001	service_intervention_created	servisne_intervencije	INSERT	100	2026-04-13 13:43:42.208896+00
+1002	service_intervention_created	servisne_intervencije	INSERT	101	2026-04-13 13:43:42.208896+00
+1003	service_intervention_created	servisne_intervencije	INSERT	102	2026-04-13 13:43:42.208896+00
+1004	service_intervention_created	servisne_intervencije	INSERT	103	2026-04-13 13:43:42.208896+00
+1005	service_intervention_created	servisne_intervencije	INSERT	104	2026-04-13 13:43:42.208896+00
+1006	service_intervention_created	servisne_intervencije	INSERT	105	2026-04-13 13:43:42.208896+00
+1007	service_intervention_created	servisne_intervencije	INSERT	106	2026-04-13 13:43:42.208896+00
+1008	service_intervention_created	servisne_intervencije	INSERT	107	2026-04-13 13:43:42.208896+00
+1009	service_intervention_created	servisne_intervencije	INSERT	108	2026-04-13 13:43:42.208896+00
+1010	service_intervention_created	servisne_intervencije	INSERT	109	2026-04-13 13:43:42.208896+00
+1011	service_intervention_created	servisne_intervencije	INSERT	110	2026-04-13 13:43:42.208896+00
+1012	service_intervention_created	servisne_intervencije	INSERT	111	2026-04-13 13:43:42.208896+00
+1013	service_intervention_created	servisne_intervencije	INSERT	112	2026-04-13 13:43:42.208896+00
+1014	service_intervention_created	servisne_intervencije	INSERT	113	2026-04-13 13:43:42.208896+00
+1015	service_intervention_created	servisne_intervencije	INSERT	114	2026-04-13 13:43:42.208896+00
+1016	service_intervention_created	servisne_intervencije	INSERT	115	2026-04-13 13:43:42.208896+00
+1017	service_intervention_created	servisne_intervencije	INSERT	116	2026-04-13 13:43:42.208896+00
+1018	service_intervention_created	servisne_intervencije	INSERT	117	2026-04-13 13:43:42.208896+00
+1019	service_intervention_created	servisne_intervencije	INSERT	118	2026-04-13 13:43:42.208896+00
+1020	service_intervention_created	servisne_intervencije	INSERT	119	2026-04-13 13:43:42.208896+00
+1021	service_intervention_created	servisne_intervencije	INSERT	120	2026-04-13 13:43:42.208896+00
+1022	service_intervention_created	servisne_intervencije	INSERT	121	2026-04-13 13:43:42.208896+00
+1023	service_intervention_created	servisne_intervencije	INSERT	122	2026-04-13 13:43:42.208896+00
+1024	service_intervention_created	servisne_intervencije	INSERT	123	2026-04-13 13:43:42.208896+00
+1025	service_intervention_created	servisne_intervencije	INSERT	124	2026-04-13 13:43:42.208896+00
+1026	service_intervention_created	servisne_intervencije	INSERT	125	2026-04-13 13:43:42.208896+00
+1027	service_intervention_created	servisne_intervencije	INSERT	126	2026-04-13 13:43:42.208896+00
+1028	service_intervention_created	servisne_intervencije	INSERT	127	2026-04-13 13:43:42.208896+00
+1029	service_intervention_created	servisne_intervencije	INSERT	128	2026-04-13 13:43:42.208896+00
+1030	service_intervention_created	servisne_intervencije	INSERT	129	2026-04-13 13:43:42.208896+00
+1031	service_intervention_created	servisne_intervencije	INSERT	130	2026-04-13 13:43:42.208896+00
+1032	service_intervention_created	servisne_intervencije	INSERT	131	2026-04-13 13:43:42.208896+00
+1033	service_intervention_created	servisne_intervencije	INSERT	132	2026-04-13 13:43:42.208896+00
+1034	service_intervention_created	servisne_intervencije	INSERT	133	2026-04-13 13:43:42.208896+00
+1035	service_intervention_created	servisne_intervencije	INSERT	134	2026-04-13 13:43:42.208896+00
+1036	service_intervention_created	servisne_intervencije	INSERT	135	2026-04-13 13:43:42.208896+00
+1037	service_intervention_created	servisne_intervencije	INSERT	136	2026-04-13 13:43:42.208896+00
+1038	service_intervention_created	servisne_intervencije	INSERT	137	2026-04-13 13:43:42.208896+00
+1039	service_intervention_created	servisne_intervencije	INSERT	138	2026-04-13 13:43:42.208896+00
+1040	service_intervention_created	servisne_intervencije	INSERT	139	2026-04-13 13:43:42.208896+00
+1041	service_intervention_created	servisne_intervencije	INSERT	140	2026-04-13 13:43:42.208896+00
+1042	service_intervention_created	servisne_intervencije	INSERT	141	2026-04-13 13:43:42.208896+00
+1043	service_intervention_created	servisne_intervencije	INSERT	142	2026-04-13 13:43:42.208896+00
+1044	service_intervention_created	servisne_intervencije	INSERT	143	2026-04-13 13:43:42.208896+00
+1045	service_intervention_created	servisne_intervencije	INSERT	144	2026-04-13 13:43:42.208896+00
+1046	service_intervention_created	servisne_intervencije	INSERT	145	2026-04-13 13:43:42.208896+00
+1047	service_intervention_created	servisne_intervencije	INSERT	146	2026-04-13 13:43:42.208896+00
+1048	service_intervention_created	servisne_intervencije	INSERT	147	2026-04-13 13:43:42.208896+00
+1049	service_intervention_created	servisne_intervencije	INSERT	148	2026-04-13 13:43:42.208896+00
+1050	service_intervention_created	servisne_intervencije	INSERT	149	2026-04-13 13:43:42.208896+00
+1051	service_intervention_created	servisne_intervencije	INSERT	150	2026-04-13 13:43:42.208896+00
+1052	service_intervention_created	servisne_intervencije	INSERT	151	2026-04-13 13:43:42.208896+00
+1053	service_intervention_created	servisne_intervencije	INSERT	152	2026-04-13 13:43:42.208896+00
+1054	service_intervention_created	servisne_intervencije	INSERT	153	2026-04-13 13:43:42.208896+00
+1055	service_intervention_created	servisne_intervencije	INSERT	154	2026-04-13 13:43:42.208896+00
+1056	service_intervention_created	servisne_intervencije	INSERT	155	2026-04-13 13:43:42.208896+00
+1057	service_intervention_created	servisne_intervencije	INSERT	156	2026-04-13 13:43:42.208896+00
+1058	service_intervention_created	servisne_intervencije	INSERT	157	2026-04-13 13:43:42.208896+00
+1059	service_intervention_created	servisne_intervencije	INSERT	158	2026-04-13 13:43:42.208896+00
+1060	service_intervention_created	servisne_intervencije	INSERT	159	2026-04-13 13:43:42.208896+00
+1061	service_intervention_created	servisne_intervencije	INSERT	160	2026-04-13 13:43:42.208896+00
+1062	service_intervention_created	servisne_intervencije	INSERT	161	2026-04-13 13:43:42.208896+00
+1063	service_intervention_created	servisne_intervencije	INSERT	162	2026-04-13 13:43:42.208896+00
+1064	service_intervention_created	servisne_intervencije	INSERT	163	2026-04-13 13:43:42.208896+00
+1065	service_intervention_created	servisne_intervencije	INSERT	164	2026-04-13 13:43:42.208896+00
+1066	service_intervention_created	servisne_intervencije	INSERT	165	2026-04-13 13:43:42.208896+00
+1067	service_intervention_created	servisne_intervencije	INSERT	166	2026-04-13 13:43:42.208896+00
+1068	service_intervention_created	servisne_intervencije	INSERT	167	2026-04-13 13:43:42.208896+00
+1069	service_intervention_created	servisne_intervencije	INSERT	168	2026-04-13 13:43:42.208896+00
+1070	service_intervention_created	servisne_intervencije	INSERT	169	2026-04-13 13:43:42.208896+00
+1071	service_intervention_created	servisne_intervencije	INSERT	170	2026-04-13 13:43:42.208896+00
+1072	service_intervention_created	servisne_intervencije	INSERT	171	2026-04-13 13:43:42.208896+00
+1073	service_intervention_created	servisne_intervencije	INSERT	172	2026-04-13 13:43:42.208896+00
+1074	service_intervention_created	servisne_intervencije	INSERT	173	2026-04-13 13:43:42.208896+00
+1075	service_intervention_created	servisne_intervencije	INSERT	174	2026-04-13 13:43:42.208896+00
+1076	service_intervention_created	servisne_intervencije	INSERT	175	2026-04-13 13:43:42.208896+00
+1077	service_intervention_created	servisne_intervencije	INSERT	176	2026-04-13 13:43:42.208896+00
+1078	service_intervention_created	servisne_intervencije	INSERT	177	2026-04-13 13:43:42.208896+00
+1079	service_intervention_created	servisne_intervencije	INSERT	178	2026-04-13 13:43:42.208896+00
+1080	service_intervention_created	servisne_intervencije	INSERT	179	2026-04-13 13:43:42.208896+00
+1081	service_intervention_created	servisne_intervencije	INSERT	180	2026-04-13 13:43:42.208896+00
+1082	service_intervention_created	servisne_intervencije	INSERT	181	2026-04-13 13:43:42.208896+00
+1083	service_intervention_created	servisne_intervencije	INSERT	182	2026-04-13 13:43:42.208896+00
+1084	service_intervention_created	servisne_intervencije	INSERT	183	2026-04-13 13:43:42.208896+00
+1085	service_intervention_created	servisne_intervencije	INSERT	184	2026-04-13 13:43:42.208896+00
+1086	service_intervention_created	servisne_intervencije	INSERT	185	2026-04-13 13:43:42.208896+00
+1087	service_intervention_created	servisne_intervencije	INSERT	186	2026-04-13 13:43:42.208896+00
+1088	service_intervention_created	servisne_intervencije	INSERT	187	2026-04-13 13:43:42.208896+00
+1089	service_intervention_created	servisne_intervencije	INSERT	188	2026-04-13 13:43:42.208896+00
+1090	service_intervention_created	servisne_intervencije	INSERT	189	2026-04-13 13:43:42.208896+00
+1091	service_intervention_created	servisne_intervencije	INSERT	190	2026-04-13 13:43:42.208896+00
+1092	service_intervention_created	servisne_intervencije	INSERT	191	2026-04-13 13:43:42.208896+00
+1093	service_intervention_created	servisne_intervencije	INSERT	192	2026-04-13 13:43:42.208896+00
+1094	service_intervention_created	servisne_intervencije	INSERT	193	2026-04-13 13:43:42.208896+00
+1095	service_intervention_created	servisne_intervencije	INSERT	194	2026-04-13 13:43:42.208896+00
+1096	service_intervention_created	servisne_intervencije	INSERT	195	2026-04-13 13:43:42.208896+00
+1097	service_intervention_created	servisne_intervencije	INSERT	196	2026-04-13 13:43:42.208896+00
+1098	service_intervention_created	servisne_intervencije	INSERT	197	2026-04-13 13:43:42.208896+00
+1099	service_intervention_created	servisne_intervencije	INSERT	198	2026-04-13 13:43:42.208896+00
+1100	service_intervention_created	servisne_intervencije	INSERT	199	2026-04-13 13:43:42.208896+00
+1101	service_intervention_created	servisne_intervencije	INSERT	200	2026-04-13 13:43:42.208896+00
+1102	service_intervention_created	servisne_intervencije	INSERT	201	2026-04-13 13:43:42.208896+00
+1103	service_intervention_created	servisne_intervencije	INSERT	202	2026-04-13 13:43:42.208896+00
+1104	service_intervention_created	servisne_intervencije	INSERT	203	2026-04-13 13:43:42.208896+00
+1105	service_intervention_created	servisne_intervencije	INSERT	204	2026-04-13 13:43:42.208896+00
+1106	service_intervention_created	servisne_intervencije	INSERT	205	2026-04-13 13:43:42.208896+00
+1107	service_intervention_created	servisne_intervencije	INSERT	206	2026-04-13 13:43:42.208896+00
+1108	service_intervention_created	servisne_intervencije	INSERT	207	2026-04-13 13:43:42.208896+00
+1109	service_intervention_created	servisne_intervencije	INSERT	208	2026-04-13 13:43:42.208896+00
+1110	service_intervention_created	servisne_intervencije	INSERT	209	2026-04-13 13:43:42.208896+00
+1111	service_intervention_created	servisne_intervencije	INSERT	210	2026-04-13 13:43:42.208896+00
+1112	service_intervention_created	servisne_intervencije	INSERT	211	2026-04-13 13:43:42.208896+00
+1113	service_intervention_created	servisne_intervencije	INSERT	212	2026-04-13 13:43:42.208896+00
+1114	service_intervention_created	servisne_intervencije	INSERT	213	2026-04-13 13:43:42.208896+00
+1115	service_intervention_created	servisne_intervencije	INSERT	214	2026-04-13 13:43:42.208896+00
+1116	service_intervention_created	servisne_intervencije	INSERT	215	2026-04-13 13:43:42.208896+00
+1117	service_intervention_created	servisne_intervencije	INSERT	216	2026-04-13 13:43:42.208896+00
+1118	service_intervention_created	servisne_intervencije	INSERT	217	2026-04-13 13:43:42.208896+00
+1119	service_intervention_created	servisne_intervencije	INSERT	218	2026-04-13 13:43:42.208896+00
+1120	service_intervention_created	servisne_intervencije	INSERT	219	2026-04-13 13:43:42.208896+00
+1121	service_intervention_created	servisne_intervencije	INSERT	220	2026-04-13 13:43:42.208896+00
+1122	service_intervention_created	servisne_intervencije	INSERT	221	2026-04-13 13:43:42.208896+00
+1123	service_intervention_created	servisne_intervencije	INSERT	222	2026-04-13 13:43:42.208896+00
+1124	service_intervention_created	servisne_intervencije	INSERT	223	2026-04-13 13:43:42.208896+00
+1125	service_intervention_created	servisne_intervencije	INSERT	224	2026-04-13 13:43:42.208896+00
+1126	service_intervention_created	servisne_intervencije	INSERT	225	2026-04-13 13:43:42.208896+00
+1127	service_intervention_created	servisne_intervencije	INSERT	226	2026-04-13 13:43:42.208896+00
+1128	service_intervention_created	servisne_intervencije	INSERT	227	2026-04-13 13:43:42.208896+00
+1129	service_intervention_created	servisne_intervencije	INSERT	228	2026-04-13 13:43:42.208896+00
+1130	service_intervention_created	servisne_intervencije	INSERT	229	2026-04-13 13:43:42.208896+00
+1131	service_intervention_created	servisne_intervencije	INSERT	230	2026-04-13 13:43:42.208896+00
+1132	service_intervention_created	servisne_intervencije	INSERT	231	2026-04-13 13:43:42.208896+00
+1133	service_intervention_created	servisne_intervencije	INSERT	232	2026-04-13 13:43:42.208896+00
+1134	service_intervention_created	servisne_intervencije	INSERT	233	2026-04-13 13:43:42.208896+00
+1135	service_intervention_created	servisne_intervencije	INSERT	234	2026-04-13 13:43:42.208896+00
+1136	service_intervention_created	servisne_intervencije	INSERT	235	2026-04-13 13:43:42.208896+00
+1137	service_intervention_created	servisne_intervencije	INSERT	236	2026-04-13 13:43:42.208896+00
+1138	service_intervention_created	servisne_intervencije	INSERT	237	2026-04-13 13:43:42.208896+00
+1139	service_intervention_created	servisne_intervencije	INSERT	238	2026-04-13 13:43:42.208896+00
+1140	service_intervention_created	servisne_intervencije	INSERT	239	2026-04-13 13:43:42.208896+00
+1141	service_intervention_created	servisne_intervencije	INSERT	240	2026-04-13 13:43:42.208896+00
+1142	service_intervention_created	servisne_intervencije	INSERT	241	2026-04-13 13:43:42.208896+00
+1143	service_intervention_created	servisne_intervencije	INSERT	242	2026-04-13 13:43:42.208896+00
+1144	service_intervention_created	servisne_intervencije	INSERT	243	2026-04-13 13:43:42.208896+00
+1145	service_intervention_created	servisne_intervencije	INSERT	244	2026-04-13 13:43:42.208896+00
+1146	service_intervention_created	servisne_intervencije	INSERT	245	2026-04-13 13:43:42.208896+00
+1147	service_intervention_created	servisne_intervencije	INSERT	246	2026-04-13 13:43:42.208896+00
+1148	service_intervention_created	servisne_intervencije	INSERT	247	2026-04-13 13:43:42.208896+00
+1149	service_intervention_created	servisne_intervencije	INSERT	248	2026-04-13 13:43:42.208896+00
+1150	service_intervention_created	servisne_intervencije	INSERT	249	2026-04-13 13:43:42.208896+00
+1151	service_intervention_created	servisne_intervencije	INSERT	250	2026-04-13 13:43:42.208896+00
+1152	service_intervention_created	servisne_intervencije	INSERT	251	2026-04-13 13:43:42.208896+00
+1153	service_intervention_created	servisne_intervencije	INSERT	252	2026-04-13 13:43:42.208896+00
+1154	service_intervention_created	servisne_intervencije	INSERT	253	2026-04-13 13:43:42.208896+00
+1155	service_intervention_created	servisne_intervencije	INSERT	254	2026-04-13 13:43:42.208896+00
+1156	service_intervention_created	servisne_intervencije	INSERT	255	2026-04-13 13:43:42.208896+00
+1157	service_intervention_created	servisne_intervencije	INSERT	256	2026-04-13 13:43:42.208896+00
+1158	service_intervention_created	servisne_intervencije	INSERT	257	2026-04-13 13:43:42.208896+00
+1159	service_intervention_created	servisne_intervencije	INSERT	258	2026-04-13 13:43:42.208896+00
+1160	service_intervention_created	servisne_intervencije	INSERT	259	2026-04-13 13:43:42.208896+00
+1161	service_intervention_created	servisne_intervencije	INSERT	260	2026-04-13 13:43:42.208896+00
+1162	service_intervention_created	servisne_intervencije	INSERT	261	2026-04-13 13:43:42.208896+00
+1163	service_intervention_created	servisne_intervencije	INSERT	262	2026-04-13 13:43:42.208896+00
+1164	service_intervention_created	servisne_intervencije	INSERT	263	2026-04-13 13:43:42.208896+00
+1165	service_intervention_created	servisne_intervencije	INSERT	264	2026-04-13 13:43:42.208896+00
+1166	service_intervention_created	servisne_intervencije	INSERT	265	2026-04-13 13:43:42.208896+00
+1167	service_intervention_created	servisne_intervencije	INSERT	266	2026-04-13 13:43:42.208896+00
+1168	service_intervention_created	servisne_intervencije	INSERT	267	2026-04-13 13:43:42.208896+00
+1169	service_intervention_created	servisne_intervencije	INSERT	268	2026-04-13 13:43:42.208896+00
+1170	service_intervention_created	servisne_intervencije	INSERT	269	2026-04-13 13:43:42.208896+00
+1171	service_intervention_created	servisne_intervencije	INSERT	270	2026-04-13 13:43:42.208896+00
+1172	service_intervention_created	servisne_intervencije	INSERT	271	2026-04-13 13:43:42.208896+00
+1173	service_intervention_created	servisne_intervencije	INSERT	272	2026-04-13 13:43:42.208896+00
+1174	service_intervention_created	servisne_intervencije	INSERT	273	2026-04-13 13:43:42.208896+00
+1175	service_intervention_created	servisne_intervencije	INSERT	274	2026-04-13 13:43:42.208896+00
+1176	service_intervention_created	servisne_intervencije	INSERT	275	2026-04-13 13:43:42.208896+00
+1177	service_intervention_created	servisne_intervencije	INSERT	276	2026-04-13 13:43:42.208896+00
+1178	service_intervention_created	servisne_intervencije	INSERT	277	2026-04-13 13:43:42.208896+00
+1179	service_intervention_created	servisne_intervencije	INSERT	278	2026-04-13 13:43:42.208896+00
+1180	service_intervention_created	servisne_intervencije	INSERT	279	2026-04-13 13:43:42.208896+00
+1181	service_intervention_created	servisne_intervencije	INSERT	280	2026-04-13 13:43:42.208896+00
+1182	service_intervention_created	servisne_intervencije	INSERT	281	2026-04-13 13:43:42.208896+00
+1183	service_intervention_created	servisne_intervencije	INSERT	282	2026-04-13 13:43:42.208896+00
+1184	service_intervention_created	servisne_intervencije	INSERT	283	2026-04-13 13:43:42.208896+00
+1185	service_intervention_created	servisne_intervencije	INSERT	284	2026-04-13 13:43:42.208896+00
+1186	service_intervention_created	servisne_intervencije	INSERT	285	2026-04-13 13:43:42.208896+00
+1187	service_intervention_created	servisne_intervencije	INSERT	286	2026-04-13 13:43:42.208896+00
+1188	service_intervention_created	servisne_intervencije	INSERT	287	2026-04-13 13:43:42.208896+00
+1189	service_intervention_created	servisne_intervencije	INSERT	288	2026-04-13 13:43:42.208896+00
+1190	service_intervention_created	servisne_intervencije	INSERT	289	2026-04-13 13:43:42.208896+00
+1191	service_intervention_created	servisne_intervencije	INSERT	290	2026-04-13 13:43:42.208896+00
+1192	service_intervention_created	servisne_intervencije	INSERT	291	2026-04-13 13:43:42.208896+00
+1193	service_intervention_created	servisne_intervencije	INSERT	292	2026-04-13 13:43:42.208896+00
+1194	service_intervention_created	servisne_intervencije	INSERT	293	2026-04-13 13:43:42.208896+00
+1195	service_intervention_created	servisne_intervencije	INSERT	294	2026-04-13 13:43:42.208896+00
+1196	service_intervention_created	servisne_intervencije	INSERT	295	2026-04-13 13:43:42.208896+00
+1197	service_intervention_created	servisne_intervencije	INSERT	296	2026-04-13 13:43:42.208896+00
+1198	service_intervention_created	servisne_intervencije	INSERT	297	2026-04-13 13:43:42.208896+00
+1199	service_intervention_created	servisne_intervencije	INSERT	298	2026-04-13 13:43:42.208896+00
+1200	service_intervention_created	servisne_intervencije	INSERT	299	2026-04-13 13:43:42.208896+00
+1201	service_intervention_created	servisne_intervencije	INSERT	300	2026-04-13 13:43:42.208896+00
+1202	service_intervention_created	servisne_intervencije	INSERT	301	2026-04-13 13:43:42.208896+00
+1203	service_intervention_created	servisne_intervencije	INSERT	302	2026-04-13 13:43:42.208896+00
+1204	service_intervention_created	servisne_intervencije	INSERT	303	2026-04-13 13:43:42.208896+00
+1205	service_intervention_created	servisne_intervencije	INSERT	304	2026-04-13 13:43:42.208896+00
+1206	service_intervention_created	servisne_intervencije	INSERT	305	2026-04-13 13:43:42.208896+00
+1207	service_intervention_created	servisne_intervencije	INSERT	306	2026-04-13 13:43:42.208896+00
+1208	service_intervention_created	servisne_intervencije	INSERT	307	2026-04-13 13:43:42.208896+00
+1209	service_intervention_created	servisne_intervencije	INSERT	308	2026-04-13 13:43:42.208896+00
+1210	service_intervention_created	servisne_intervencije	INSERT	309	2026-04-13 13:43:42.208896+00
+1211	service_intervention_created	servisne_intervencije	INSERT	310	2026-04-13 13:43:42.208896+00
+1212	service_intervention_created	servisne_intervencije	INSERT	311	2026-04-13 13:43:42.208896+00
+1213	service_intervention_created	servisne_intervencije	INSERT	312	2026-04-13 13:43:42.208896+00
+1214	service_intervention_created	servisne_intervencije	INSERT	313	2026-04-13 13:43:42.208896+00
+1215	service_intervention_created	servisne_intervencije	INSERT	314	2026-04-13 13:43:42.208896+00
+1216	service_intervention_created	servisne_intervencije	INSERT	315	2026-04-13 13:43:42.208896+00
+1217	service_intervention_created	servisne_intervencije	INSERT	316	2026-04-13 13:43:42.208896+00
+1218	service_intervention_created	servisne_intervencije	INSERT	317	2026-04-13 13:43:42.208896+00
+1219	service_intervention_created	servisne_intervencije	INSERT	318	2026-04-13 13:43:42.208896+00
+1220	service_intervention_created	servisne_intervencije	INSERT	319	2026-04-13 13:43:42.208896+00
+1221	service_intervention_created	servisne_intervencije	INSERT	320	2026-04-13 13:43:42.208896+00
+1222	service_intervention_created	servisne_intervencije	INSERT	321	2026-04-13 13:43:42.208896+00
+1223	service_intervention_created	servisne_intervencije	INSERT	322	2026-04-13 13:43:42.208896+00
+1224	service_intervention_created	servisne_intervencije	INSERT	323	2026-04-13 13:43:42.208896+00
+1225	service_intervention_created	servisne_intervencije	INSERT	324	2026-04-13 13:43:42.208896+00
+1226	service_intervention_created	servisne_intervencije	INSERT	325	2026-04-13 13:43:42.208896+00
+1227	service_intervention_created	servisne_intervencije	INSERT	326	2026-04-13 13:43:42.208896+00
+1228	service_intervention_created	servisne_intervencije	INSERT	327	2026-04-13 13:43:42.208896+00
+1229	service_intervention_created	servisne_intervencije	INSERT	328	2026-04-13 13:43:42.208896+00
+1230	service_intervention_created	servisne_intervencije	INSERT	329	2026-04-13 13:43:42.208896+00
+1231	service_intervention_created	servisne_intervencije	INSERT	330	2026-04-13 13:43:42.208896+00
+1232	service_intervention_created	servisne_intervencije	INSERT	331	2026-04-13 13:43:42.208896+00
+1233	service_intervention_created	servisne_intervencije	INSERT	332	2026-04-13 13:43:42.208896+00
+1234	service_intervention_created	servisne_intervencije	INSERT	333	2026-04-13 13:43:42.208896+00
+1235	service_intervention_created	servisne_intervencije	INSERT	334	2026-04-13 13:43:42.208896+00
+1236	service_intervention_created	servisne_intervencije	INSERT	335	2026-04-13 13:43:42.208896+00
+1237	service_intervention_created	servisne_intervencije	INSERT	336	2026-04-13 13:43:42.208896+00
+1238	service_intervention_created	servisne_intervencije	INSERT	337	2026-04-13 13:43:42.208896+00
+1239	service_intervention_created	servisne_intervencije	INSERT	338	2026-04-13 13:43:42.208896+00
+1240	service_intervention_created	servisne_intervencije	INSERT	339	2026-04-13 13:43:42.208896+00
+1241	service_intervention_created	servisne_intervencije	INSERT	340	2026-04-13 13:43:42.208896+00
+1242	service_intervention_created	servisne_intervencije	INSERT	341	2026-04-13 13:43:42.208896+00
+1243	service_intervention_created	servisne_intervencije	INSERT	342	2026-04-13 13:43:42.208896+00
+1244	service_intervention_created	servisne_intervencije	INSERT	343	2026-04-13 13:43:42.208896+00
+1245	service_intervention_created	servisne_intervencije	INSERT	344	2026-04-13 13:43:42.208896+00
+1246	service_intervention_created	servisne_intervencije	INSERT	345	2026-04-13 13:43:42.208896+00
+1247	service_intervention_created	servisne_intervencije	INSERT	346	2026-04-13 13:43:42.208896+00
+1248	service_intervention_created	servisne_intervencije	INSERT	347	2026-04-13 13:43:42.208896+00
+1249	service_intervention_created	servisne_intervencije	INSERT	348	2026-04-13 13:43:42.208896+00
+1250	service_intervention_created	servisne_intervencije	INSERT	349	2026-04-13 13:43:42.208896+00
+1251	service_intervention_created	servisne_intervencije	INSERT	350	2026-04-13 13:43:42.208896+00
+1252	service_intervention_created	servisne_intervencije	INSERT	351	2026-04-13 13:43:42.208896+00
+1253	service_intervention_created	servisne_intervencije	INSERT	352	2026-04-13 13:43:42.208896+00
+1254	service_intervention_created	servisne_intervencije	INSERT	353	2026-04-13 13:43:42.208896+00
+1255	service_intervention_created	servisne_intervencije	INSERT	354	2026-04-13 13:43:42.208896+00
+1256	service_intervention_created	servisne_intervencije	INSERT	355	2026-04-13 13:43:42.208896+00
+1257	service_intervention_created	servisne_intervencije	INSERT	356	2026-04-13 13:43:42.208896+00
+1258	service_intervention_created	servisne_intervencije	INSERT	357	2026-04-13 13:43:42.208896+00
+1259	service_intervention_created	servisne_intervencije	INSERT	358	2026-04-13 13:43:42.208896+00
+1260	service_intervention_created	servisne_intervencije	INSERT	359	2026-04-13 13:43:42.208896+00
+1261	service_intervention_created	servisne_intervencije	INSERT	360	2026-04-13 13:43:42.208896+00
+1262	service_intervention_created	servisne_intervencije	INSERT	361	2026-04-13 13:43:42.208896+00
+1263	service_intervention_created	servisne_intervencije	INSERT	362	2026-04-13 13:43:42.208896+00
+1264	service_intervention_created	servisne_intervencije	INSERT	363	2026-04-13 13:43:42.208896+00
+1265	service_intervention_created	servisne_intervencije	INSERT	364	2026-04-13 13:43:42.208896+00
+1266	service_intervention_created	servisne_intervencije	INSERT	365	2026-04-13 13:43:42.208896+00
+1267	service_intervention_created	servisne_intervencije	INSERT	366	2026-04-13 13:43:42.208896+00
+1268	service_intervention_created	servisne_intervencije	INSERT	367	2026-04-13 13:43:42.208896+00
+1269	service_intervention_created	servisne_intervencije	INSERT	368	2026-04-13 13:43:42.208896+00
+1270	service_intervention_created	servisne_intervencije	INSERT	369	2026-04-13 13:43:42.208896+00
+1271	service_intervention_created	servisne_intervencije	INSERT	370	2026-04-13 13:43:42.208896+00
+1272	service_intervention_created	servisne_intervencije	INSERT	371	2026-04-13 13:43:42.208896+00
+1273	service_intervention_created	servisne_intervencije	INSERT	372	2026-04-13 13:43:42.208896+00
+1274	service_intervention_created	servisne_intervencije	INSERT	373	2026-04-13 13:43:42.208896+00
+1275	service_intervention_created	servisne_intervencije	INSERT	374	2026-04-13 13:43:42.208896+00
+1276	service_intervention_created	servisne_intervencije	INSERT	375	2026-04-13 13:43:42.208896+00
+1277	service_intervention_created	servisne_intervencije	INSERT	376	2026-04-13 13:43:42.208896+00
+1278	service_intervention_created	servisne_intervencije	INSERT	377	2026-04-13 13:43:42.208896+00
+1279	service_intervention_created	servisne_intervencije	INSERT	378	2026-04-13 13:43:42.208896+00
+1280	service_intervention_created	servisne_intervencije	INSERT	379	2026-04-13 13:43:42.208896+00
+1281	service_intervention_created	servisne_intervencije	INSERT	380	2026-04-13 13:43:42.208896+00
+1282	service_intervention_created	servisne_intervencije	INSERT	381	2026-04-13 13:43:42.208896+00
+1283	service_intervention_created	servisne_intervencije	INSERT	382	2026-04-13 13:43:42.208896+00
+1284	service_intervention_created	servisne_intervencije	INSERT	383	2026-04-13 13:43:42.208896+00
+1285	service_intervention_created	servisne_intervencije	INSERT	384	2026-04-13 13:43:42.208896+00
+1286	service_intervention_created	servisne_intervencije	INSERT	385	2026-04-13 13:43:42.208896+00
+1287	service_intervention_created	servisne_intervencije	INSERT	386	2026-04-13 13:43:42.208896+00
+1288	service_intervention_created	servisne_intervencije	INSERT	387	2026-04-13 13:43:42.208896+00
+1289	service_intervention_created	servisne_intervencije	INSERT	388	2026-04-13 13:43:42.208896+00
+1290	service_intervention_created	servisne_intervencije	INSERT	389	2026-04-13 13:43:42.208896+00
+1291	service_intervention_created	servisne_intervencije	INSERT	390	2026-04-13 13:43:42.208896+00
+1292	service_intervention_created	servisne_intervencije	INSERT	391	2026-04-13 13:43:42.208896+00
+1293	service_intervention_created	servisne_intervencije	INSERT	392	2026-04-13 13:43:42.208896+00
+1294	service_intervention_created	servisne_intervencije	INSERT	393	2026-04-13 13:43:42.208896+00
+1295	service_intervention_created	servisne_intervencije	INSERT	394	2026-04-13 13:43:42.208896+00
+1296	service_intervention_created	servisne_intervencije	INSERT	395	2026-04-13 13:43:42.208896+00
+1297	service_intervention_created	servisne_intervencije	INSERT	396	2026-04-13 13:43:42.208896+00
+1298	service_intervention_created	servisne_intervencije	INSERT	397	2026-04-13 13:43:42.208896+00
+1299	service_intervention_created	servisne_intervencije	INSERT	398	2026-04-13 13:43:42.208896+00
+1300	service_intervention_created	servisne_intervencije	INSERT	399	2026-04-13 13:43:42.208896+00
+1301	service_intervention_created	servisne_intervencije	INSERT	400	2026-04-13 13:43:42.208896+00
+1302	service_intervention_created	servisne_intervencije	INSERT	401	2026-04-13 13:43:42.208896+00
+1303	service_intervention_created	servisne_intervencije	INSERT	402	2026-04-13 13:43:42.208896+00
+1304	service_intervention_created	servisne_intervencije	INSERT	403	2026-04-13 13:43:42.208896+00
+1305	service_intervention_created	servisne_intervencije	INSERT	404	2026-04-13 13:43:42.208896+00
+1306	service_intervention_created	servisne_intervencije	INSERT	405	2026-04-13 13:43:42.208896+00
+1307	service_intervention_created	servisne_intervencije	INSERT	406	2026-04-13 13:43:42.208896+00
+1308	service_intervention_created	servisne_intervencije	INSERT	407	2026-04-13 13:43:42.208896+00
+1309	service_intervention_created	servisne_intervencije	INSERT	408	2026-04-13 13:43:42.208896+00
+1310	service_intervention_created	servisne_intervencije	INSERT	409	2026-04-13 13:43:42.208896+00
+1311	service_intervention_created	servisne_intervencije	INSERT	410	2026-04-13 13:43:42.208896+00
+1312	service_intervention_created	servisne_intervencije	INSERT	411	2026-04-13 13:43:42.208896+00
+1313	service_intervention_created	servisne_intervencije	INSERT	412	2026-04-13 13:43:42.208896+00
+1314	service_intervention_created	servisne_intervencije	INSERT	413	2026-04-13 13:43:42.208896+00
+1315	service_intervention_created	servisne_intervencije	INSERT	414	2026-04-13 13:43:42.208896+00
+1316	service_intervention_created	servisne_intervencije	INSERT	415	2026-04-13 13:43:42.208896+00
+1317	service_intervention_created	servisne_intervencije	INSERT	416	2026-04-13 13:43:42.208896+00
+1318	service_intervention_created	servisne_intervencije	INSERT	417	2026-04-13 13:43:42.208896+00
+1319	service_intervention_created	servisne_intervencije	INSERT	418	2026-04-13 13:43:42.208896+00
+1320	service_intervention_created	servisne_intervencije	INSERT	419	2026-04-13 13:43:42.208896+00
+1321	service_intervention_created	servisne_intervencije	INSERT	420	2026-04-13 13:43:42.208896+00
+1322	service_intervention_created	servisne_intervencije	INSERT	421	2026-04-13 13:43:42.208896+00
+1323	service_intervention_created	servisne_intervencije	INSERT	422	2026-04-13 13:43:42.208896+00
+1324	service_intervention_created	servisne_intervencije	INSERT	423	2026-04-13 13:43:42.208896+00
+1325	service_intervention_created	servisne_intervencije	INSERT	424	2026-04-13 13:43:42.208896+00
+1326	service_intervention_created	servisne_intervencije	INSERT	425	2026-04-13 13:43:42.208896+00
+1327	service_intervention_created	servisne_intervencije	INSERT	426	2026-04-13 13:43:42.208896+00
+1328	service_intervention_created	servisne_intervencije	INSERT	427	2026-04-13 13:43:42.208896+00
+1329	service_intervention_created	servisne_intervencije	INSERT	428	2026-04-13 13:43:42.208896+00
+1330	service_intervention_created	servisne_intervencije	INSERT	429	2026-04-13 13:43:42.208896+00
+1331	service_intervention_created	servisne_intervencije	INSERT	430	2026-04-13 13:43:42.208896+00
+1332	service_intervention_created	servisne_intervencije	INSERT	431	2026-04-13 13:43:42.208896+00
+1333	service_intervention_created	servisne_intervencije	INSERT	432	2026-04-13 13:43:42.208896+00
+1334	service_intervention_created	servisne_intervencije	INSERT	433	2026-04-13 13:43:42.208896+00
+1335	service_intervention_created	servisne_intervencije	INSERT	434	2026-04-13 13:43:42.208896+00
+1336	service_intervention_created	servisne_intervencije	INSERT	435	2026-04-13 13:43:42.208896+00
+1337	service_intervention_created	servisne_intervencije	INSERT	436	2026-04-13 13:43:42.208896+00
+1338	service_intervention_created	servisne_intervencije	INSERT	437	2026-04-13 13:43:42.208896+00
+1339	service_intervention_created	servisne_intervencije	INSERT	438	2026-04-13 13:43:42.208896+00
+1340	service_intervention_created	servisne_intervencije	INSERT	439	2026-04-13 13:43:42.208896+00
+1341	service_intervention_created	servisne_intervencije	INSERT	440	2026-04-13 13:43:42.208896+00
+1372	fuel_changed	evidencija_goriva	UPDATE	79	2026-04-13 14:06:47.431729+00
+1373	fuel_changed	evidencija_goriva	UPDATE	80	2026-04-13 14:06:47.431729+00
+1374	fuel_changed	evidencija_goriva	UPDATE	81	2026-04-13 14:06:47.431729+00
+1375	fuel_changed	evidencija_goriva	UPDATE	82	2026-04-13 14:06:47.431729+00
+1376	fuel_changed	evidencija_goriva	UPDATE	83	2026-04-13 14:06:47.431729+00
+1377	fuel_changed	evidencija_goriva	UPDATE	84	2026-04-13 14:06:47.431729+00
+1378	fuel_changed	evidencija_goriva	UPDATE	85	2026-04-13 14:06:47.431729+00
+1379	fuel_changed	evidencija_goriva	UPDATE	86	2026-04-13 14:06:47.431729+00
+1380	fuel_changed	evidencija_goriva	UPDATE	87	2026-04-13 14:06:47.431729+00
+1381	fuel_changed	evidencija_goriva	UPDATE	88	2026-04-13 14:06:47.431729+00
+1382	fuel_changed	evidencija_goriva	UPDATE	89	2026-04-13 14:06:47.431729+00
+1383	fuel_changed	evidencija_goriva	UPDATE	90	2026-04-13 14:06:47.431729+00
+1384	fuel_changed	evidencija_goriva	UPDATE	91	2026-04-13 14:06:47.431729+00
+1385	fuel_changed	evidencija_goriva	UPDATE	92	2026-04-13 14:06:47.431729+00
+1386	fuel_changed	evidencija_goriva	UPDATE	93	2026-04-13 14:06:47.431729+00
+1387	fuel_changed	evidencija_goriva	UPDATE	94	2026-04-13 14:06:47.431729+00
+1388	fuel_changed	evidencija_goriva	UPDATE	95	2026-04-13 14:06:47.431729+00
+1389	fuel_changed	evidencija_goriva	UPDATE	96	2026-04-13 14:06:47.431729+00
+1390	fuel_changed	evidencija_goriva	UPDATE	97	2026-04-13 14:06:47.431729+00
+1391	fuel_changed	evidencija_goriva	UPDATE	98	2026-04-13 14:06:47.431729+00
+1392	fuel_changed	evidencija_goriva	UPDATE	99	2026-04-13 14:06:47.431729+00
+1393	fuel_changed	evidencija_goriva	UPDATE	100	2026-04-13 14:06:47.431729+00
+1394	fuel_changed	evidencija_goriva	UPDATE	101	2026-04-13 14:06:47.431729+00
+1395	fuel_changed	evidencija_goriva	UPDATE	102	2026-04-13 14:06:47.431729+00
+1396	fuel_changed	evidencija_goriva	UPDATE	103	2026-04-13 14:06:47.431729+00
+1397	fuel_changed	evidencija_goriva	UPDATE	104	2026-04-13 14:06:47.431729+00
+1398	fuel_changed	evidencija_goriva	UPDATE	105	2026-04-13 14:06:47.431729+00
+1399	fuel_changed	evidencija_goriva	UPDATE	106	2026-04-13 14:06:47.431729+00
+1400	fuel_changed	evidencija_goriva	UPDATE	107	2026-04-13 14:06:47.431729+00
+1401	fuel_changed	evidencija_goriva	UPDATE	108	2026-04-13 14:06:47.431729+00
+1402	fuel_changed	evidencija_goriva	UPDATE	109	2026-04-13 14:06:47.431729+00
+1403	fuel_changed	evidencija_goriva	UPDATE	110	2026-04-13 14:06:47.431729+00
+1404	fuel_changed	evidencija_goriva	UPDATE	111	2026-04-13 14:06:47.431729+00
+1405	fuel_changed	evidencija_goriva	UPDATE	112	2026-04-13 14:06:47.431729+00
+1406	fuel_changed	evidencija_goriva	UPDATE	113	2026-04-13 14:06:47.431729+00
+1407	fuel_changed	evidencija_goriva	UPDATE	114	2026-04-13 14:06:47.431729+00
+1408	fuel_changed	evidencija_goriva	UPDATE	115	2026-04-13 14:06:47.431729+00
+1409	fuel_changed	evidencija_goriva	UPDATE	116	2026-04-13 14:06:47.431729+00
+1410	fuel_changed	evidencija_goriva	UPDATE	117	2026-04-13 14:06:47.431729+00
+1411	fuel_changed	evidencija_goriva	UPDATE	118	2026-04-13 14:06:47.431729+00
+1412	fuel_changed	evidencija_goriva	UPDATE	119	2026-04-13 14:06:47.431729+00
+1413	fuel_changed	evidencija_goriva	UPDATE	120	2026-04-13 14:06:47.431729+00
+1414	fuel_changed	evidencija_goriva	UPDATE	121	2026-04-13 14:06:47.431729+00
+1415	fuel_changed	evidencija_goriva	UPDATE	122	2026-04-13 14:06:47.431729+00
+1416	fuel_changed	evidencija_goriva	UPDATE	123	2026-04-13 14:06:47.431729+00
+1417	fuel_changed	evidencija_goriva	UPDATE	124	2026-04-13 14:06:47.431729+00
+1418	fuel_changed	evidencija_goriva	UPDATE	125	2026-04-13 14:06:47.431729+00
+1419	fuel_changed	evidencija_goriva	UPDATE	126	2026-04-13 14:06:47.431729+00
+1420	fuel_changed	evidencija_goriva	UPDATE	127	2026-04-13 14:06:47.431729+00
+1421	fuel_changed	evidencija_goriva	UPDATE	128	2026-04-13 14:06:47.431729+00
+1422	fuel_changed	evidencija_goriva	UPDATE	129	2026-04-13 14:06:47.431729+00
+1423	fuel_changed	evidencija_goriva	UPDATE	130	2026-04-13 14:06:47.431729+00
+1424	fuel_changed	evidencija_goriva	UPDATE	131	2026-04-13 14:06:47.431729+00
+1425	fuel_changed	evidencija_goriva	UPDATE	132	2026-04-13 14:06:47.431729+00
+1426	fuel_changed	evidencija_goriva	UPDATE	133	2026-04-13 14:06:47.431729+00
+1427	fuel_changed	evidencija_goriva	UPDATE	134	2026-04-13 14:06:47.431729+00
+1428	fuel_changed	evidencija_goriva	UPDATE	135	2026-04-13 14:06:47.431729+00
+1429	fuel_changed	evidencija_goriva	UPDATE	136	2026-04-13 14:06:47.431729+00
+1430	fuel_changed	evidencija_goriva	UPDATE	137	2026-04-13 14:06:47.431729+00
+1431	fuel_changed	evidencija_goriva	UPDATE	138	2026-04-13 14:06:47.431729+00
+1432	fuel_changed	evidencija_goriva	UPDATE	139	2026-04-13 14:06:47.431729+00
+1433	fuel_changed	evidencija_goriva	UPDATE	140	2026-04-13 14:06:47.431729+00
+1434	fuel_changed	evidencija_goriva	UPDATE	141	2026-04-13 14:06:47.431729+00
+1435	fuel_changed	evidencija_goriva	UPDATE	142	2026-04-13 14:06:47.431729+00
+1436	fuel_changed	evidencija_goriva	UPDATE	143	2026-04-13 14:06:47.431729+00
+1437	fuel_changed	evidencija_goriva	UPDATE	144	2026-04-13 14:06:47.431729+00
+1438	fuel_changed	evidencija_goriva	UPDATE	145	2026-04-13 14:06:47.431729+00
+1439	fuel_changed	evidencija_goriva	UPDATE	146	2026-04-13 14:06:47.431729+00
+1440	fuel_changed	evidencija_goriva	UPDATE	147	2026-04-13 14:06:47.431729+00
+1441	fuel_changed	evidencija_goriva	UPDATE	148	2026-04-13 14:06:47.431729+00
+1442	fuel_changed	evidencija_goriva	UPDATE	149	2026-04-13 14:06:47.431729+00
+1443	fuel_changed	evidencija_goriva	UPDATE	150	2026-04-13 14:06:47.431729+00
+1444	fuel_changed	evidencija_goriva	UPDATE	151	2026-04-13 14:06:47.431729+00
+1445	fuel_changed	evidencija_goriva	UPDATE	152	2026-04-13 14:06:47.431729+00
+1446	fuel_changed	evidencija_goriva	UPDATE	153	2026-04-13 14:06:47.431729+00
+1447	fuel_changed	evidencija_goriva	UPDATE	154	2026-04-13 14:06:47.431729+00
+1448	fuel_changed	evidencija_goriva	UPDATE	155	2026-04-13 14:06:47.431729+00
+1449	fuel_changed	evidencija_goriva	UPDATE	156	2026-04-13 14:06:47.431729+00
+1450	fuel_changed	evidencija_goriva	UPDATE	157	2026-04-13 14:06:47.431729+00
+1451	fuel_changed	evidencija_goriva	UPDATE	158	2026-04-13 14:06:47.431729+00
+1452	fuel_changed	evidencija_goriva	UPDATE	159	2026-04-13 14:06:47.431729+00
+1453	fuel_changed	evidencija_goriva	UPDATE	160	2026-04-13 14:06:47.431729+00
+1454	fuel_changed	evidencija_goriva	UPDATE	161	2026-04-13 14:06:47.431729+00
+1455	fuel_changed	evidencija_goriva	UPDATE	162	2026-04-13 14:06:47.431729+00
+1456	fuel_changed	evidencija_goriva	UPDATE	163	2026-04-13 14:06:47.431729+00
+1457	fuel_changed	evidencija_goriva	UPDATE	164	2026-04-13 14:06:47.431729+00
+1458	fuel_changed	evidencija_goriva	UPDATE	165	2026-04-13 14:06:47.431729+00
+1459	fuel_changed	evidencija_goriva	UPDATE	166	2026-04-13 14:06:47.431729+00
+1460	fuel_changed	evidencija_goriva	UPDATE	167	2026-04-13 14:06:47.431729+00
+1461	fuel_changed	evidencija_goriva	UPDATE	168	2026-04-13 14:06:47.431729+00
+1462	fuel_changed	evidencija_goriva	UPDATE	169	2026-04-13 14:06:47.431729+00
+1463	fuel_changed	evidencija_goriva	UPDATE	170	2026-04-13 14:06:47.431729+00
+1464	fuel_changed	evidencija_goriva	UPDATE	171	2026-04-13 14:06:47.431729+00
+1465	fuel_changed	evidencija_goriva	UPDATE	172	2026-04-13 14:06:47.431729+00
+1466	fuel_changed	evidencija_goriva	UPDATE	173	2026-04-13 14:06:47.431729+00
+1467	fuel_changed	evidencija_goriva	UPDATE	174	2026-04-13 14:06:47.431729+00
+1468	fuel_changed	evidencija_goriva	UPDATE	175	2026-04-13 14:06:47.431729+00
+1469	fuel_changed	evidencija_goriva	UPDATE	176	2026-04-13 14:06:47.431729+00
+1470	fuel_changed	evidencija_goriva	UPDATE	177	2026-04-13 14:06:47.431729+00
+1471	fuel_changed	evidencija_goriva	UPDATE	178	2026-04-13 14:06:47.431729+00
+1472	fuel_changed	evidencija_goriva	UPDATE	179	2026-04-13 14:06:47.431729+00
+1473	fuel_changed	evidencija_goriva	UPDATE	180	2026-04-13 14:06:47.431729+00
+1474	fuel_changed	evidencija_goriva	UPDATE	181	2026-04-13 14:06:47.431729+00
+1475	fuel_changed	evidencija_goriva	UPDATE	182	2026-04-13 14:06:47.431729+00
+1476	fuel_changed	evidencija_goriva	UPDATE	183	2026-04-13 14:06:47.431729+00
+1477	fuel_changed	evidencija_goriva	UPDATE	184	2026-04-13 14:06:47.431729+00
+1478	fuel_changed	evidencija_goriva	UPDATE	185	2026-04-13 14:06:47.431729+00
+1479	fuel_changed	evidencija_goriva	UPDATE	186	2026-04-13 14:06:47.431729+00
+1480	fuel_changed	evidencija_goriva	UPDATE	187	2026-04-13 14:06:47.431729+00
+1481	fuel_changed	evidencija_goriva	UPDATE	188	2026-04-13 14:06:47.431729+00
+1482	fuel_changed	evidencija_goriva	UPDATE	189	2026-04-13 14:06:47.431729+00
+1483	fuel_changed	evidencija_goriva	UPDATE	190	2026-04-13 14:06:47.431729+00
+1484	fuel_changed	evidencija_goriva	UPDATE	191	2026-04-13 14:06:47.431729+00
+1485	fuel_changed	evidencija_goriva	UPDATE	192	2026-04-13 14:06:47.431729+00
+1486	fuel_changed	evidencija_goriva	UPDATE	193	2026-04-13 14:06:47.431729+00
+1487	fuel_changed	evidencija_goriva	UPDATE	194	2026-04-13 14:06:47.431729+00
+1488	fuel_changed	evidencija_goriva	UPDATE	195	2026-04-13 14:06:47.431729+00
+1489	fuel_changed	evidencija_goriva	UPDATE	196	2026-04-13 14:06:47.431729+00
+1490	fuel_changed	evidencija_goriva	UPDATE	197	2026-04-13 14:06:47.431729+00
+1491	fuel_changed	evidencija_goriva	UPDATE	198	2026-04-13 14:06:47.431729+00
+1492	fuel_changed	evidencija_goriva	UPDATE	199	2026-04-13 14:06:47.431729+00
+1493	fuel_changed	evidencija_goriva	UPDATE	200	2026-04-13 14:06:47.431729+00
+1494	fuel_changed	evidencija_goriva	UPDATE	201	2026-04-13 14:06:47.431729+00
+1495	fuel_changed	evidencija_goriva	UPDATE	202	2026-04-13 14:06:47.431729+00
+1496	fuel_changed	evidencija_goriva	UPDATE	203	2026-04-13 14:06:47.431729+00
+1497	fuel_changed	evidencija_goriva	UPDATE	204	2026-04-13 14:06:47.431729+00
+1498	fuel_changed	evidencija_goriva	UPDATE	205	2026-04-13 14:06:47.431729+00
+1499	fuel_changed	evidencija_goriva	UPDATE	206	2026-04-13 14:06:47.431729+00
+1500	fuel_changed	evidencija_goriva	UPDATE	207	2026-04-13 14:06:47.431729+00
+1501	fuel_changed	evidencija_goriva	UPDATE	208	2026-04-13 14:06:47.431729+00
+1502	fuel_changed	evidencija_goriva	UPDATE	209	2026-04-13 14:06:47.431729+00
+1503	fuel_changed	evidencija_goriva	UPDATE	210	2026-04-13 14:06:47.431729+00
+1504	fuel_changed	evidencija_goriva	UPDATE	211	2026-04-13 14:06:47.431729+00
+1505	fuel_changed	evidencija_goriva	UPDATE	212	2026-04-13 14:06:47.431729+00
+1506	fuel_changed	evidencija_goriva	UPDATE	213	2026-04-13 14:06:47.431729+00
+1507	fuel_changed	evidencija_goriva	UPDATE	214	2026-04-13 14:06:47.431729+00
+1508	fuel_changed	evidencija_goriva	UPDATE	215	2026-04-13 14:06:47.431729+00
+1509	fuel_changed	evidencija_goriva	UPDATE	216	2026-04-13 14:06:47.431729+00
+1510	fuel_changed	evidencija_goriva	UPDATE	217	2026-04-13 14:06:47.431729+00
+1511	fuel_changed	evidencija_goriva	UPDATE	218	2026-04-13 14:06:47.431729+00
+1512	fuel_changed	evidencija_goriva	UPDATE	219	2026-04-13 14:06:47.431729+00
+1513	fuel_changed	evidencija_goriva	UPDATE	220	2026-04-13 14:06:47.431729+00
+1514	fuel_changed	evidencija_goriva	UPDATE	221	2026-04-13 14:06:47.431729+00
+1515	fuel_changed	evidencija_goriva	UPDATE	222	2026-04-13 14:06:47.431729+00
+1516	fuel_changed	evidencija_goriva	UPDATE	223	2026-04-13 14:06:47.431729+00
+1517	fuel_changed	evidencija_goriva	UPDATE	224	2026-04-13 14:06:47.431729+00
+1518	fuel_changed	evidencija_goriva	UPDATE	225	2026-04-13 14:06:47.431729+00
+1519	fuel_changed	evidencija_goriva	UPDATE	226	2026-04-13 14:06:47.431729+00
+1520	fuel_changed	evidencija_goriva	UPDATE	227	2026-04-13 14:06:47.431729+00
+1521	fuel_changed	evidencija_goriva	UPDATE	228	2026-04-13 14:06:47.431729+00
+1522	fuel_changed	evidencija_goriva	UPDATE	229	2026-04-13 14:06:47.431729+00
+1523	fuel_changed	evidencija_goriva	UPDATE	230	2026-04-13 14:06:47.431729+00
+1524	fuel_changed	evidencija_goriva	UPDATE	231	2026-04-13 14:06:47.431729+00
+1525	fuel_changed	evidencija_goriva	UPDATE	232	2026-04-13 14:06:47.431729+00
+1526	fuel_changed	evidencija_goriva	UPDATE	233	2026-04-13 14:06:47.431729+00
+1527	fuel_changed	evidencija_goriva	UPDATE	234	2026-04-13 14:06:47.431729+00
+1528	fuel_changed	evidencija_goriva	UPDATE	235	2026-04-13 14:06:47.431729+00
+1529	fuel_changed	evidencija_goriva	UPDATE	236	2026-04-13 14:06:47.431729+00
+1530	fuel_changed	evidencija_goriva	UPDATE	237	2026-04-13 14:06:47.431729+00
+1531	fuel_changed	evidencija_goriva	UPDATE	238	2026-04-13 14:06:47.431729+00
+1532	fuel_changed	evidencija_goriva	UPDATE	239	2026-04-13 14:06:47.431729+00
+1533	fuel_changed	evidencija_goriva	UPDATE	240	2026-04-13 14:06:47.431729+00
+1534	fuel_changed	evidencija_goriva	UPDATE	241	2026-04-13 14:06:47.431729+00
+1535	fuel_changed	evidencija_goriva	UPDATE	242	2026-04-13 14:06:47.431729+00
+1536	fuel_changed	evidencija_goriva	UPDATE	243	2026-04-13 14:06:47.431729+00
+1537	fuel_changed	evidencija_goriva	UPDATE	244	2026-04-13 14:06:47.431729+00
+1538	fuel_changed	evidencija_goriva	UPDATE	245	2026-04-13 14:06:47.431729+00
+1539	fuel_changed	evidencija_goriva	UPDATE	246	2026-04-13 14:06:47.431729+00
+1540	fuel_changed	evidencija_goriva	UPDATE	247	2026-04-13 14:06:47.431729+00
+1541	fuel_changed	evidencija_goriva	UPDATE	248	2026-04-13 14:06:47.431729+00
+1542	fuel_changed	evidencija_goriva	UPDATE	249	2026-04-13 14:06:47.431729+00
+1543	fuel_changed	evidencija_goriva	UPDATE	250	2026-04-13 14:06:47.431729+00
+1544	fuel_changed	evidencija_goriva	UPDATE	251	2026-04-13 14:06:47.431729+00
+1545	fuel_changed	evidencija_goriva	UPDATE	252	2026-04-13 14:06:47.431729+00
+1546	fuel_changed	evidencija_goriva	UPDATE	253	2026-04-13 14:06:47.431729+00
+1547	fuel_changed	evidencija_goriva	UPDATE	254	2026-04-13 14:06:47.431729+00
+1548	fuel_changed	evidencija_goriva	UPDATE	255	2026-04-13 14:06:47.431729+00
+1549	fuel_changed	evidencija_goriva	UPDATE	256	2026-04-13 14:06:47.431729+00
+1550	fuel_changed	evidencija_goriva	UPDATE	257	2026-04-13 14:06:47.431729+00
+1551	fuel_changed	evidencija_goriva	UPDATE	258	2026-04-13 14:06:47.431729+00
+1552	fuel_changed	evidencija_goriva	UPDATE	259	2026-04-13 14:06:47.431729+00
+1553	fuel_changed	evidencija_goriva	UPDATE	260	2026-04-13 14:06:47.431729+00
+1554	fuel_changed	evidencija_goriva	UPDATE	261	2026-04-13 14:06:47.431729+00
+1555	fuel_changed	evidencija_goriva	UPDATE	262	2026-04-13 14:06:47.431729+00
+1556	fuel_changed	evidencija_goriva	UPDATE	263	2026-04-13 14:06:47.431729+00
+1557	fuel_changed	evidencija_goriva	UPDATE	264	2026-04-13 14:06:47.431729+00
+1558	fuel_changed	evidencija_goriva	UPDATE	265	2026-04-13 14:06:47.431729+00
+1559	fuel_changed	evidencija_goriva	UPDATE	266	2026-04-13 14:06:47.431729+00
+1560	fuel_changed	evidencija_goriva	UPDATE	267	2026-04-13 14:06:47.431729+00
+1561	fuel_changed	evidencija_goriva	UPDATE	268	2026-04-13 14:06:47.431729+00
+1562	fuel_changed	evidencija_goriva	UPDATE	269	2026-04-13 14:06:47.431729+00
+1563	fuel_changed	evidencija_goriva	UPDATE	270	2026-04-13 14:06:47.431729+00
+1564	fuel_changed	evidencija_goriva	UPDATE	271	2026-04-13 14:06:47.431729+00
+1565	fuel_changed	evidencija_goriva	UPDATE	272	2026-04-13 14:06:47.431729+00
+1566	fuel_changed	evidencija_goriva	UPDATE	273	2026-04-13 14:06:47.431729+00
+1567	fuel_changed	evidencija_goriva	UPDATE	274	2026-04-13 14:06:47.431729+00
+1568	fuel_changed	evidencija_goriva	UPDATE	275	2026-04-13 14:06:47.431729+00
+1569	fuel_changed	evidencija_goriva	UPDATE	276	2026-04-13 14:06:47.431729+00
+1570	fuel_changed	evidencija_goriva	UPDATE	277	2026-04-13 14:06:47.431729+00
+1571	fuel_changed	evidencija_goriva	UPDATE	278	2026-04-13 14:06:47.431729+00
+1572	fuel_changed	evidencija_goriva	UPDATE	279	2026-04-13 14:06:47.431729+00
+1573	fuel_changed	evidencija_goriva	UPDATE	280	2026-04-13 14:06:47.431729+00
+1574	fuel_changed	evidencija_goriva	UPDATE	281	2026-04-13 14:06:47.431729+00
+1575	fuel_changed	evidencija_goriva	UPDATE	282	2026-04-13 14:06:47.431729+00
+1576	fuel_changed	evidencija_goriva	UPDATE	283	2026-04-13 14:06:47.431729+00
+1577	fuel_changed	evidencija_goriva	UPDATE	284	2026-04-13 14:06:47.431729+00
+1578	fuel_changed	evidencija_goriva	UPDATE	285	2026-04-13 14:06:47.431729+00
+1579	fuel_changed	evidencija_goriva	UPDATE	286	2026-04-13 14:06:47.431729+00
+1580	fuel_changed	evidencija_goriva	UPDATE	287	2026-04-13 14:06:47.431729+00
+1581	fuel_changed	evidencija_goriva	UPDATE	288	2026-04-13 14:06:47.431729+00
+1582	fuel_changed	evidencija_goriva	UPDATE	289	2026-04-13 14:06:47.431729+00
+1583	fuel_changed	evidencija_goriva	UPDATE	290	2026-04-13 14:06:47.431729+00
+1584	fuel_changed	evidencija_goriva	UPDATE	291	2026-04-13 14:06:47.431729+00
+1585	fuel_changed	evidencija_goriva	UPDATE	292	2026-04-13 14:06:47.431729+00
+1586	fuel_changed	evidencija_goriva	UPDATE	293	2026-04-13 14:06:47.431729+00
+1587	fuel_changed	evidencija_goriva	UPDATE	294	2026-04-13 14:06:47.431729+00
+1588	fuel_changed	evidencija_goriva	UPDATE	295	2026-04-13 14:06:47.431729+00
+1589	fuel_changed	evidencija_goriva	UPDATE	296	2026-04-13 14:06:47.431729+00
+1590	fuel_changed	evidencija_goriva	UPDATE	297	2026-04-13 14:06:47.431729+00
+1591	fuel_changed	evidencija_goriva	UPDATE	298	2026-04-13 14:06:47.431729+00
+1592	fuel_changed	evidencija_goriva	UPDATE	299	2026-04-13 14:06:47.431729+00
+1593	fuel_changed	evidencija_goriva	UPDATE	300	2026-04-13 14:06:47.431729+00
+1594	fuel_changed	evidencija_goriva	UPDATE	301	2026-04-13 14:06:47.431729+00
+1595	fuel_changed	evidencija_goriva	UPDATE	302	2026-04-13 14:06:47.431729+00
+1596	fuel_changed	evidencija_goriva	UPDATE	303	2026-04-13 14:06:47.431729+00
+1597	fuel_changed	evidencija_goriva	UPDATE	304	2026-04-13 14:06:47.431729+00
+1598	fuel_changed	evidencija_goriva	UPDATE	305	2026-04-13 14:06:47.431729+00
+1599	fuel_changed	evidencija_goriva	UPDATE	306	2026-04-13 14:06:47.431729+00
+1600	fuel_changed	evidencija_goriva	UPDATE	307	2026-04-13 14:06:47.431729+00
+1601	fuel_changed	evidencija_goriva	UPDATE	308	2026-04-13 14:06:47.431729+00
+1602	fuel_changed	evidencija_goriva	UPDATE	309	2026-04-13 14:06:47.431729+00
+1603	fuel_changed	evidencija_goriva	UPDATE	310	2026-04-13 14:06:47.431729+00
+1604	fuel_changed	evidencija_goriva	UPDATE	311	2026-04-13 14:06:47.431729+00
+1605	fuel_changed	evidencija_goriva	UPDATE	312	2026-04-13 14:06:47.431729+00
+1606	fuel_changed	evidencija_goriva	UPDATE	313	2026-04-13 14:06:47.431729+00
+1607	fuel_changed	evidencija_goriva	UPDATE	314	2026-04-13 14:06:47.431729+00
+1608	fuel_changed	evidencija_goriva	UPDATE	315	2026-04-13 14:06:47.431729+00
+1609	fuel_changed	evidencija_goriva	UPDATE	316	2026-04-13 14:06:47.431729+00
+1610	fuel_changed	evidencija_goriva	UPDATE	317	2026-04-13 14:06:47.431729+00
+1611	fuel_changed	evidencija_goriva	UPDATE	318	2026-04-13 14:06:47.431729+00
+1612	fuel_changed	evidencija_goriva	UPDATE	319	2026-04-13 14:06:47.431729+00
+1613	fuel_changed	evidencija_goriva	UPDATE	320	2026-04-13 14:06:47.431729+00
+1614	fuel_changed	evidencija_goriva	UPDATE	321	2026-04-13 14:06:47.431729+00
+1615	fuel_changed	evidencija_goriva	UPDATE	322	2026-04-13 14:06:47.431729+00
+1616	fuel_changed	evidencija_goriva	UPDATE	323	2026-04-13 14:06:47.431729+00
+1617	fuel_changed	evidencija_goriva	UPDATE	324	2026-04-13 14:06:47.431729+00
+1618	fuel_changed	evidencija_goriva	UPDATE	325	2026-04-13 14:06:47.431729+00
+1619	fuel_changed	evidencija_goriva	UPDATE	326	2026-04-13 14:06:47.431729+00
+1620	fuel_changed	evidencija_goriva	UPDATE	327	2026-04-13 14:06:47.431729+00
+1621	fuel_changed	evidencija_goriva	UPDATE	328	2026-04-13 14:06:47.431729+00
+1622	fuel_changed	evidencija_goriva	UPDATE	329	2026-04-13 14:06:47.431729+00
+1623	fuel_changed	evidencija_goriva	UPDATE	330	2026-04-13 14:06:47.431729+00
+1624	fuel_changed	evidencija_goriva	UPDATE	331	2026-04-13 14:06:47.431729+00
+1625	fuel_changed	evidencija_goriva	UPDATE	332	2026-04-13 14:06:47.431729+00
+1626	fuel_changed	evidencija_goriva	UPDATE	333	2026-04-13 14:06:47.431729+00
+1627	fuel_changed	evidencija_goriva	UPDATE	334	2026-04-13 14:06:47.431729+00
+1628	fuel_changed	evidencija_goriva	UPDATE	335	2026-04-13 14:06:47.431729+00
+1629	fuel_changed	evidencija_goriva	UPDATE	336	2026-04-13 14:06:47.431729+00
+1630	fuel_changed	evidencija_goriva	UPDATE	337	2026-04-13 14:06:47.431729+00
+1631	fuel_changed	evidencija_goriva	UPDATE	338	2026-04-13 14:06:47.431729+00
+1632	fuel_changed	evidencija_goriva	UPDATE	339	2026-04-13 14:06:47.431729+00
+1633	fuel_changed	evidencija_goriva	UPDATE	340	2026-04-13 14:06:47.431729+00
+1634	fuel_changed	evidencija_goriva	UPDATE	341	2026-04-13 14:06:47.431729+00
+1635	fuel_changed	evidencija_goriva	UPDATE	342	2026-04-13 14:06:47.431729+00
+1636	fuel_changed	evidencija_goriva	UPDATE	343	2026-04-13 14:06:47.431729+00
+1637	fuel_changed	evidencija_goriva	UPDATE	344	2026-04-13 14:06:47.431729+00
+1638	fuel_changed	evidencija_goriva	UPDATE	345	2026-04-13 14:06:47.431729+00
+1639	fuel_changed	evidencija_goriva	UPDATE	346	2026-04-13 14:06:47.431729+00
+1640	fuel_changed	evidencija_goriva	UPDATE	347	2026-04-13 14:06:47.431729+00
+1641	fuel_changed	evidencija_goriva	UPDATE	348	2026-04-13 14:06:47.431729+00
+1642	fuel_changed	evidencija_goriva	UPDATE	349	2026-04-13 14:06:47.431729+00
+1643	fuel_changed	evidencija_goriva	UPDATE	350	2026-04-13 14:06:47.431729+00
+1644	fuel_changed	evidencija_goriva	UPDATE	351	2026-04-13 14:06:47.431729+00
+1645	fuel_changed	evidencija_goriva	UPDATE	352	2026-04-13 14:06:47.431729+00
+1646	fuel_changed	evidencija_goriva	UPDATE	353	2026-04-13 14:06:47.431729+00
+1647	fuel_changed	evidencija_goriva	UPDATE	354	2026-04-13 14:06:47.431729+00
+1648	fuel_changed	evidencija_goriva	UPDATE	355	2026-04-13 14:06:47.431729+00
+1649	fuel_changed	evidencija_goriva	UPDATE	356	2026-04-13 14:06:47.431729+00
+1650	fuel_changed	evidencija_goriva	UPDATE	357	2026-04-13 14:06:47.431729+00
+1651	fuel_changed	evidencija_goriva	UPDATE	358	2026-04-13 14:06:47.431729+00
+1652	fuel_changed	evidencija_goriva	UPDATE	359	2026-04-13 14:06:47.431729+00
+1653	fuel_changed	evidencija_goriva	UPDATE	360	2026-04-13 14:06:47.431729+00
+1654	fuel_changed	evidencija_goriva	UPDATE	361	2026-04-13 14:06:47.431729+00
+1655	fuel_changed	evidencija_goriva	UPDATE	362	2026-04-13 14:06:47.431729+00
+1656	fuel_changed	evidencija_goriva	UPDATE	363	2026-04-13 14:06:47.431729+00
+1657	fuel_changed	evidencija_goriva	UPDATE	364	2026-04-13 14:06:47.431729+00
+1658	fuel_changed	evidencija_goriva	UPDATE	365	2026-04-13 14:06:47.431729+00
+1659	fuel_changed	evidencija_goriva	UPDATE	366	2026-04-13 14:06:47.431729+00
+1660	fuel_changed	evidencija_goriva	UPDATE	367	2026-04-13 14:06:47.431729+00
+1661	fuel_changed	evidencija_goriva	UPDATE	368	2026-04-13 14:06:47.431729+00
+1662	fuel_changed	evidencija_goriva	UPDATE	369	2026-04-13 14:06:47.431729+00
+1663	fuel_changed	evidencija_goriva	UPDATE	370	2026-04-13 14:06:47.431729+00
+1664	fuel_changed	evidencija_goriva	UPDATE	371	2026-04-13 14:06:47.431729+00
+1665	fuel_changed	evidencija_goriva	UPDATE	372	2026-04-13 14:06:47.431729+00
+1666	fuel_changed	evidencija_goriva	UPDATE	373	2026-04-13 14:06:47.431729+00
+1667	fuel_changed	evidencija_goriva	UPDATE	374	2026-04-13 14:06:47.431729+00
+1668	fuel_changed	evidencija_goriva	UPDATE	375	2026-04-13 14:06:47.431729+00
+1669	fuel_changed	evidencija_goriva	UPDATE	376	2026-04-13 14:06:47.431729+00
+1670	fuel_changed	evidencija_goriva	UPDATE	377	2026-04-13 14:06:47.431729+00
+1671	fuel_changed	evidencija_goriva	UPDATE	378	2026-04-13 14:06:47.431729+00
+1672	fuel_changed	evidencija_goriva	UPDATE	379	2026-04-13 14:06:47.431729+00
+1673	fuel_changed	evidencija_goriva	UPDATE	380	2026-04-13 14:06:47.431729+00
+1674	fuel_changed	evidencija_goriva	UPDATE	381	2026-04-13 14:06:47.431729+00
+1675	fuel_changed	evidencija_goriva	UPDATE	382	2026-04-13 14:06:47.431729+00
+1676	fuel_changed	evidencija_goriva	UPDATE	383	2026-04-13 14:06:47.431729+00
+1677	fuel_changed	evidencija_goriva	UPDATE	384	2026-04-13 14:06:47.431729+00
+1678	fuel_changed	evidencija_goriva	UPDATE	385	2026-04-13 14:06:47.431729+00
+1679	fuel_changed	evidencija_goriva	UPDATE	386	2026-04-13 14:06:47.431729+00
+1680	fuel_changed	evidencija_goriva	UPDATE	387	2026-04-13 14:06:47.431729+00
+1681	fuel_changed	evidencija_goriva	UPDATE	388	2026-04-13 14:06:47.431729+00
+1682	fuel_changed	evidencija_goriva	UPDATE	389	2026-04-13 14:06:47.431729+00
+1683	fuel_changed	evidencija_goriva	UPDATE	390	2026-04-13 14:06:47.431729+00
+1684	fuel_changed	evidencija_goriva	UPDATE	391	2026-04-13 14:06:47.431729+00
+1685	fuel_changed	evidencija_goriva	UPDATE	392	2026-04-13 14:06:47.431729+00
+1686	fuel_changed	evidencija_goriva	UPDATE	393	2026-04-13 14:06:47.431729+00
+1687	fuel_changed	evidencija_goriva	UPDATE	394	2026-04-13 14:06:47.431729+00
+1688	fuel_changed	evidencija_goriva	UPDATE	395	2026-04-13 14:06:47.431729+00
+1689	fuel_changed	evidencija_goriva	UPDATE	396	2026-04-13 14:06:47.431729+00
+1690	fuel_changed	evidencija_goriva	UPDATE	397	2026-04-13 14:06:47.431729+00
+1691	fuel_changed	evidencija_goriva	UPDATE	398	2026-04-13 14:06:47.431729+00
+1692	fuel_changed	evidencija_goriva	UPDATE	399	2026-04-13 14:06:47.431729+00
+1693	fuel_changed	evidencija_goriva	UPDATE	400	2026-04-13 14:06:47.431729+00
+1694	fuel_changed	evidencija_goriva	UPDATE	401	2026-04-13 14:06:47.431729+00
+1695	fuel_changed	evidencija_goriva	UPDATE	402	2026-04-13 14:06:47.431729+00
+1696	fuel_changed	evidencija_goriva	UPDATE	403	2026-04-13 14:06:47.431729+00
+1697	fuel_changed	evidencija_goriva	UPDATE	404	2026-04-13 14:06:47.431729+00
+1698	fuel_changed	evidencija_goriva	UPDATE	405	2026-04-13 14:06:47.431729+00
+1699	fuel_changed	evidencija_goriva	UPDATE	406	2026-04-13 14:06:47.431729+00
+1700	fuel_changed	evidencija_goriva	UPDATE	407	2026-04-13 14:06:47.431729+00
+1701	fuel_changed	evidencija_goriva	UPDATE	408	2026-04-13 14:06:47.431729+00
+1702	fuel_changed	evidencija_goriva	UPDATE	409	2026-04-13 14:06:47.431729+00
+1703	fuel_changed	evidencija_goriva	UPDATE	410	2026-04-13 14:06:47.431729+00
+1704	fuel_changed	evidencija_goriva	UPDATE	411	2026-04-13 14:06:47.431729+00
+1705	fuel_changed	evidencija_goriva	UPDATE	412	2026-04-13 14:06:47.431729+00
+1706	fuel_changed	evidencija_goriva	UPDATE	413	2026-04-13 14:06:47.431729+00
+1707	fuel_changed	evidencija_goriva	UPDATE	414	2026-04-13 14:06:47.431729+00
+1708	fuel_changed	evidencija_goriva	UPDATE	415	2026-04-13 14:06:47.431729+00
+1709	fuel_changed	evidencija_goriva	UPDATE	416	2026-04-13 14:06:47.431729+00
+1710	fuel_changed	evidencija_goriva	UPDATE	417	2026-04-13 14:06:47.431729+00
+1711	fuel_changed	evidencija_goriva	UPDATE	418	2026-04-13 14:06:47.431729+00
+1712	fuel_changed	evidencija_goriva	UPDATE	419	2026-04-13 14:06:47.431729+00
+1713	fuel_changed	evidencija_goriva	UPDATE	420	2026-04-13 14:06:47.431729+00
+1714	fuel_changed	evidencija_goriva	UPDATE	421	2026-04-13 14:06:47.431729+00
+1715	fuel_changed	evidencija_goriva	UPDATE	422	2026-04-13 14:06:47.431729+00
+1716	fuel_changed	evidencija_goriva	UPDATE	423	2026-04-13 14:06:47.431729+00
+1717	fuel_changed	evidencija_goriva	UPDATE	424	2026-04-13 14:06:47.431729+00
+1718	fuel_changed	evidencija_goriva	UPDATE	425	2026-04-13 14:06:47.431729+00
+1719	fuel_changed	evidencija_goriva	UPDATE	426	2026-04-13 14:06:47.431729+00
+1720	fuel_changed	evidencija_goriva	UPDATE	427	2026-04-13 14:06:47.431729+00
+1721	fuel_changed	evidencija_goriva	UPDATE	428	2026-04-13 14:06:47.431729+00
+1722	fuel_changed	evidencija_goriva	UPDATE	429	2026-04-13 14:06:47.431729+00
+1723	fuel_changed	evidencija_goriva	UPDATE	430	2026-04-13 14:06:47.431729+00
+1724	fuel_changed	evidencija_goriva	UPDATE	431	2026-04-13 14:06:47.431729+00
+1725	fuel_changed	evidencija_goriva	UPDATE	432	2026-04-13 14:06:47.431729+00
+1726	fuel_changed	evidencija_goriva	UPDATE	433	2026-04-13 14:06:47.431729+00
+1727	fuel_changed	evidencija_goriva	UPDATE	434	2026-04-13 14:06:47.431729+00
+1728	fuel_changed	evidencija_goriva	UPDATE	435	2026-04-13 14:06:47.431729+00
+1729	fuel_changed	evidencija_goriva	UPDATE	436	2026-04-13 14:06:47.431729+00
+1730	fuel_changed	evidencija_goriva	UPDATE	437	2026-04-13 14:06:47.431729+00
+1731	fuel_changed	evidencija_goriva	UPDATE	438	2026-04-13 14:06:47.431729+00
+1732	fuel_changed	evidencija_goriva	UPDATE	439	2026-04-13 14:06:47.431729+00
+1733	fuel_changed	evidencija_goriva	UPDATE	440	2026-04-13 14:06:47.431729+00
+1734	fuel_changed	evidencija_goriva	UPDATE	441	2026-04-13 14:06:47.431729+00
+1735	fuel_changed	evidencija_goriva	UPDATE	442	2026-04-13 14:06:47.431729+00
+1736	fuel_changed	evidencija_goriva	UPDATE	443	2026-04-13 14:06:47.431729+00
+1737	fuel_changed	evidencija_goriva	UPDATE	444	2026-04-13 14:06:47.431729+00
+1738	fuel_changed	evidencija_goriva	UPDATE	445	2026-04-13 14:06:47.431729+00
+1739	fuel_changed	evidencija_goriva	UPDATE	446	2026-04-13 14:06:47.431729+00
+1740	fuel_changed	evidencija_goriva	UPDATE	447	2026-04-13 14:06:47.431729+00
+1741	fuel_changed	evidencija_goriva	UPDATE	448	2026-04-13 14:06:47.431729+00
+1742	service_status_changed	servisne_intervencije	UPDATE	50	2026-05-05 13:26:56.813844+00
 \.
 
 
 --
--- TOC entry 3996 (class 0 OID 20543)
--- Dependencies: 354
+-- TOC entry 4014 (class 0 OID 20543)
+-- Dependencies: 356
 -- Data for Name: drzave; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -2469,8 +2490,8 @@ COPY public.drzave (id, naziv) FROM stdin;
 
 
 --
--- TOC entry 4026 (class 0 OID 20734)
--- Dependencies: 384
+-- TOC entry 4044 (class 0 OID 20734)
+-- Dependencies: 386
 -- Data for Name: evidencija_goriva; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -2879,8 +2900,8 @@ COPY public.evidencija_goriva (id, zaduzenje_id, datum, litraza, cijena_po_litri
 
 
 --
--- TOC entry 4028 (class 0 OID 20747)
--- Dependencies: 386
+-- TOC entry 4046 (class 0 OID 20747)
+-- Dependencies: 388
 -- Data for Name: evidencija_guma; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -3049,8 +3070,8 @@ COPY public.evidencija_guma (id, vozilo_id, sezona, proizvodjac, datum_kupovine,
 
 
 --
--- TOC entry 4012 (class 0 OID 20601)
--- Dependencies: 370
+-- TOC entry 4030 (class 0 OID 20601)
+-- Dependencies: 372
 -- Data for Name: kategorije_kvarova; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -3068,8 +3089,8 @@ COPY public.kategorije_kvarova (id, naziv) FROM stdin;
 
 
 --
--- TOC entry 4006 (class 0 OID 20583)
--- Dependencies: 364
+-- TOC entry 4024 (class 0 OID 20583)
+-- Dependencies: 366
 -- Data for Name: kategorije_vozila; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -3081,8 +3102,8 @@ COPY public.kategorije_vozila (id, naziv) FROM stdin;
 
 
 --
--- TOC entry 4000 (class 0 OID 20560)
--- Dependencies: 358
+-- TOC entry 4018 (class 0 OID 20560)
+-- Dependencies: 360
 -- Data for Name: mjesta; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -3229,8 +3250,8 @@ COPY public.mjesta (id, naziv, zupanija_id) FROM stdin;
 
 
 --
--- TOC entry 4014 (class 0 OID 20607)
--- Dependencies: 372
+-- TOC entry 4032 (class 0 OID 20607)
+-- Dependencies: 374
 -- Data for Name: modeli; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -3249,8 +3270,8 @@ COPY public.modeli (id, naziv, proizvodjac_id, kategorija_id, tip_goriva_id, kap
 
 
 --
--- TOC entry 4004 (class 0 OID 20577)
--- Dependencies: 362
+-- TOC entry 4022 (class 0 OID 20577)
+-- Dependencies: 364
 -- Data for Name: proizvodjaci; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -3265,8 +3286,8 @@ COPY public.proizvodjaci (id, naziv) FROM stdin;
 
 
 --
--- TOC entry 4022 (class 0 OID 20694)
--- Dependencies: 380
+-- TOC entry 4040 (class 0 OID 20694)
+-- Dependencies: 382
 -- Data for Name: registracije; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -3431,422 +3452,423 @@ COPY public.registracije (id, vozilo_id, registracijska_oznaka, datum_registraci
 210	90	N40-V-240	2023-09-21	2024-09-20	230.00
 211	90	N40-V-240	2024-09-20	2025-09-20	235.00
 212	90	N40-V-240	2025-09-20	2026-09-20	240.00
+213	52	B02-J-202	2026-05-07	2026-05-16	50.00
 \.
 
 
 --
--- TOC entry 4024 (class 0 OID 20705)
--- Dependencies: 382
+-- TOC entry 4042 (class 0 OID 20705)
+-- Dependencies: 384
 -- Data for Name: servisne_intervencije; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY public.servisne_intervencije (id, vozilo_id, datum_pocetka, datum_zavrsetka, km_u_tom_trenutku, cijena, opis, kategorija_id, zaposlenik_id, hitnost, status_prijave, attachment_url) FROM stdin;
-50	51	2026-01-17 09:20:00	2026-05-05 13:26:56.182	62280	250.00	Vozilo je u obradi zbog aktivnog kvara na pogonskom sustavu.	4	35	kriticno	zatvoreno	\N
-41	51	2025-10-01 09:20:00	2025-10-02 15:20:00	57600	160.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N
-42	51	2025-10-13 09:20:00	2025-10-14 15:20:00	58120	197.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	srednje	zatvoreno	\N
-43	51	2025-10-25 09:20:00	2025-10-26 15:20:00	58640	234.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	nisko	zatvoreno	\N
-44	51	2025-11-06 09:20:00	2025-11-07 15:20:00	59160	451.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N
-45	51	2025-11-18 09:20:00	2025-11-19 15:20:00	59680	308.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	srednje	zatvoreno	\N
-46	51	2025-11-30 09:20:00	2025-12-01 15:20:00	60200	345.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	nisko	zatvoreno	\N
-47	51	2025-12-12 09:20:00	2025-12-13 15:20:00	60720	382.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	32	srednje	zatvoreno	\N
-48	51	2025-12-24 09:20:00	2025-12-25 15:20:00	61240	599.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	33	visoko	zatvoreno	\N
-49	51	2026-01-05 09:20:00	2026-01-06 15:20:00	61760	456.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	nisko	zatvoreno	\N
-51	52	2025-10-03 09:20:00	2025-10-04 15:20:00	60400	163.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N
-52	52	2025-10-15 09:20:00	2025-10-16 15:20:00	60920	200.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	srednje	zatvoreno	\N
-53	52	2025-10-27 09:20:00	2025-10-28 15:20:00	61440	237.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	nisko	zatvoreno	\N
-54	52	2025-11-08 09:20:00	2025-11-09 15:20:00	61960	454.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N
-55	52	2025-11-20 09:20:00	2025-11-21 15:20:00	62480	311.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	srednje	zatvoreno	\N
-56	52	2025-12-02 09:20:00	2025-12-03 15:20:00	63000	348.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	nisko	zatvoreno	\N
-57	52	2025-12-14 09:20:00	2025-12-15 15:20:00	63520	385.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	35	srednje	zatvoreno	\N
-58	52	2025-12-26 09:20:00	2025-12-27 15:20:00	64040	602.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	36	visoko	zatvoreno	\N
-59	52	2026-01-07 09:20:00	2026-01-08 15:20:00	64560	459.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	nisko	zatvoreno	\N
-60	52	2026-01-19 09:20:00	\N	65080	\N	Vozilo je u obradi zbog aktivnog kvara na pogonskom sustavu.	5	38	kriticno	u_obradi	\N
-61	53	2025-10-05 09:20:00	2025-10-06 15:20:00	63200	166.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N
-62	53	2025-10-17 09:20:00	2025-10-18 15:20:00	63720	203.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	srednje	zatvoreno	\N
-63	53	2025-10-29 09:20:00	2025-10-30 15:20:00	64240	240.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	nisko	zatvoreno	\N
-64	53	2025-11-10 09:20:00	2025-11-11 15:20:00	64760	457.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N
-65	53	2025-11-22 09:20:00	2025-11-23 15:20:00	65280	314.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	srednje	zatvoreno	\N
-66	53	2025-12-04 09:20:00	2025-12-05 15:20:00	65800	351.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	nisko	zatvoreno	\N
-67	53	2025-12-16 09:20:00	2025-12-17 15:20:00	66320	388.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	38	srednje	zatvoreno	\N
-68	53	2025-12-28 09:20:00	2025-12-29 15:20:00	66840	605.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	23	visoko	zatvoreno	\N
-69	53	2026-01-09 09:20:00	2026-01-10 15:20:00	67360	462.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	nisko	zatvoreno	\N
-70	53	2026-01-21 09:20:00	\N	67880	\N	Vozilo je u obradi zbog aktivnog kvara na pogonskom sustavu.	6	25	kriticno	u_obradi	\N
-71	54	2025-10-07 09:20:00	2025-10-08 15:20:00	66000	169.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N
-72	54	2025-10-19 09:20:00	2025-10-20 15:20:00	66520	206.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	srednje	zatvoreno	\N
-73	54	2025-10-31 09:20:00	2025-11-01 15:20:00	67040	243.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	nisko	zatvoreno	\N
-74	54	2025-11-12 09:20:00	2025-11-13 15:20:00	67560	460.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N
-75	54	2025-11-24 09:20:00	2025-11-25 15:20:00	68080	317.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	srednje	zatvoreno	\N
-76	54	2025-12-06 09:20:00	2025-12-07 15:20:00	68600	354.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	nisko	zatvoreno	\N
-77	54	2025-12-18 09:20:00	2025-12-19 15:20:00	69120	391.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	25	srednje	zatvoreno	\N
-78	54	2025-12-30 09:20:00	2025-12-31 15:20:00	69640	608.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	26	visoko	zatvoreno	\N
-79	54	2026-01-11 09:20:00	2026-01-12 15:20:00	70160	465.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	nisko	zatvoreno	\N
-80	54	2026-01-23 09:20:00	\N	70680	\N	Vozilo je u obradi zbog aktivnog kvara na pogonskom sustavu.	7	28	kriticno	u_obradi	\N
-81	55	2025-10-09 09:20:00	2025-10-10 15:20:00	68800	172.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	srednje	zatvoreno	\N
-82	55	2025-10-21 09:20:00	2025-10-22 15:20:00	69320	209.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	srednje	zatvoreno	\N
-83	55	2025-11-02 09:20:00	2025-11-03 15:20:00	69840	246.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	24	nisko	zatvoreno	\N
-84	55	2025-11-14 09:20:00	2025-11-15 15:20:00	70360	463.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	25	visoko	zatvoreno	\N
-85	55	2025-11-26 09:20:00	2025-11-27 15:20:00	70880	320.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N
-86	55	2025-12-08 09:20:00	2025-12-09 15:20:00	71400	357.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	nisko	zatvoreno	\N
-87	55	2025-12-20 09:20:00	2025-12-21 15:20:00	71920	394.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	srednje	zatvoreno	\N
-88	55	2026-01-01 09:20:00	2026-01-02 15:20:00	72440	611.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N
-89	55	2026-01-13 09:20:00	2026-01-14 15:20:00	72960	468.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	nisko	zatvoreno	\N
-90	55	2026-01-25 09:20:00	\N	73480	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	8	31	visoko	novo	\N
-91	56	2025-10-11 09:20:00	2025-10-12 15:20:00	71600	175.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	srednje	zatvoreno	\N
-92	56	2025-10-23 09:20:00	2025-10-24 15:20:00	72120	212.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	srednje	zatvoreno	\N
-93	56	2025-11-04 09:20:00	2025-11-05 15:20:00	72640	249.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	27	nisko	zatvoreno	\N
-94	56	2025-11-16 09:20:00	2025-11-17 15:20:00	73160	466.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	28	visoko	zatvoreno	\N
-95	56	2025-11-28 09:20:00	2025-11-29 15:20:00	73680	323.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N
-96	56	2025-12-10 09:20:00	2025-12-11 15:20:00	74200	360.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	nisko	zatvoreno	\N
-97	56	2025-12-22 09:20:00	2025-12-23 15:20:00	74720	397.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	srednje	zatvoreno	\N
-98	56	2026-01-03 09:20:00	2026-01-04 15:20:00	75240	614.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N
-99	56	2026-01-15 09:20:00	2026-01-16 15:20:00	75760	471.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	nisko	zatvoreno	\N
-100	56	2026-01-27 09:20:00	\N	76280	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	1	34	visoko	novo	\N
-101	57	2025-10-13 09:20:00	2025-10-14 15:20:00	74400	178.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	srednje	zatvoreno	\N
-102	57	2025-10-25 09:20:00	2025-10-26 15:20:00	74920	215.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	srednje	zatvoreno	\N
-103	57	2025-11-06 09:20:00	2025-11-07 15:20:00	75440	252.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	30	nisko	zatvoreno	\N
-104	57	2025-11-18 09:20:00	2025-11-19 15:20:00	75960	469.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	31	visoko	zatvoreno	\N
-105	57	2025-11-30 09:20:00	2025-12-01 15:20:00	76480	326.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N
-106	57	2025-12-12 09:20:00	2025-12-13 15:20:00	77000	363.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	nisko	zatvoreno	\N
-107	57	2025-12-24 09:20:00	2025-12-25 15:20:00	77520	400.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	srednje	zatvoreno	\N
-108	57	2026-01-05 09:20:00	2026-01-06 15:20:00	78040	617.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N
-109	57	2026-01-17 09:20:00	2026-01-18 15:20:00	78560	474.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	nisko	zatvoreno	\N
-110	57	2026-01-29 09:20:00	\N	79080	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	2	37	visoko	novo	\N
-111	58	2025-10-15 09:20:00	2025-10-16 15:20:00	77200	181.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	srednje	zatvoreno	\N
-112	58	2025-10-27 09:20:00	2025-10-28 15:20:00	77720	218.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	srednje	zatvoreno	\N
-113	58	2025-11-08 09:20:00	2025-11-09 15:20:00	78240	255.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	33	nisko	zatvoreno	\N
-114	58	2025-11-20 09:20:00	2025-11-21 15:20:00	78760	472.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	34	visoko	zatvoreno	\N
-115	58	2025-12-02 09:20:00	2025-12-03 15:20:00	79280	329.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N
-116	58	2025-12-14 09:20:00	2025-12-15 15:20:00	79800	366.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	nisko	zatvoreno	\N
-117	58	2025-12-26 09:20:00	2025-12-27 15:20:00	80320	403.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	srednje	zatvoreno	\N
-118	58	2026-01-07 09:20:00	2026-01-08 15:20:00	80840	620.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N
-119	58	2026-01-19 09:20:00	2026-01-20 15:20:00	81360	477.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	nisko	zatvoreno	\N
-120	58	2026-01-31 09:20:00	\N	81880	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	3	24	visoko	novo	\N
-121	59	2025-10-17 09:20:00	2025-10-18 15:20:00	80000	184.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	srednje	zatvoreno	\N
-122	59	2025-10-29 09:20:00	2025-10-30 15:20:00	80520	221.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	srednje	zatvoreno	\N
-123	59	2025-11-10 09:20:00	2025-11-11 15:20:00	81040	258.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	36	nisko	zatvoreno	\N
-124	59	2025-11-22 09:20:00	2025-11-23 15:20:00	81560	475.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	37	visoko	zatvoreno	\N
-125	59	2025-12-04 09:20:00	2025-12-05 15:20:00	82080	332.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	srednje	zatvoreno	\N
-126	59	2025-12-16 09:20:00	2025-12-17 15:20:00	82600	369.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	nisko	zatvoreno	\N
-127	59	2025-12-28 09:20:00	2025-12-29 15:20:00	83120	406.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	24	srednje	zatvoreno	\N
-128	59	2026-01-09 09:20:00	2026-01-10 15:20:00	83640	623.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	25	visoko	zatvoreno	\N
-129	59	2026-01-21 09:20:00	2026-01-22 15:20:00	84160	480.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	nisko	zatvoreno	\N
-130	59	2026-02-02 09:20:00	\N	84680	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	4	27	visoko	novo	\N
-131	60	2025-10-19 09:20:00	2025-10-20 15:20:00	82800	187.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	srednje	zatvoreno	\N
-132	60	2025-10-31 09:20:00	2025-11-01 15:20:00	83320	224.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	srednje	zatvoreno	\N
-133	60	2025-11-12 09:20:00	2025-11-13 15:20:00	83840	261.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	23	nisko	zatvoreno	\N
-134	60	2025-11-24 09:20:00	2025-11-25 15:20:00	84360	478.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	24	visoko	zatvoreno	\N
-135	60	2025-12-06 09:20:00	2025-12-07 15:20:00	84880	335.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	srednje	zatvoreno	\N
-136	60	2025-12-18 09:20:00	2025-12-19 15:20:00	85400	372.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	nisko	zatvoreno	\N
-137	60	2025-12-30 09:20:00	2025-12-31 15:20:00	85920	409.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	27	srednje	zatvoreno	\N
-138	60	2026-01-11 09:20:00	2026-01-12 15:20:00	86440	626.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	28	visoko	zatvoreno	\N
-139	60	2026-01-23 09:20:00	2026-01-24 15:20:00	86960	483.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	nisko	zatvoreno	\N
-140	60	2026-02-04 09:20:00	\N	87480	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	5	30	visoko	novo	\N
-141	61	2025-10-21 09:20:00	2025-10-22 15:20:00	85600	190.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	srednje	zatvoreno	\N
-142	61	2025-11-02 09:20:00	2025-11-03 15:20:00	86120	227.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	srednje	zatvoreno	\N
-143	61	2025-11-14 09:20:00	2025-11-15 15:20:00	86640	264.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	26	nisko	zatvoreno	\N
-144	61	2025-11-26 09:20:00	2025-11-27 15:20:00	87160	481.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	27	visoko	zatvoreno	\N
-145	61	2025-12-08 09:20:00	2025-12-09 15:20:00	87680	338.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	srednje	zatvoreno	\N
-146	61	2025-12-20 09:20:00	2025-12-21 15:20:00	88200	375.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	nisko	zatvoreno	\N
-147	61	2026-01-01 09:20:00	2026-01-02 15:20:00	88720	412.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	30	srednje	zatvoreno	\N
-148	61	2026-01-13 09:20:00	2026-01-14 15:20:00	89240	629.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	31	visoko	zatvoreno	\N
-149	61	2026-01-25 09:20:00	2026-01-26 15:20:00	89760	486.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	nisko	zatvoreno	\N
-150	61	2026-02-06 09:20:00	2026-02-07 15:20:00	90280	523.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	srednje	zatvoreno	\N
-151	62	2025-10-23 09:20:00	2025-10-24 15:20:00	88400	193.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	srednje	zatvoreno	\N
-152	62	2025-11-04 09:20:00	2025-11-05 15:20:00	88920	230.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	srednje	zatvoreno	\N
-153	62	2025-11-16 09:20:00	2025-11-17 15:20:00	89440	267.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	29	nisko	zatvoreno	\N
-154	62	2025-11-28 09:20:00	2025-11-29 15:20:00	89960	484.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	30	visoko	zatvoreno	\N
-155	62	2025-12-10 09:20:00	2025-12-11 15:20:00	90480	341.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	srednje	zatvoreno	\N
-156	62	2025-12-22 09:20:00	2025-12-23 15:20:00	91000	378.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	nisko	zatvoreno	\N
-157	62	2026-01-03 09:20:00	2026-01-04 15:20:00	91520	415.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	33	srednje	zatvoreno	\N
-158	62	2026-01-15 09:20:00	2026-01-16 15:20:00	92040	632.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	34	visoko	zatvoreno	\N
-159	62	2026-01-27 09:20:00	2026-01-28 15:20:00	92560	489.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	nisko	zatvoreno	\N
-160	62	2026-02-08 09:20:00	2026-02-09 15:20:00	93080	526.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	srednje	zatvoreno	\N
-161	63	2025-10-25 09:20:00	2025-10-26 15:20:00	91200	196.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	srednje	zatvoreno	\N
-162	63	2025-11-06 09:20:00	2025-11-07 15:20:00	91720	233.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	srednje	zatvoreno	\N
-163	63	2025-11-18 09:20:00	2025-11-19 15:20:00	92240	270.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	32	nisko	zatvoreno	\N
-164	63	2025-11-30 09:20:00	2025-12-01 15:20:00	92760	487.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	33	visoko	zatvoreno	\N
-165	63	2025-12-12 09:20:00	2025-12-13 15:20:00	93280	344.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	srednje	zatvoreno	\N
-166	63	2025-12-24 09:20:00	2025-12-25 15:20:00	93800	381.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	nisko	zatvoreno	\N
-167	63	2026-01-05 09:20:00	2026-01-06 15:20:00	94320	418.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	36	srednje	zatvoreno	\N
-168	63	2026-01-17 09:20:00	2026-01-18 15:20:00	94840	635.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	37	visoko	zatvoreno	\N
-169	63	2026-01-29 09:20:00	2026-01-30 15:20:00	95360	492.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	nisko	zatvoreno	\N
-170	63	2026-02-10 09:20:00	2026-02-11 15:20:00	95880	529.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	srednje	zatvoreno	\N
-171	64	2025-10-27 09:20:00	2025-10-28 15:20:00	94000	199.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	srednje	zatvoreno	\N
-172	64	2025-11-08 09:20:00	2025-11-09 15:20:00	94520	236.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	srednje	zatvoreno	\N
-173	64	2025-11-20 09:20:00	2025-11-21 15:20:00	95040	273.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	35	nisko	zatvoreno	\N
-174	64	2025-12-02 09:20:00	2025-12-03 15:20:00	95560	490.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	36	visoko	zatvoreno	\N
-175	64	2025-12-14 09:20:00	2025-12-15 15:20:00	96080	347.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	srednje	zatvoreno	\N
-176	64	2025-12-26 09:20:00	2025-12-27 15:20:00	96600	384.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	nisko	zatvoreno	\N
-177	64	2026-01-07 09:20:00	2026-01-08 15:20:00	97120	421.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	23	srednje	zatvoreno	\N
-178	64	2026-01-19 09:20:00	2026-01-20 15:20:00	97640	638.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	24	visoko	zatvoreno	\N
-179	64	2026-01-31 09:20:00	2026-02-01 15:20:00	98160	495.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	nisko	zatvoreno	\N
-180	64	2026-02-12 09:20:00	2026-02-13 15:20:00	98680	532.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	srednje	zatvoreno	\N
-181	65	2025-10-29 09:20:00	2025-10-30 15:20:00	96800	202.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	srednje	zatvoreno	\N
-182	65	2025-11-10 09:20:00	2025-11-11 15:20:00	97320	239.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	srednje	zatvoreno	\N
-183	65	2025-11-22 09:20:00	2025-11-23 15:20:00	97840	276.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	38	nisko	zatvoreno	\N
-184	65	2025-12-04 09:20:00	2025-12-05 15:20:00	98360	493.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	23	visoko	zatvoreno	\N
-185	65	2025-12-16 09:20:00	2025-12-17 15:20:00	98880	350.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	srednje	zatvoreno	\N
-186	65	2025-12-28 09:20:00	2025-12-29 15:20:00	99400	387.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	nisko	zatvoreno	\N
-187	65	2026-01-09 09:20:00	2026-01-10 15:20:00	99920	424.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	26	srednje	zatvoreno	\N
-188	65	2026-01-21 09:20:00	2026-01-22 15:20:00	100440	641.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	27	visoko	zatvoreno	\N
-189	65	2026-02-02 09:20:00	2026-02-03 15:20:00	100960	498.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	nisko	zatvoreno	\N
-190	65	2026-02-14 09:20:00	2026-02-15 15:20:00	101480	535.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	srednje	zatvoreno	\N
-191	66	2025-10-31 09:20:00	2025-11-01 15:20:00	99600	205.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	srednje	zatvoreno	\N
-192	66	2025-11-12 09:20:00	2025-11-13 15:20:00	100120	242.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	srednje	zatvoreno	\N
-193	66	2025-11-24 09:20:00	2025-11-25 15:20:00	100640	279.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	25	nisko	zatvoreno	\N
-194	66	2025-12-06 09:20:00	2025-12-07 15:20:00	101160	496.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	26	visoko	zatvoreno	\N
-195	66	2025-12-18 09:20:00	2025-12-19 15:20:00	101680	353.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	srednje	zatvoreno	\N
-196	66	2025-12-30 09:20:00	2025-12-31 15:20:00	102200	390.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	nisko	zatvoreno	\N
-197	66	2026-01-11 09:20:00	2026-01-12 15:20:00	102720	427.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	29	srednje	zatvoreno	\N
-198	66	2026-01-23 09:20:00	2026-01-24 15:20:00	103240	644.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	30	visoko	zatvoreno	\N
-199	66	2026-02-04 09:20:00	2026-02-05 15:20:00	103760	501.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	nisko	zatvoreno	\N
-200	66	2026-02-16 09:20:00	2026-02-17 15:20:00	104280	538.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	srednje	zatvoreno	\N
-201	67	2025-11-02 09:20:00	2025-11-03 15:20:00	102400	208.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N
-202	67	2025-11-14 09:20:00	2025-11-15 15:20:00	102920	245.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	srednje	zatvoreno	\N
-203	67	2025-11-26 09:20:00	2025-11-27 15:20:00	103440	282.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	nisko	zatvoreno	\N
-204	67	2025-12-08 09:20:00	2025-12-09 15:20:00	103960	499.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N
-205	67	2025-12-20 09:20:00	2025-12-21 15:20:00	104480	356.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	srednje	zatvoreno	\N
-206	67	2026-01-01 09:20:00	2026-01-02 15:20:00	105000	393.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	nisko	zatvoreno	\N
-207	67	2026-01-13 09:20:00	2026-01-14 15:20:00	105520	430.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	32	srednje	zatvoreno	\N
-208	67	2026-01-25 09:20:00	2026-01-26 15:20:00	106040	647.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	33	visoko	zatvoreno	\N
-209	67	2026-02-06 09:20:00	2026-02-07 15:20:00	106560	504.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	nisko	zatvoreno	\N
-210	67	2026-02-18 09:20:00	2026-02-19 15:20:00	107080	541.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	srednje	zatvoreno	\N
-211	68	2025-11-04 09:20:00	2025-11-05 15:20:00	105200	211.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N
-212	68	2025-11-16 09:20:00	2025-11-17 15:20:00	105720	248.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	srednje	zatvoreno	\N
-213	68	2025-11-28 09:20:00	2025-11-29 15:20:00	106240	285.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	nisko	zatvoreno	\N
-214	68	2025-12-10 09:20:00	2025-12-11 15:20:00	106760	502.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N
-215	68	2025-12-22 09:20:00	2025-12-23 15:20:00	107280	359.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	srednje	zatvoreno	\N
-216	68	2026-01-03 09:20:00	2026-01-04 15:20:00	107800	396.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	nisko	zatvoreno	\N
-217	68	2026-01-15 09:20:00	2026-01-16 15:20:00	108320	433.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	35	srednje	zatvoreno	\N
-218	68	2026-01-27 09:20:00	2026-01-28 15:20:00	108840	650.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	36	visoko	zatvoreno	\N
-219	68	2026-02-08 09:20:00	2026-02-09 15:20:00	109360	507.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	nisko	zatvoreno	\N
-220	68	2026-02-20 09:20:00	2026-02-21 15:20:00	109880	544.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	srednje	zatvoreno	\N
-221	69	2025-11-06 09:20:00	2025-11-07 15:20:00	108000	214.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N
-222	69	2025-11-18 09:20:00	2025-11-19 15:20:00	108520	251.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	srednje	zatvoreno	\N
-223	69	2025-11-30 09:20:00	2025-12-01 15:20:00	109040	288.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	nisko	zatvoreno	\N
-224	69	2025-12-12 09:20:00	2025-12-13 15:20:00	109560	505.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N
-225	69	2025-12-24 09:20:00	2025-12-25 15:20:00	110080	362.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	srednje	zatvoreno	\N
-226	69	2026-01-05 09:20:00	2026-01-06 15:20:00	110600	399.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	nisko	zatvoreno	\N
-227	69	2026-01-17 09:20:00	2026-01-18 15:20:00	111120	436.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	38	srednje	zatvoreno	\N
-228	69	2026-01-29 09:20:00	2026-01-30 15:20:00	111640	653.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	23	visoko	zatvoreno	\N
-229	69	2026-02-10 09:20:00	2026-02-11 15:20:00	112160	510.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	nisko	zatvoreno	\N
-230	69	2026-02-22 09:20:00	2026-02-23 15:20:00	112680	547.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	srednje	zatvoreno	\N
-231	70	2025-11-08 09:20:00	2025-11-09 15:20:00	110800	217.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N
-232	70	2025-11-20 09:20:00	2025-11-21 15:20:00	111320	254.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	srednje	zatvoreno	\N
-233	70	2025-12-02 09:20:00	2025-12-03 15:20:00	111840	291.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	nisko	zatvoreno	\N
-234	70	2025-12-14 09:20:00	2025-12-15 15:20:00	112360	508.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N
-235	70	2025-12-26 09:20:00	2025-12-27 15:20:00	112880	365.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	srednje	zatvoreno	\N
-236	70	2026-01-07 09:20:00	2026-01-08 15:20:00	113400	402.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	nisko	zatvoreno	\N
-237	70	2026-01-19 09:20:00	2026-01-20 15:20:00	113920	439.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	25	srednje	zatvoreno	\N
-238	70	2026-01-31 09:20:00	2026-02-01 15:20:00	114440	656.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	26	visoko	zatvoreno	\N
-239	70	2026-02-12 09:20:00	2026-02-13 15:20:00	114960	513.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	nisko	zatvoreno	\N
-240	70	2026-02-24 09:20:00	2026-02-25 15:20:00	115480	550.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	srednje	zatvoreno	\N
-241	71	2025-11-10 09:20:00	2025-11-11 15:20:00	113600	220.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	srednje	zatvoreno	\N
-242	71	2025-11-22 09:20:00	2025-11-23 15:20:00	114120	257.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	srednje	zatvoreno	\N
-243	71	2025-12-04 09:20:00	2025-12-05 15:20:00	114640	294.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	24	nisko	zatvoreno	\N
-244	71	2025-12-16 09:20:00	2025-12-17 15:20:00	115160	511.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	25	visoko	zatvoreno	\N
-245	71	2025-12-28 09:20:00	2025-12-29 15:20:00	115680	368.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N
-246	71	2026-01-09 09:20:00	2026-01-10 15:20:00	116200	405.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	nisko	zatvoreno	\N
-247	71	2026-01-21 09:20:00	2026-01-22 15:20:00	116720	442.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	srednje	zatvoreno	\N
-248	71	2026-02-02 09:20:00	2026-02-03 15:20:00	117240	659.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N
-249	71	2026-02-14 09:20:00	2026-02-15 15:20:00	117760	516.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	nisko	zatvoreno	\N
-250	71	2026-02-26 09:20:00	2026-02-27 15:20:00	118280	553.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	srednje	zatvoreno	\N
-251	72	2025-11-12 09:20:00	2025-11-13 15:20:00	116400	223.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	srednje	zatvoreno	\N
-252	72	2025-11-24 09:20:00	2025-11-25 15:20:00	116920	260.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	srednje	zatvoreno	\N
-253	72	2025-12-06 09:20:00	2025-12-07 15:20:00	117440	297.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	27	nisko	zatvoreno	\N
-254	72	2025-12-18 09:20:00	2025-12-19 15:20:00	117960	514.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	28	visoko	zatvoreno	\N
-255	72	2025-12-30 09:20:00	2025-12-31 15:20:00	118480	371.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N
-256	72	2026-01-11 09:20:00	2026-01-12 15:20:00	119000	408.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	nisko	zatvoreno	\N
-257	72	2026-01-23 09:20:00	2026-01-24 15:20:00	119520	445.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	srednje	zatvoreno	\N
-258	72	2026-02-04 09:20:00	2026-02-05 15:20:00	120040	662.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N
-259	72	2026-02-16 09:20:00	2026-02-17 15:20:00	120560	519.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	nisko	zatvoreno	\N
-260	72	2026-02-28 09:20:00	2026-03-01 15:20:00	121080	556.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	srednje	zatvoreno	\N
-261	73	2025-11-14 09:20:00	2025-11-15 15:20:00	119200	226.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	srednje	zatvoreno	\N
-262	73	2025-11-26 09:20:00	2025-11-27 15:20:00	119720	263.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	srednje	zatvoreno	\N
-263	73	2025-12-08 09:20:00	2025-12-09 15:20:00	120240	300.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	30	nisko	zatvoreno	\N
-264	73	2025-12-20 09:20:00	2025-12-21 15:20:00	120760	517.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	31	visoko	zatvoreno	\N
-265	73	2026-01-01 09:20:00	2026-01-02 15:20:00	121280	374.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N
-266	73	2026-01-13 09:20:00	2026-01-14 15:20:00	121800	411.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	nisko	zatvoreno	\N
-267	73	2026-01-25 09:20:00	2026-01-26 15:20:00	122320	448.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	srednje	zatvoreno	\N
-268	73	2026-02-06 09:20:00	2026-02-07 15:20:00	122840	665.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N
-269	73	2026-02-18 09:20:00	2026-02-19 15:20:00	123360	522.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	nisko	zatvoreno	\N
-270	73	2026-03-02 09:20:00	2026-03-03 15:20:00	123880	559.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	srednje	zatvoreno	\N
-271	74	2025-11-16 09:20:00	2025-11-17 15:20:00	122000	229.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	srednje	zatvoreno	\N
-272	74	2025-11-28 09:20:00	2025-11-29 15:20:00	122520	266.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	srednje	zatvoreno	\N
-273	74	2025-12-10 09:20:00	2025-12-11 15:20:00	123040	303.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	33	nisko	zatvoreno	\N
-274	74	2025-12-22 09:20:00	2025-12-23 15:20:00	123560	520.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	34	visoko	zatvoreno	\N
-275	74	2026-01-03 09:20:00	2026-01-04 15:20:00	124080	377.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N
-276	74	2026-01-15 09:20:00	2026-01-16 15:20:00	124600	414.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	nisko	zatvoreno	\N
-277	74	2026-01-27 09:20:00	2026-01-28 15:20:00	125120	451.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	srednje	zatvoreno	\N
-278	74	2026-02-08 09:20:00	2026-02-09 15:20:00	125640	668.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N
-279	74	2026-02-20 09:20:00	2026-02-21 15:20:00	126160	525.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	nisko	zatvoreno	\N
-280	74	2026-03-04 09:20:00	2026-03-05 15:20:00	126680	562.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	srednje	zatvoreno	\N
-281	75	2025-11-18 09:20:00	2025-11-19 15:20:00	124800	232.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	srednje	zatvoreno	\N
-282	75	2025-11-30 09:20:00	2025-12-01 15:20:00	125320	269.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	srednje	zatvoreno	\N
-283	75	2025-12-12 09:20:00	2025-12-13 15:20:00	125840	306.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	36	nisko	zatvoreno	\N
-284	75	2025-12-24 09:20:00	2025-12-25 15:20:00	126360	523.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	37	visoko	zatvoreno	\N
-285	75	2026-01-05 09:20:00	2026-01-06 15:20:00	126880	380.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	srednje	zatvoreno	\N
-286	75	2026-01-17 09:20:00	2026-01-18 15:20:00	127400	417.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	nisko	zatvoreno	\N
-287	75	2026-01-29 09:20:00	2026-01-30 15:20:00	127920	454.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	24	srednje	zatvoreno	\N
-288	75	2026-02-10 09:20:00	2026-02-11 15:20:00	128440	671.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	25	visoko	zatvoreno	\N
-289	75	2026-02-22 09:20:00	2026-02-23 15:20:00	128960	528.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	nisko	zatvoreno	\N
-290	75	2026-03-06 09:20:00	2026-03-07 15:20:00	129480	565.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	srednje	zatvoreno	\N
-291	76	2025-11-20 09:20:00	2025-11-21 15:20:00	127600	235.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	srednje	zatvoreno	\N
-292	76	2025-12-02 09:20:00	2025-12-03 15:20:00	128120	272.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	srednje	zatvoreno	\N
-293	76	2025-12-14 09:20:00	2025-12-15 15:20:00	128640	309.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	23	nisko	zatvoreno	\N
-294	76	2025-12-26 09:20:00	2025-12-27 15:20:00	129160	526.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	24	visoko	zatvoreno	\N
-295	76	2026-01-07 09:20:00	2026-01-08 15:20:00	129680	383.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	srednje	zatvoreno	\N
-296	76	2026-01-19 09:20:00	2026-01-20 15:20:00	130200	420.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	nisko	zatvoreno	\N
-297	76	2026-01-31 09:20:00	2026-02-01 15:20:00	130720	457.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	27	srednje	zatvoreno	\N
-298	76	2026-02-12 09:20:00	2026-02-13 15:20:00	131240	674.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	28	visoko	zatvoreno	\N
-299	76	2026-02-24 09:20:00	2026-02-25 15:20:00	131760	531.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	nisko	zatvoreno	\N
-300	76	2026-03-08 09:20:00	2026-03-09 15:20:00	132280	568.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	srednje	zatvoreno	\N
-301	77	2025-11-22 09:20:00	2025-11-23 15:20:00	130400	238.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	srednje	zatvoreno	\N
-302	77	2025-12-04 09:20:00	2025-12-05 15:20:00	130920	275.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	srednje	zatvoreno	\N
-303	77	2025-12-16 09:20:00	2025-12-17 15:20:00	131440	312.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	26	nisko	zatvoreno	\N
-304	77	2025-12-28 09:20:00	2025-12-29 15:20:00	131960	529.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	27	visoko	zatvoreno	\N
-305	77	2026-01-09 09:20:00	2026-01-10 15:20:00	132480	386.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	srednje	zatvoreno	\N
-306	77	2026-01-21 09:20:00	2026-01-22 15:20:00	133000	423.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	nisko	zatvoreno	\N
-307	77	2026-02-02 09:20:00	2026-02-03 15:20:00	133520	460.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	30	srednje	zatvoreno	\N
-308	77	2026-02-14 09:20:00	2026-02-15 15:20:00	134040	677.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	31	visoko	zatvoreno	\N
-309	77	2026-02-26 09:20:00	2026-02-27 15:20:00	134560	534.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	nisko	zatvoreno	\N
-310	77	2026-03-10 09:20:00	2026-03-11 15:20:00	135080	571.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	srednje	zatvoreno	\N
-311	78	2025-11-24 09:20:00	2025-11-25 15:20:00	133200	241.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	srednje	zatvoreno	\N
-312	78	2025-12-06 09:20:00	2025-12-07 15:20:00	133720	278.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	srednje	zatvoreno	\N
-313	78	2025-12-18 09:20:00	2025-12-19 15:20:00	134240	315.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	29	nisko	zatvoreno	\N
-314	78	2025-12-30 09:20:00	2025-12-31 15:20:00	134760	532.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	30	visoko	zatvoreno	\N
-315	78	2026-01-11 09:20:00	2026-01-12 15:20:00	135280	389.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	srednje	zatvoreno	\N
-316	78	2026-01-23 09:20:00	2026-01-24 15:20:00	135800	426.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	nisko	zatvoreno	\N
-317	78	2026-02-04 09:20:00	2026-02-05 15:20:00	136320	463.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	33	srednje	zatvoreno	\N
-318	78	2026-02-16 09:20:00	2026-02-17 15:20:00	136840	680.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	34	visoko	zatvoreno	\N
-319	78	2026-02-28 09:20:00	2026-03-01 15:20:00	137360	537.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	nisko	zatvoreno	\N
-320	78	2026-03-12 09:20:00	2026-03-13 15:20:00	137880	574.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	srednje	zatvoreno	\N
-321	79	2025-11-26 09:20:00	2025-11-27 15:20:00	136000	244.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	srednje	zatvoreno	\N
-322	79	2025-12-08 09:20:00	2025-12-09 15:20:00	136520	281.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	srednje	zatvoreno	\N
-323	79	2025-12-20 09:20:00	2025-12-21 15:20:00	137040	318.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	32	nisko	zatvoreno	\N
-324	79	2026-01-01 09:20:00	2026-01-02 15:20:00	137560	535.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	33	visoko	zatvoreno	\N
-325	79	2026-01-13 09:20:00	2026-01-14 15:20:00	138080	392.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	srednje	zatvoreno	\N
-326	79	2026-01-25 09:20:00	2026-01-26 15:20:00	138600	429.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	nisko	zatvoreno	\N
-327	79	2026-02-06 09:20:00	2026-02-07 15:20:00	139120	466.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	36	srednje	zatvoreno	\N
-328	79	2026-02-18 09:20:00	2026-02-19 15:20:00	139640	683.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	37	visoko	zatvoreno	\N
-329	79	2026-03-02 09:20:00	2026-03-03 15:20:00	140160	540.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	nisko	zatvoreno	\N
-330	79	2026-03-14 09:20:00	2026-03-15 15:20:00	140680	577.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	srednje	zatvoreno	\N
-331	80	2025-11-28 09:20:00	2025-11-29 15:20:00	138800	247.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	srednje	zatvoreno	\N
-332	80	2025-12-10 09:20:00	2025-12-11 15:20:00	139320	284.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	srednje	zatvoreno	\N
-333	80	2025-12-22 09:20:00	2025-12-23 15:20:00	139840	321.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	35	nisko	zatvoreno	\N
-334	80	2026-01-03 09:20:00	2026-01-04 15:20:00	140360	538.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	36	visoko	zatvoreno	\N
-335	80	2026-01-15 09:20:00	2026-01-16 15:20:00	140880	395.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	srednje	zatvoreno	\N
-336	80	2026-01-27 09:20:00	2026-01-28 15:20:00	141400	432.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	nisko	zatvoreno	\N
-337	80	2026-02-08 09:20:00	2026-02-09 15:20:00	141920	469.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	23	srednje	zatvoreno	\N
-338	80	2026-02-20 09:20:00	2026-02-21 15:20:00	142440	686.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	24	visoko	zatvoreno	\N
-339	80	2026-03-04 09:20:00	2026-03-05 15:20:00	142960	543.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	nisko	zatvoreno	\N
-340	80	2026-03-16 09:20:00	2026-03-17 15:20:00	143480	580.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	srednje	zatvoreno	\N
-341	81	2025-11-30 09:20:00	2025-12-01 15:20:00	141600	250.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	srednje	zatvoreno	\N
-342	81	2025-12-12 09:20:00	2025-12-13 15:20:00	142120	287.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	srednje	zatvoreno	\N
-343	81	2025-12-24 09:20:00	2025-12-25 15:20:00	142640	324.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	38	nisko	zatvoreno	\N
-344	81	2026-01-05 09:20:00	2026-01-06 15:20:00	143160	541.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	23	visoko	zatvoreno	\N
-345	81	2026-01-17 09:20:00	2026-01-18 15:20:00	143680	398.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	srednje	zatvoreno	\N
-346	81	2026-01-29 09:20:00	2026-01-30 15:20:00	144200	435.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	nisko	zatvoreno	\N
-347	81	2026-02-10 09:20:00	2026-02-11 15:20:00	144720	472.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	26	srednje	zatvoreno	\N
-348	81	2026-02-22 09:20:00	2026-02-23 15:20:00	145240	689.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	27	visoko	zatvoreno	\N
-349	81	2026-03-06 09:20:00	2026-03-07 15:20:00	145760	546.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	nisko	zatvoreno	\N
-350	81	2026-03-18 09:20:00	2026-03-19 15:20:00	146280	583.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	srednje	zatvoreno	\N
-351	82	2025-12-02 09:20:00	2025-12-03 15:20:00	144400	253.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	srednje	zatvoreno	\N
-352	82	2025-12-14 09:20:00	2025-12-15 15:20:00	144920	290.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	srednje	zatvoreno	\N
-353	82	2025-12-26 09:20:00	2025-12-27 15:20:00	145440	327.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	25	nisko	zatvoreno	\N
-354	82	2026-01-07 09:20:00	2026-01-08 15:20:00	145960	544.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	26	visoko	zatvoreno	\N
-355	82	2026-01-19 09:20:00	2026-01-20 15:20:00	146480	401.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	srednje	zatvoreno	\N
-356	82	2026-01-31 09:20:00	2026-02-01 15:20:00	147000	438.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	nisko	zatvoreno	\N
-357	82	2026-02-12 09:20:00	2026-02-13 15:20:00	147520	475.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	29	srednje	zatvoreno	\N
-358	82	2026-02-24 09:20:00	2026-02-25 15:20:00	148040	692.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	30	visoko	zatvoreno	\N
-359	82	2026-03-08 09:20:00	2026-03-09 15:20:00	148560	549.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	nisko	zatvoreno	\N
-360	82	2026-03-20 09:20:00	2026-03-21 15:20:00	149080	586.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	srednje	zatvoreno	\N
-361	83	2025-12-04 09:20:00	2025-12-05 15:20:00	147200	256.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N
-362	83	2025-12-16 09:20:00	2025-12-17 15:20:00	147720	293.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	srednje	zatvoreno	\N
-363	83	2025-12-28 09:20:00	2025-12-29 15:20:00	148240	330.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	nisko	zatvoreno	\N
-364	83	2026-01-09 09:20:00	2026-01-10 15:20:00	148760	547.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N
-365	83	2026-01-21 09:20:00	2026-01-22 15:20:00	149280	404.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	srednje	zatvoreno	\N
-366	83	2026-02-02 09:20:00	2026-02-03 15:20:00	149800	441.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	nisko	zatvoreno	\N
-367	83	2026-02-14 09:20:00	2026-02-15 15:20:00	150320	478.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	32	srednje	zatvoreno	\N
-368	83	2026-02-26 09:20:00	2026-02-27 15:20:00	150840	695.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	33	visoko	zatvoreno	\N
-369	83	2026-03-10 09:20:00	2026-03-11 15:20:00	151360	552.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	nisko	zatvoreno	\N
-370	83	2026-03-22 09:20:00	2026-03-23 15:20:00	151880	589.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	srednje	zatvoreno	\N
-371	84	2025-12-06 09:20:00	2025-12-07 15:20:00	150000	259.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N
-372	84	2025-12-18 09:20:00	2025-12-19 15:20:00	150520	296.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	srednje	zatvoreno	\N
-373	84	2025-12-30 09:20:00	2025-12-31 15:20:00	151040	333.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	nisko	zatvoreno	\N
-374	84	2026-01-11 09:20:00	2026-01-12 15:20:00	151560	550.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N
-375	84	2026-01-23 09:20:00	2026-01-24 15:20:00	152080	407.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	srednje	zatvoreno	\N
-376	84	2026-02-04 09:20:00	2026-02-05 15:20:00	152600	444.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	nisko	zatvoreno	\N
-377	84	2026-02-16 09:20:00	2026-02-17 15:20:00	153120	481.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	35	srednje	zatvoreno	\N
-378	84	2026-02-28 09:20:00	2026-03-01 15:20:00	153640	698.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	36	visoko	zatvoreno	\N
-379	84	2026-03-12 09:20:00	2026-03-13 15:20:00	154160	555.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	nisko	zatvoreno	\N
-380	84	2026-03-24 09:20:00	2026-03-25 15:20:00	154680	592.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	srednje	zatvoreno	\N
-381	85	2025-12-08 09:20:00	2025-12-09 15:20:00	152800	262.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N
-382	85	2025-12-20 09:20:00	2025-12-21 15:20:00	153320	299.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	srednje	zatvoreno	\N
-383	85	2026-01-01 09:20:00	2026-01-02 15:20:00	153840	336.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	nisko	zatvoreno	\N
-384	85	2026-01-13 09:20:00	2026-01-14 15:20:00	154360	553.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N
-385	85	2026-01-25 09:20:00	2026-01-26 15:20:00	154880	410.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	srednje	zatvoreno	\N
-386	85	2026-02-06 09:20:00	2026-02-07 15:20:00	155400	447.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	nisko	zatvoreno	\N
-387	85	2026-02-18 09:20:00	2026-02-19 15:20:00	155920	484.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	38	srednje	zatvoreno	\N
-388	85	2026-03-02 09:20:00	2026-03-03 15:20:00	156440	701.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	23	visoko	zatvoreno	\N
-389	85	2026-03-14 09:20:00	2026-03-15 15:20:00	156960	558.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	nisko	zatvoreno	\N
-390	85	2026-03-26 09:20:00	2026-03-27 15:20:00	157480	595.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	srednje	zatvoreno	\N
-391	86	2025-12-10 09:20:00	2025-12-11 15:20:00	155600	265.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N
-392	86	2025-12-22 09:20:00	2025-12-23 15:20:00	156120	302.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	srednje	zatvoreno	\N
-393	86	2026-01-03 09:20:00	2026-01-04 15:20:00	156640	339.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	nisko	zatvoreno	\N
-394	86	2026-01-15 09:20:00	2026-01-16 15:20:00	157160	556.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N
-395	86	2026-01-27 09:20:00	2026-01-28 15:20:00	157680	413.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	srednje	zatvoreno	\N
-396	86	2026-02-08 09:20:00	2026-02-09 15:20:00	158200	450.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	nisko	zatvoreno	\N
-397	86	2026-02-20 09:20:00	2026-02-21 15:20:00	158720	487.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	25	srednje	zatvoreno	\N
-398	86	2026-03-04 09:20:00	2026-03-05 15:20:00	159240	704.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	26	visoko	zatvoreno	\N
-399	86	2026-03-16 09:20:00	2026-03-17 15:20:00	159760	561.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	nisko	zatvoreno	\N
-400	86	2026-03-28 09:20:00	2026-03-29 15:20:00	160280	598.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	srednje	zatvoreno	\N
-401	87	2025-12-12 09:20:00	2025-12-13 15:20:00	158400	268.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	srednje	zatvoreno	\N
-402	87	2025-12-24 09:20:00	2025-12-25 15:20:00	158920	305.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	srednje	zatvoreno	\N
-403	87	2026-01-05 09:20:00	2026-01-06 15:20:00	159440	342.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	24	nisko	zatvoreno	\N
-404	87	2026-01-17 09:20:00	2026-01-18 15:20:00	159960	559.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	25	visoko	zatvoreno	\N
-405	87	2026-01-29 09:20:00	2026-01-30 15:20:00	160480	416.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N
-406	87	2026-02-10 09:20:00	2026-02-11 15:20:00	161000	453.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	nisko	zatvoreno	\N
-407	87	2026-02-22 09:20:00	2026-02-23 15:20:00	161520	490.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	srednje	zatvoreno	\N
-408	87	2026-03-06 09:20:00	2026-03-07 15:20:00	162040	707.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N
-409	87	2026-03-18 09:20:00	2026-03-19 15:20:00	162560	564.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	nisko	zatvoreno	\N
-410	87	2026-03-30 09:20:00	2026-03-31 15:20:00	163080	601.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	srednje	zatvoreno	\N
-411	88	2025-12-14 09:20:00	2025-12-15 15:20:00	161200	271.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	srednje	zatvoreno	\N
-412	88	2025-12-26 09:20:00	2025-12-27 15:20:00	161720	308.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	srednje	zatvoreno	\N
-413	88	2026-01-07 09:20:00	2026-01-08 15:20:00	162240	345.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	27	nisko	zatvoreno	\N
-414	88	2026-01-19 09:20:00	2026-01-20 15:20:00	162760	562.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	28	visoko	zatvoreno	\N
-415	88	2026-01-31 09:20:00	2026-02-01 15:20:00	163280	419.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N
-416	88	2026-02-12 09:20:00	2026-02-13 15:20:00	163800	456.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	nisko	zatvoreno	\N
-417	88	2026-02-24 09:20:00	2026-02-25 15:20:00	164320	493.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	srednje	zatvoreno	\N
-418	88	2026-03-08 09:20:00	2026-03-09 15:20:00	164840	710.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N
-419	88	2026-03-20 09:20:00	2026-03-21 15:20:00	165360	567.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	nisko	zatvoreno	\N
-420	88	2026-04-01 09:20:00	2026-04-02 15:20:00	165880	604.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	srednje	zatvoreno	\N
-421	89	2025-12-16 09:20:00	2025-12-17 15:20:00	164000	274.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	srednje	zatvoreno	\N
-422	89	2025-12-28 09:20:00	2025-12-29 15:20:00	164520	311.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	srednje	zatvoreno	\N
-423	89	2026-01-09 09:20:00	2026-01-10 15:20:00	165040	348.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	30	nisko	zatvoreno	\N
-424	89	2026-01-21 09:20:00	2026-01-22 15:20:00	165560	565.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	31	visoko	zatvoreno	\N
-425	89	2026-02-02 09:20:00	2026-02-03 15:20:00	166080	422.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N
-426	89	2026-02-14 09:20:00	2026-02-15 15:20:00	166600	459.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	nisko	zatvoreno	\N
-427	89	2026-02-26 09:20:00	2026-02-27 15:20:00	167120	496.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	srednje	zatvoreno	\N
-428	89	2026-03-10 09:20:00	2026-03-11 15:20:00	167640	713.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N
-429	89	2026-03-22 09:20:00	2026-03-23 15:20:00	168160	570.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	nisko	zatvoreno	\N
-430	89	2026-04-03 09:20:00	2026-04-04 15:20:00	168680	607.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	srednje	zatvoreno	\N
-431	90	2025-12-18 09:20:00	2025-12-19 15:20:00	166800	277.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	srednje	zatvoreno	\N
-432	90	2025-12-30 09:20:00	2025-12-31 15:20:00	167320	314.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	srednje	zatvoreno	\N
-433	90	2026-01-11 09:20:00	2026-01-12 15:20:00	167840	351.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	33	nisko	zatvoreno	\N
-434	90	2026-01-23 09:20:00	2026-01-24 15:20:00	168360	568.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	34	visoko	zatvoreno	\N
-435	90	2026-02-04 09:20:00	2026-02-05 15:20:00	168880	425.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N
-436	90	2026-02-16 09:20:00	2026-02-17 15:20:00	169400	462.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	nisko	zatvoreno	\N
-437	90	2026-02-28 09:20:00	2026-03-01 15:20:00	169920	499.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	srednje	zatvoreno	\N
-438	90	2026-03-12 09:20:00	2026-03-13 15:20:00	170440	716.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N
-439	90	2026-03-24 09:20:00	2026-03-25 15:20:00	170960	573.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	nisko	zatvoreno	\N
-440	90	2026-04-05 09:20:00	2026-04-06 15:20:00	171480	610.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	srednje	zatvoreno	\N
+COPY public.servisne_intervencije (id, vozilo_id, datum_pocetka, datum_zavrsetka, km_u_tom_trenutku, cijena, opis, kategorija_id, zaposlenik_id, hitnost, status_prijave, attachment_url, obrisano_u, obrisao_zaposlenik_id, razlog_brisanja) FROM stdin;
+80	54	2026-01-23 09:20:00	2026-05-12 14:40:35.218	70680	400.00	Vozilo je u obradi zbog aktivnog kvara na pogonskom sustavu.	7	28	kriticno	zatvoreno	\N	\N	\N	\N
+50	51	2026-01-17 09:20:00	2026-05-05 13:26:56.182	62280	250.00	Vozilo je u obradi zbog aktivnog kvara na pogonskom sustavu.	4	35	kriticno	zatvoreno	\N	\N	\N	\N
+41	51	2025-10-01 09:20:00	2025-10-02 15:20:00	57600	160.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N	\N	\N	\N
+42	51	2025-10-13 09:20:00	2025-10-14 15:20:00	58120	197.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	srednje	zatvoreno	\N	\N	\N	\N
+43	51	2025-10-25 09:20:00	2025-10-26 15:20:00	58640	234.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	nisko	zatvoreno	\N	\N	\N	\N
+44	51	2025-11-06 09:20:00	2025-11-07 15:20:00	59160	451.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N	\N	\N	\N
+45	51	2025-11-18 09:20:00	2025-11-19 15:20:00	59680	308.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	srednje	zatvoreno	\N	\N	\N	\N
+46	51	2025-11-30 09:20:00	2025-12-01 15:20:00	60200	345.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	nisko	zatvoreno	\N	\N	\N	\N
+47	51	2025-12-12 09:20:00	2025-12-13 15:20:00	60720	382.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	32	srednje	zatvoreno	\N	\N	\N	\N
+48	51	2025-12-24 09:20:00	2025-12-25 15:20:00	61240	599.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	33	visoko	zatvoreno	\N	\N	\N	\N
+49	51	2026-01-05 09:20:00	2026-01-06 15:20:00	61760	456.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	nisko	zatvoreno	\N	\N	\N	\N
+51	52	2025-10-03 09:20:00	2025-10-04 15:20:00	60400	163.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N	\N	\N	\N
+52	52	2025-10-15 09:20:00	2025-10-16 15:20:00	60920	200.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	srednje	zatvoreno	\N	\N	\N	\N
+53	52	2025-10-27 09:20:00	2025-10-28 15:20:00	61440	237.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	nisko	zatvoreno	\N	\N	\N	\N
+54	52	2025-11-08 09:20:00	2025-11-09 15:20:00	61960	454.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N	\N	\N	\N
+55	52	2025-11-20 09:20:00	2025-11-21 15:20:00	62480	311.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	srednje	zatvoreno	\N	\N	\N	\N
+56	52	2025-12-02 09:20:00	2025-12-03 15:20:00	63000	348.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	nisko	zatvoreno	\N	\N	\N	\N
+57	52	2025-12-14 09:20:00	2025-12-15 15:20:00	63520	385.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	35	srednje	zatvoreno	\N	\N	\N	\N
+58	52	2025-12-26 09:20:00	2025-12-27 15:20:00	64040	602.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	36	visoko	zatvoreno	\N	\N	\N	\N
+59	52	2026-01-07 09:20:00	2026-01-08 15:20:00	64560	459.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	nisko	zatvoreno	\N	\N	\N	\N
+60	52	2026-01-19 09:20:00	\N	65080	\N	Vozilo je u obradi zbog aktivnog kvara na pogonskom sustavu.	5	38	kriticno	u_obradi	\N	\N	\N	\N
+61	53	2025-10-05 09:20:00	2025-10-06 15:20:00	63200	166.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N	\N	\N	\N
+62	53	2025-10-17 09:20:00	2025-10-18 15:20:00	63720	203.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	srednje	zatvoreno	\N	\N	\N	\N
+63	53	2025-10-29 09:20:00	2025-10-30 15:20:00	64240	240.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	nisko	zatvoreno	\N	\N	\N	\N
+64	53	2025-11-10 09:20:00	2025-11-11 15:20:00	64760	457.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N	\N	\N	\N
+65	53	2025-11-22 09:20:00	2025-11-23 15:20:00	65280	314.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	srednje	zatvoreno	\N	\N	\N	\N
+66	53	2025-12-04 09:20:00	2025-12-05 15:20:00	65800	351.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	nisko	zatvoreno	\N	\N	\N	\N
+67	53	2025-12-16 09:20:00	2025-12-17 15:20:00	66320	388.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	38	srednje	zatvoreno	\N	\N	\N	\N
+68	53	2025-12-28 09:20:00	2025-12-29 15:20:00	66840	605.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	23	visoko	zatvoreno	\N	\N	\N	\N
+69	53	2026-01-09 09:20:00	2026-01-10 15:20:00	67360	462.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	nisko	zatvoreno	\N	\N	\N	\N
+70	53	2026-01-21 09:20:00	\N	67880	\N	Vozilo je u obradi zbog aktivnog kvara na pogonskom sustavu.	6	25	kriticno	u_obradi	\N	\N	\N	\N
+71	54	2025-10-07 09:20:00	2025-10-08 15:20:00	66000	169.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N	\N	\N	\N
+72	54	2025-10-19 09:20:00	2025-10-20 15:20:00	66520	206.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	srednje	zatvoreno	\N	\N	\N	\N
+73	54	2025-10-31 09:20:00	2025-11-01 15:20:00	67040	243.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	nisko	zatvoreno	\N	\N	\N	\N
+74	54	2025-11-12 09:20:00	2025-11-13 15:20:00	67560	460.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N	\N	\N	\N
+75	54	2025-11-24 09:20:00	2025-11-25 15:20:00	68080	317.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	srednje	zatvoreno	\N	\N	\N	\N
+76	54	2025-12-06 09:20:00	2025-12-07 15:20:00	68600	354.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	nisko	zatvoreno	\N	\N	\N	\N
+77	54	2025-12-18 09:20:00	2025-12-19 15:20:00	69120	391.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	25	srednje	zatvoreno	\N	\N	\N	\N
+78	54	2025-12-30 09:20:00	2025-12-31 15:20:00	69640	608.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	26	visoko	zatvoreno	\N	\N	\N	\N
+79	54	2026-01-11 09:20:00	2026-01-12 15:20:00	70160	465.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	nisko	zatvoreno	\N	\N	\N	\N
+81	55	2025-10-09 09:20:00	2025-10-10 15:20:00	68800	172.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	srednje	zatvoreno	\N	\N	\N	\N
+82	55	2025-10-21 09:20:00	2025-10-22 15:20:00	69320	209.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	srednje	zatvoreno	\N	\N	\N	\N
+83	55	2025-11-02 09:20:00	2025-11-03 15:20:00	69840	246.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	24	nisko	zatvoreno	\N	\N	\N	\N
+84	55	2025-11-14 09:20:00	2025-11-15 15:20:00	70360	463.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	25	visoko	zatvoreno	\N	\N	\N	\N
+85	55	2025-11-26 09:20:00	2025-11-27 15:20:00	70880	320.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N	\N	\N	\N
+86	55	2025-12-08 09:20:00	2025-12-09 15:20:00	71400	357.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	nisko	zatvoreno	\N	\N	\N	\N
+87	55	2025-12-20 09:20:00	2025-12-21 15:20:00	71920	394.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	srednje	zatvoreno	\N	\N	\N	\N
+88	55	2026-01-01 09:20:00	2026-01-02 15:20:00	72440	611.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N	\N	\N	\N
+89	55	2026-01-13 09:20:00	2026-01-14 15:20:00	72960	468.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	nisko	zatvoreno	\N	\N	\N	\N
+90	55	2026-01-25 09:20:00	\N	73480	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	8	31	visoko	novo	\N	\N	\N	\N
+91	56	2025-10-11 09:20:00	2025-10-12 15:20:00	71600	175.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	srednje	zatvoreno	\N	\N	\N	\N
+92	56	2025-10-23 09:20:00	2025-10-24 15:20:00	72120	212.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	srednje	zatvoreno	\N	\N	\N	\N
+93	56	2025-11-04 09:20:00	2025-11-05 15:20:00	72640	249.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	27	nisko	zatvoreno	\N	\N	\N	\N
+94	56	2025-11-16 09:20:00	2025-11-17 15:20:00	73160	466.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	28	visoko	zatvoreno	\N	\N	\N	\N
+95	56	2025-11-28 09:20:00	2025-11-29 15:20:00	73680	323.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N	\N	\N	\N
+96	56	2025-12-10 09:20:00	2025-12-11 15:20:00	74200	360.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	nisko	zatvoreno	\N	\N	\N	\N
+97	56	2025-12-22 09:20:00	2025-12-23 15:20:00	74720	397.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	srednje	zatvoreno	\N	\N	\N	\N
+98	56	2026-01-03 09:20:00	2026-01-04 15:20:00	75240	614.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N	\N	\N	\N
+99	56	2026-01-15 09:20:00	2026-01-16 15:20:00	75760	471.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	nisko	zatvoreno	\N	\N	\N	\N
+100	56	2026-01-27 09:20:00	\N	76280	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	1	34	visoko	novo	\N	\N	\N	\N
+101	57	2025-10-13 09:20:00	2025-10-14 15:20:00	74400	178.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	srednje	zatvoreno	\N	\N	\N	\N
+102	57	2025-10-25 09:20:00	2025-10-26 15:20:00	74920	215.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	srednje	zatvoreno	\N	\N	\N	\N
+103	57	2025-11-06 09:20:00	2025-11-07 15:20:00	75440	252.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	30	nisko	zatvoreno	\N	\N	\N	\N
+104	57	2025-11-18 09:20:00	2025-11-19 15:20:00	75960	469.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	31	visoko	zatvoreno	\N	\N	\N	\N
+105	57	2025-11-30 09:20:00	2025-12-01 15:20:00	76480	326.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N	\N	\N	\N
+106	57	2025-12-12 09:20:00	2025-12-13 15:20:00	77000	363.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	nisko	zatvoreno	\N	\N	\N	\N
+107	57	2025-12-24 09:20:00	2025-12-25 15:20:00	77520	400.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	srednje	zatvoreno	\N	\N	\N	\N
+108	57	2026-01-05 09:20:00	2026-01-06 15:20:00	78040	617.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N	\N	\N	\N
+109	57	2026-01-17 09:20:00	2026-01-18 15:20:00	78560	474.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	nisko	zatvoreno	\N	\N	\N	\N
+110	57	2026-01-29 09:20:00	\N	79080	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	2	37	visoko	novo	\N	\N	\N	\N
+111	58	2025-10-15 09:20:00	2025-10-16 15:20:00	77200	181.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	srednje	zatvoreno	\N	\N	\N	\N
+112	58	2025-10-27 09:20:00	2025-10-28 15:20:00	77720	218.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	srednje	zatvoreno	\N	\N	\N	\N
+113	58	2025-11-08 09:20:00	2025-11-09 15:20:00	78240	255.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	33	nisko	zatvoreno	\N	\N	\N	\N
+114	58	2025-11-20 09:20:00	2025-11-21 15:20:00	78760	472.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	34	visoko	zatvoreno	\N	\N	\N	\N
+115	58	2025-12-02 09:20:00	2025-12-03 15:20:00	79280	329.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N	\N	\N	\N
+116	58	2025-12-14 09:20:00	2025-12-15 15:20:00	79800	366.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	nisko	zatvoreno	\N	\N	\N	\N
+117	58	2025-12-26 09:20:00	2025-12-27 15:20:00	80320	403.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	srednje	zatvoreno	\N	\N	\N	\N
+118	58	2026-01-07 09:20:00	2026-01-08 15:20:00	80840	620.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N	\N	\N	\N
+119	58	2026-01-19 09:20:00	2026-01-20 15:20:00	81360	477.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	nisko	zatvoreno	\N	\N	\N	\N
+120	58	2026-01-31 09:20:00	\N	81880	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	3	24	visoko	novo	\N	\N	\N	\N
+121	59	2025-10-17 09:20:00	2025-10-18 15:20:00	80000	184.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	srednje	zatvoreno	\N	\N	\N	\N
+122	59	2025-10-29 09:20:00	2025-10-30 15:20:00	80520	221.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	srednje	zatvoreno	\N	\N	\N	\N
+123	59	2025-11-10 09:20:00	2025-11-11 15:20:00	81040	258.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	36	nisko	zatvoreno	\N	\N	\N	\N
+124	59	2025-11-22 09:20:00	2025-11-23 15:20:00	81560	475.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	37	visoko	zatvoreno	\N	\N	\N	\N
+125	59	2025-12-04 09:20:00	2025-12-05 15:20:00	82080	332.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	srednje	zatvoreno	\N	\N	\N	\N
+126	59	2025-12-16 09:20:00	2025-12-17 15:20:00	82600	369.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	nisko	zatvoreno	\N	\N	\N	\N
+127	59	2025-12-28 09:20:00	2025-12-29 15:20:00	83120	406.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	24	srednje	zatvoreno	\N	\N	\N	\N
+128	59	2026-01-09 09:20:00	2026-01-10 15:20:00	83640	623.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	25	visoko	zatvoreno	\N	\N	\N	\N
+129	59	2026-01-21 09:20:00	2026-01-22 15:20:00	84160	480.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	nisko	zatvoreno	\N	\N	\N	\N
+130	59	2026-02-02 09:20:00	\N	84680	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	4	27	visoko	novo	\N	\N	\N	\N
+131	60	2025-10-19 09:20:00	2025-10-20 15:20:00	82800	187.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	srednje	zatvoreno	\N	\N	\N	\N
+132	60	2025-10-31 09:20:00	2025-11-01 15:20:00	83320	224.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	srednje	zatvoreno	\N	\N	\N	\N
+133	60	2025-11-12 09:20:00	2025-11-13 15:20:00	83840	261.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	23	nisko	zatvoreno	\N	\N	\N	\N
+134	60	2025-11-24 09:20:00	2025-11-25 15:20:00	84360	478.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	24	visoko	zatvoreno	\N	\N	\N	\N
+135	60	2025-12-06 09:20:00	2025-12-07 15:20:00	84880	335.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	srednje	zatvoreno	\N	\N	\N	\N
+136	60	2025-12-18 09:20:00	2025-12-19 15:20:00	85400	372.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	nisko	zatvoreno	\N	\N	\N	\N
+137	60	2025-12-30 09:20:00	2025-12-31 15:20:00	85920	409.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	27	srednje	zatvoreno	\N	\N	\N	\N
+138	60	2026-01-11 09:20:00	2026-01-12 15:20:00	86440	626.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	28	visoko	zatvoreno	\N	\N	\N	\N
+139	60	2026-01-23 09:20:00	2026-01-24 15:20:00	86960	483.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	nisko	zatvoreno	\N	\N	\N	\N
+140	60	2026-02-04 09:20:00	\N	87480	\N	Novo prijavljen kvar, ceka inicijalnu obradu i dijagnostiku.	5	30	visoko	novo	\N	\N	\N	\N
+141	61	2025-10-21 09:20:00	2025-10-22 15:20:00	85600	190.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	srednje	zatvoreno	\N	\N	\N	\N
+142	61	2025-11-02 09:20:00	2025-11-03 15:20:00	86120	227.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	srednje	zatvoreno	\N	\N	\N	\N
+143	61	2025-11-14 09:20:00	2025-11-15 15:20:00	86640	264.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	26	nisko	zatvoreno	\N	\N	\N	\N
+144	61	2025-11-26 09:20:00	2025-11-27 15:20:00	87160	481.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	27	visoko	zatvoreno	\N	\N	\N	\N
+145	61	2025-12-08 09:20:00	2025-12-09 15:20:00	87680	338.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	srednje	zatvoreno	\N	\N	\N	\N
+146	61	2025-12-20 09:20:00	2025-12-21 15:20:00	88200	375.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	nisko	zatvoreno	\N	\N	\N	\N
+147	61	2026-01-01 09:20:00	2026-01-02 15:20:00	88720	412.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	30	srednje	zatvoreno	\N	\N	\N	\N
+148	61	2026-01-13 09:20:00	2026-01-14 15:20:00	89240	629.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	31	visoko	zatvoreno	\N	\N	\N	\N
+149	61	2026-01-25 09:20:00	2026-01-26 15:20:00	89760	486.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	nisko	zatvoreno	\N	\N	\N	\N
+150	61	2026-02-06 09:20:00	2026-02-07 15:20:00	90280	523.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	srednje	zatvoreno	\N	\N	\N	\N
+151	62	2025-10-23 09:20:00	2025-10-24 15:20:00	88400	193.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	srednje	zatvoreno	\N	\N	\N	\N
+152	62	2025-11-04 09:20:00	2025-11-05 15:20:00	88920	230.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	srednje	zatvoreno	\N	\N	\N	\N
+153	62	2025-11-16 09:20:00	2025-11-17 15:20:00	89440	267.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	29	nisko	zatvoreno	\N	\N	\N	\N
+154	62	2025-11-28 09:20:00	2025-11-29 15:20:00	89960	484.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	30	visoko	zatvoreno	\N	\N	\N	\N
+155	62	2025-12-10 09:20:00	2025-12-11 15:20:00	90480	341.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	srednje	zatvoreno	\N	\N	\N	\N
+156	62	2025-12-22 09:20:00	2025-12-23 15:20:00	91000	378.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	nisko	zatvoreno	\N	\N	\N	\N
+157	62	2026-01-03 09:20:00	2026-01-04 15:20:00	91520	415.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	33	srednje	zatvoreno	\N	\N	\N	\N
+158	62	2026-01-15 09:20:00	2026-01-16 15:20:00	92040	632.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	34	visoko	zatvoreno	\N	\N	\N	\N
+159	62	2026-01-27 09:20:00	2026-01-28 15:20:00	92560	489.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	nisko	zatvoreno	\N	\N	\N	\N
+160	62	2026-02-08 09:20:00	2026-02-09 15:20:00	93080	526.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	srednje	zatvoreno	\N	\N	\N	\N
+161	63	2025-10-25 09:20:00	2025-10-26 15:20:00	91200	196.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	srednje	zatvoreno	\N	\N	\N	\N
+162	63	2025-11-06 09:20:00	2025-11-07 15:20:00	91720	233.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	srednje	zatvoreno	\N	\N	\N	\N
+163	63	2025-11-18 09:20:00	2025-11-19 15:20:00	92240	270.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	32	nisko	zatvoreno	\N	\N	\N	\N
+164	63	2025-11-30 09:20:00	2025-12-01 15:20:00	92760	487.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	33	visoko	zatvoreno	\N	\N	\N	\N
+165	63	2025-12-12 09:20:00	2025-12-13 15:20:00	93280	344.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	srednje	zatvoreno	\N	\N	\N	\N
+166	63	2025-12-24 09:20:00	2025-12-25 15:20:00	93800	381.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	nisko	zatvoreno	\N	\N	\N	\N
+167	63	2026-01-05 09:20:00	2026-01-06 15:20:00	94320	418.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	36	srednje	zatvoreno	\N	\N	\N	\N
+168	63	2026-01-17 09:20:00	2026-01-18 15:20:00	94840	635.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	37	visoko	zatvoreno	\N	\N	\N	\N
+169	63	2026-01-29 09:20:00	2026-01-30 15:20:00	95360	492.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	nisko	zatvoreno	\N	\N	\N	\N
+170	63	2026-02-10 09:20:00	2026-02-11 15:20:00	95880	529.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	srednje	zatvoreno	\N	\N	\N	\N
+171	64	2025-10-27 09:20:00	2025-10-28 15:20:00	94000	199.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	srednje	zatvoreno	\N	\N	\N	\N
+172	64	2025-11-08 09:20:00	2025-11-09 15:20:00	94520	236.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	srednje	zatvoreno	\N	\N	\N	\N
+173	64	2025-11-20 09:20:00	2025-11-21 15:20:00	95040	273.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	35	nisko	zatvoreno	\N	\N	\N	\N
+174	64	2025-12-02 09:20:00	2025-12-03 15:20:00	95560	490.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	36	visoko	zatvoreno	\N	\N	\N	\N
+175	64	2025-12-14 09:20:00	2025-12-15 15:20:00	96080	347.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	srednje	zatvoreno	\N	\N	\N	\N
+176	64	2025-12-26 09:20:00	2025-12-27 15:20:00	96600	384.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	nisko	zatvoreno	\N	\N	\N	\N
+177	64	2026-01-07 09:20:00	2026-01-08 15:20:00	97120	421.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	23	srednje	zatvoreno	\N	\N	\N	\N
+178	64	2026-01-19 09:20:00	2026-01-20 15:20:00	97640	638.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	24	visoko	zatvoreno	\N	\N	\N	\N
+179	64	2026-01-31 09:20:00	2026-02-01 15:20:00	98160	495.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	nisko	zatvoreno	\N	\N	\N	\N
+180	64	2026-02-12 09:20:00	2026-02-13 15:20:00	98680	532.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	srednje	zatvoreno	\N	\N	\N	\N
+181	65	2025-10-29 09:20:00	2025-10-30 15:20:00	96800	202.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	srednje	zatvoreno	\N	\N	\N	\N
+182	65	2025-11-10 09:20:00	2025-11-11 15:20:00	97320	239.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	srednje	zatvoreno	\N	\N	\N	\N
+183	65	2025-11-22 09:20:00	2025-11-23 15:20:00	97840	276.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	38	nisko	zatvoreno	\N	\N	\N	\N
+184	65	2025-12-04 09:20:00	2025-12-05 15:20:00	98360	493.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	23	visoko	zatvoreno	\N	\N	\N	\N
+185	65	2025-12-16 09:20:00	2025-12-17 15:20:00	98880	350.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	srednje	zatvoreno	\N	\N	\N	\N
+186	65	2025-12-28 09:20:00	2025-12-29 15:20:00	99400	387.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	nisko	zatvoreno	\N	\N	\N	\N
+187	65	2026-01-09 09:20:00	2026-01-10 15:20:00	99920	424.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	26	srednje	zatvoreno	\N	\N	\N	\N
+188	65	2026-01-21 09:20:00	2026-01-22 15:20:00	100440	641.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	27	visoko	zatvoreno	\N	\N	\N	\N
+189	65	2026-02-02 09:20:00	2026-02-03 15:20:00	100960	498.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	nisko	zatvoreno	\N	\N	\N	\N
+190	65	2026-02-14 09:20:00	2026-02-15 15:20:00	101480	535.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	srednje	zatvoreno	\N	\N	\N	\N
+191	66	2025-10-31 09:20:00	2025-11-01 15:20:00	99600	205.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	srednje	zatvoreno	\N	\N	\N	\N
+192	66	2025-11-12 09:20:00	2025-11-13 15:20:00	100120	242.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	srednje	zatvoreno	\N	\N	\N	\N
+193	66	2025-11-24 09:20:00	2025-11-25 15:20:00	100640	279.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	25	nisko	zatvoreno	\N	\N	\N	\N
+194	66	2025-12-06 09:20:00	2025-12-07 15:20:00	101160	496.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	26	visoko	zatvoreno	\N	\N	\N	\N
+195	66	2025-12-18 09:20:00	2025-12-19 15:20:00	101680	353.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	srednje	zatvoreno	\N	\N	\N	\N
+196	66	2025-12-30 09:20:00	2025-12-31 15:20:00	102200	390.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	nisko	zatvoreno	\N	\N	\N	\N
+197	66	2026-01-11 09:20:00	2026-01-12 15:20:00	102720	427.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	29	srednje	zatvoreno	\N	\N	\N	\N
+198	66	2026-01-23 09:20:00	2026-01-24 15:20:00	103240	644.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	30	visoko	zatvoreno	\N	\N	\N	\N
+199	66	2026-02-04 09:20:00	2026-02-05 15:20:00	103760	501.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	nisko	zatvoreno	\N	\N	\N	\N
+200	66	2026-02-16 09:20:00	2026-02-17 15:20:00	104280	538.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	srednje	zatvoreno	\N	\N	\N	\N
+201	67	2025-11-02 09:20:00	2025-11-03 15:20:00	102400	208.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N	\N	\N	\N
+202	67	2025-11-14 09:20:00	2025-11-15 15:20:00	102920	245.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	srednje	zatvoreno	\N	\N	\N	\N
+203	67	2025-11-26 09:20:00	2025-11-27 15:20:00	103440	282.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	nisko	zatvoreno	\N	\N	\N	\N
+204	67	2025-12-08 09:20:00	2025-12-09 15:20:00	103960	499.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N	\N	\N	\N
+205	67	2025-12-20 09:20:00	2025-12-21 15:20:00	104480	356.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	srednje	zatvoreno	\N	\N	\N	\N
+206	67	2026-01-01 09:20:00	2026-01-02 15:20:00	105000	393.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	nisko	zatvoreno	\N	\N	\N	\N
+207	67	2026-01-13 09:20:00	2026-01-14 15:20:00	105520	430.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	32	srednje	zatvoreno	\N	\N	\N	\N
+208	67	2026-01-25 09:20:00	2026-01-26 15:20:00	106040	647.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	33	visoko	zatvoreno	\N	\N	\N	\N
+209	67	2026-02-06 09:20:00	2026-02-07 15:20:00	106560	504.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	nisko	zatvoreno	\N	\N	\N	\N
+210	67	2026-02-18 09:20:00	2026-02-19 15:20:00	107080	541.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	srednje	zatvoreno	\N	\N	\N	\N
+211	68	2025-11-04 09:20:00	2025-11-05 15:20:00	105200	211.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N	\N	\N	\N
+212	68	2025-11-16 09:20:00	2025-11-17 15:20:00	105720	248.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	srednje	zatvoreno	\N	\N	\N	\N
+213	68	2025-11-28 09:20:00	2025-11-29 15:20:00	106240	285.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	nisko	zatvoreno	\N	\N	\N	\N
+214	68	2025-12-10 09:20:00	2025-12-11 15:20:00	106760	502.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N	\N	\N	\N
+215	68	2025-12-22 09:20:00	2025-12-23 15:20:00	107280	359.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	srednje	zatvoreno	\N	\N	\N	\N
+216	68	2026-01-03 09:20:00	2026-01-04 15:20:00	107800	396.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	nisko	zatvoreno	\N	\N	\N	\N
+217	68	2026-01-15 09:20:00	2026-01-16 15:20:00	108320	433.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	35	srednje	zatvoreno	\N	\N	\N	\N
+218	68	2026-01-27 09:20:00	2026-01-28 15:20:00	108840	650.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	36	visoko	zatvoreno	\N	\N	\N	\N
+219	68	2026-02-08 09:20:00	2026-02-09 15:20:00	109360	507.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	nisko	zatvoreno	\N	\N	\N	\N
+220	68	2026-02-20 09:20:00	2026-02-21 15:20:00	109880	544.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	srednje	zatvoreno	\N	\N	\N	\N
+221	69	2025-11-06 09:20:00	2025-11-07 15:20:00	108000	214.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N	\N	\N	\N
+222	69	2025-11-18 09:20:00	2025-11-19 15:20:00	108520	251.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	srednje	zatvoreno	\N	\N	\N	\N
+223	69	2025-11-30 09:20:00	2025-12-01 15:20:00	109040	288.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	nisko	zatvoreno	\N	\N	\N	\N
+224	69	2025-12-12 09:20:00	2025-12-13 15:20:00	109560	505.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N	\N	\N	\N
+225	69	2025-12-24 09:20:00	2025-12-25 15:20:00	110080	362.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	srednje	zatvoreno	\N	\N	\N	\N
+226	69	2026-01-05 09:20:00	2026-01-06 15:20:00	110600	399.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	nisko	zatvoreno	\N	\N	\N	\N
+227	69	2026-01-17 09:20:00	2026-01-18 15:20:00	111120	436.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	38	srednje	zatvoreno	\N	\N	\N	\N
+228	69	2026-01-29 09:20:00	2026-01-30 15:20:00	111640	653.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	23	visoko	zatvoreno	\N	\N	\N	\N
+229	69	2026-02-10 09:20:00	2026-02-11 15:20:00	112160	510.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	nisko	zatvoreno	\N	\N	\N	\N
+230	69	2026-02-22 09:20:00	2026-02-23 15:20:00	112680	547.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	srednje	zatvoreno	\N	\N	\N	\N
+231	70	2025-11-08 09:20:00	2025-11-09 15:20:00	110800	217.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N	\N	\N	\N
+232	70	2025-11-20 09:20:00	2025-11-21 15:20:00	111320	254.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	srednje	zatvoreno	\N	\N	\N	\N
+233	70	2025-12-02 09:20:00	2025-12-03 15:20:00	111840	291.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	nisko	zatvoreno	\N	\N	\N	\N
+234	70	2025-12-14 09:20:00	2025-12-15 15:20:00	112360	508.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N	\N	\N	\N
+235	70	2025-12-26 09:20:00	2025-12-27 15:20:00	112880	365.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	srednje	zatvoreno	\N	\N	\N	\N
+236	70	2026-01-07 09:20:00	2026-01-08 15:20:00	113400	402.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	nisko	zatvoreno	\N	\N	\N	\N
+237	70	2026-01-19 09:20:00	2026-01-20 15:20:00	113920	439.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	25	srednje	zatvoreno	\N	\N	\N	\N
+238	70	2026-01-31 09:20:00	2026-02-01 15:20:00	114440	656.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	26	visoko	zatvoreno	\N	\N	\N	\N
+239	70	2026-02-12 09:20:00	2026-02-13 15:20:00	114960	513.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	nisko	zatvoreno	\N	\N	\N	\N
+240	70	2026-02-24 09:20:00	2026-02-25 15:20:00	115480	550.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	srednje	zatvoreno	\N	\N	\N	\N
+241	71	2025-11-10 09:20:00	2025-11-11 15:20:00	113600	220.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	srednje	zatvoreno	\N	\N	\N	\N
+242	71	2025-11-22 09:20:00	2025-11-23 15:20:00	114120	257.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	srednje	zatvoreno	\N	\N	\N	\N
+243	71	2025-12-04 09:20:00	2025-12-05 15:20:00	114640	294.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	24	nisko	zatvoreno	\N	\N	\N	\N
+244	71	2025-12-16 09:20:00	2025-12-17 15:20:00	115160	511.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	25	visoko	zatvoreno	\N	\N	\N	\N
+245	71	2025-12-28 09:20:00	2025-12-29 15:20:00	115680	368.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N	\N	\N	\N
+246	71	2026-01-09 09:20:00	2026-01-10 15:20:00	116200	405.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	nisko	zatvoreno	\N	\N	\N	\N
+247	71	2026-01-21 09:20:00	2026-01-22 15:20:00	116720	442.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	srednje	zatvoreno	\N	\N	\N	\N
+248	71	2026-02-02 09:20:00	2026-02-03 15:20:00	117240	659.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N	\N	\N	\N
+249	71	2026-02-14 09:20:00	2026-02-15 15:20:00	117760	516.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	nisko	zatvoreno	\N	\N	\N	\N
+250	71	2026-02-26 09:20:00	2026-02-27 15:20:00	118280	553.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	srednje	zatvoreno	\N	\N	\N	\N
+251	72	2025-11-12 09:20:00	2025-11-13 15:20:00	116400	223.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	srednje	zatvoreno	\N	\N	\N	\N
+252	72	2025-11-24 09:20:00	2025-11-25 15:20:00	116920	260.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	srednje	zatvoreno	\N	\N	\N	\N
+253	72	2025-12-06 09:20:00	2025-12-07 15:20:00	117440	297.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	27	nisko	zatvoreno	\N	\N	\N	\N
+254	72	2025-12-18 09:20:00	2025-12-19 15:20:00	117960	514.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	28	visoko	zatvoreno	\N	\N	\N	\N
+255	72	2025-12-30 09:20:00	2025-12-31 15:20:00	118480	371.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N	\N	\N	\N
+256	72	2026-01-11 09:20:00	2026-01-12 15:20:00	119000	408.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	nisko	zatvoreno	\N	\N	\N	\N
+257	72	2026-01-23 09:20:00	2026-01-24 15:20:00	119520	445.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	srednje	zatvoreno	\N	\N	\N	\N
+258	72	2026-02-04 09:20:00	2026-02-05 15:20:00	120040	662.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N	\N	\N	\N
+259	72	2026-02-16 09:20:00	2026-02-17 15:20:00	120560	519.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	nisko	zatvoreno	\N	\N	\N	\N
+260	72	2026-02-28 09:20:00	2026-03-01 15:20:00	121080	556.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	srednje	zatvoreno	\N	\N	\N	\N
+261	73	2025-11-14 09:20:00	2025-11-15 15:20:00	119200	226.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	srednje	zatvoreno	\N	\N	\N	\N
+262	73	2025-11-26 09:20:00	2025-11-27 15:20:00	119720	263.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	srednje	zatvoreno	\N	\N	\N	\N
+263	73	2025-12-08 09:20:00	2025-12-09 15:20:00	120240	300.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	30	nisko	zatvoreno	\N	\N	\N	\N
+264	73	2025-12-20 09:20:00	2025-12-21 15:20:00	120760	517.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	31	visoko	zatvoreno	\N	\N	\N	\N
+265	73	2026-01-01 09:20:00	2026-01-02 15:20:00	121280	374.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N	\N	\N	\N
+266	73	2026-01-13 09:20:00	2026-01-14 15:20:00	121800	411.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	nisko	zatvoreno	\N	\N	\N	\N
+267	73	2026-01-25 09:20:00	2026-01-26 15:20:00	122320	448.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	srednje	zatvoreno	\N	\N	\N	\N
+268	73	2026-02-06 09:20:00	2026-02-07 15:20:00	122840	665.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N	\N	\N	\N
+269	73	2026-02-18 09:20:00	2026-02-19 15:20:00	123360	522.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	nisko	zatvoreno	\N	\N	\N	\N
+270	73	2026-03-02 09:20:00	2026-03-03 15:20:00	123880	559.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	srednje	zatvoreno	\N	\N	\N	\N
+271	74	2025-11-16 09:20:00	2025-11-17 15:20:00	122000	229.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	srednje	zatvoreno	\N	\N	\N	\N
+272	74	2025-11-28 09:20:00	2025-11-29 15:20:00	122520	266.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	srednje	zatvoreno	\N	\N	\N	\N
+273	74	2025-12-10 09:20:00	2025-12-11 15:20:00	123040	303.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	33	nisko	zatvoreno	\N	\N	\N	\N
+274	74	2025-12-22 09:20:00	2025-12-23 15:20:00	123560	520.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	34	visoko	zatvoreno	\N	\N	\N	\N
+275	74	2026-01-03 09:20:00	2026-01-04 15:20:00	124080	377.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N	\N	\N	\N
+276	74	2026-01-15 09:20:00	2026-01-16 15:20:00	124600	414.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	nisko	zatvoreno	\N	\N	\N	\N
+277	74	2026-01-27 09:20:00	2026-01-28 15:20:00	125120	451.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	srednje	zatvoreno	\N	\N	\N	\N
+278	74	2026-02-08 09:20:00	2026-02-09 15:20:00	125640	668.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N	\N	\N	\N
+279	74	2026-02-20 09:20:00	2026-02-21 15:20:00	126160	525.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	nisko	zatvoreno	\N	\N	\N	\N
+280	74	2026-03-04 09:20:00	2026-03-05 15:20:00	126680	562.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	srednje	zatvoreno	\N	\N	\N	\N
+281	75	2025-11-18 09:20:00	2025-11-19 15:20:00	124800	232.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	srednje	zatvoreno	\N	\N	\N	\N
+282	75	2025-11-30 09:20:00	2025-12-01 15:20:00	125320	269.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	srednje	zatvoreno	\N	\N	\N	\N
+283	75	2025-12-12 09:20:00	2025-12-13 15:20:00	125840	306.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	36	nisko	zatvoreno	\N	\N	\N	\N
+284	75	2025-12-24 09:20:00	2025-12-25 15:20:00	126360	523.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	37	visoko	zatvoreno	\N	\N	\N	\N
+285	75	2026-01-05 09:20:00	2026-01-06 15:20:00	126880	380.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	srednje	zatvoreno	\N	\N	\N	\N
+286	75	2026-01-17 09:20:00	2026-01-18 15:20:00	127400	417.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	nisko	zatvoreno	\N	\N	\N	\N
+287	75	2026-01-29 09:20:00	2026-01-30 15:20:00	127920	454.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	24	srednje	zatvoreno	\N	\N	\N	\N
+288	75	2026-02-10 09:20:00	2026-02-11 15:20:00	128440	671.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	25	visoko	zatvoreno	\N	\N	\N	\N
+289	75	2026-02-22 09:20:00	2026-02-23 15:20:00	128960	528.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	nisko	zatvoreno	\N	\N	\N	\N
+290	75	2026-03-06 09:20:00	2026-03-07 15:20:00	129480	565.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	srednje	zatvoreno	\N	\N	\N	\N
+291	76	2025-11-20 09:20:00	2025-11-21 15:20:00	127600	235.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	srednje	zatvoreno	\N	\N	\N	\N
+292	76	2025-12-02 09:20:00	2025-12-03 15:20:00	128120	272.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	srednje	zatvoreno	\N	\N	\N	\N
+293	76	2025-12-14 09:20:00	2025-12-15 15:20:00	128640	309.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	23	nisko	zatvoreno	\N	\N	\N	\N
+294	76	2025-12-26 09:20:00	2025-12-27 15:20:00	129160	526.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	24	visoko	zatvoreno	\N	\N	\N	\N
+295	76	2026-01-07 09:20:00	2026-01-08 15:20:00	129680	383.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	srednje	zatvoreno	\N	\N	\N	\N
+296	76	2026-01-19 09:20:00	2026-01-20 15:20:00	130200	420.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	nisko	zatvoreno	\N	\N	\N	\N
+297	76	2026-01-31 09:20:00	2026-02-01 15:20:00	130720	457.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	27	srednje	zatvoreno	\N	\N	\N	\N
+298	76	2026-02-12 09:20:00	2026-02-13 15:20:00	131240	674.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	28	visoko	zatvoreno	\N	\N	\N	\N
+299	76	2026-02-24 09:20:00	2026-02-25 15:20:00	131760	531.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	nisko	zatvoreno	\N	\N	\N	\N
+300	76	2026-03-08 09:20:00	2026-03-09 15:20:00	132280	568.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	srednje	zatvoreno	\N	\N	\N	\N
+301	77	2025-11-22 09:20:00	2025-11-23 15:20:00	130400	238.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	srednje	zatvoreno	\N	\N	\N	\N
+302	77	2025-12-04 09:20:00	2025-12-05 15:20:00	130920	275.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	srednje	zatvoreno	\N	\N	\N	\N
+303	77	2025-12-16 09:20:00	2025-12-17 15:20:00	131440	312.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	26	nisko	zatvoreno	\N	\N	\N	\N
+304	77	2025-12-28 09:20:00	2025-12-29 15:20:00	131960	529.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	27	visoko	zatvoreno	\N	\N	\N	\N
+305	77	2026-01-09 09:20:00	2026-01-10 15:20:00	132480	386.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	srednje	zatvoreno	\N	\N	\N	\N
+306	77	2026-01-21 09:20:00	2026-01-22 15:20:00	133000	423.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	nisko	zatvoreno	\N	\N	\N	\N
+307	77	2026-02-02 09:20:00	2026-02-03 15:20:00	133520	460.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	30	srednje	zatvoreno	\N	\N	\N	\N
+308	77	2026-02-14 09:20:00	2026-02-15 15:20:00	134040	677.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	31	visoko	zatvoreno	\N	\N	\N	\N
+309	77	2026-02-26 09:20:00	2026-02-27 15:20:00	134560	534.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	nisko	zatvoreno	\N	\N	\N	\N
+310	77	2026-03-10 09:20:00	2026-03-11 15:20:00	135080	571.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	srednje	zatvoreno	\N	\N	\N	\N
+311	78	2025-11-24 09:20:00	2025-11-25 15:20:00	133200	241.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	srednje	zatvoreno	\N	\N	\N	\N
+312	78	2025-12-06 09:20:00	2025-12-07 15:20:00	133720	278.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	srednje	zatvoreno	\N	\N	\N	\N
+313	78	2025-12-18 09:20:00	2025-12-19 15:20:00	134240	315.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	29	nisko	zatvoreno	\N	\N	\N	\N
+314	78	2025-12-30 09:20:00	2025-12-31 15:20:00	134760	532.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	30	visoko	zatvoreno	\N	\N	\N	\N
+315	78	2026-01-11 09:20:00	2026-01-12 15:20:00	135280	389.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	srednje	zatvoreno	\N	\N	\N	\N
+316	78	2026-01-23 09:20:00	2026-01-24 15:20:00	135800	426.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	nisko	zatvoreno	\N	\N	\N	\N
+317	78	2026-02-04 09:20:00	2026-02-05 15:20:00	136320	463.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	33	srednje	zatvoreno	\N	\N	\N	\N
+318	78	2026-02-16 09:20:00	2026-02-17 15:20:00	136840	680.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	34	visoko	zatvoreno	\N	\N	\N	\N
+319	78	2026-02-28 09:20:00	2026-03-01 15:20:00	137360	537.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	nisko	zatvoreno	\N	\N	\N	\N
+320	78	2026-03-12 09:20:00	2026-03-13 15:20:00	137880	574.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	srednje	zatvoreno	\N	\N	\N	\N
+321	79	2025-11-26 09:20:00	2025-11-27 15:20:00	136000	244.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	srednje	zatvoreno	\N	\N	\N	\N
+322	79	2025-12-08 09:20:00	2025-12-09 15:20:00	136520	281.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	srednje	zatvoreno	\N	\N	\N	\N
+323	79	2025-12-20 09:20:00	2025-12-21 15:20:00	137040	318.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	32	nisko	zatvoreno	\N	\N	\N	\N
+324	79	2026-01-01 09:20:00	2026-01-02 15:20:00	137560	535.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	33	visoko	zatvoreno	\N	\N	\N	\N
+325	79	2026-01-13 09:20:00	2026-01-14 15:20:00	138080	392.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	srednje	zatvoreno	\N	\N	\N	\N
+326	79	2026-01-25 09:20:00	2026-01-26 15:20:00	138600	429.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	nisko	zatvoreno	\N	\N	\N	\N
+327	79	2026-02-06 09:20:00	2026-02-07 15:20:00	139120	466.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	36	srednje	zatvoreno	\N	\N	\N	\N
+328	79	2026-02-18 09:20:00	2026-02-19 15:20:00	139640	683.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	37	visoko	zatvoreno	\N	\N	\N	\N
+329	79	2026-03-02 09:20:00	2026-03-03 15:20:00	140160	540.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	nisko	zatvoreno	\N	\N	\N	\N
+330	79	2026-03-14 09:20:00	2026-03-15 15:20:00	140680	577.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	srednje	zatvoreno	\N	\N	\N	\N
+331	80	2025-11-28 09:20:00	2025-11-29 15:20:00	138800	247.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	srednje	zatvoreno	\N	\N	\N	\N
+332	80	2025-12-10 09:20:00	2025-12-11 15:20:00	139320	284.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	srednje	zatvoreno	\N	\N	\N	\N
+333	80	2025-12-22 09:20:00	2025-12-23 15:20:00	139840	321.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	35	nisko	zatvoreno	\N	\N	\N	\N
+334	80	2026-01-03 09:20:00	2026-01-04 15:20:00	140360	538.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	36	visoko	zatvoreno	\N	\N	\N	\N
+335	80	2026-01-15 09:20:00	2026-01-16 15:20:00	140880	395.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	srednje	zatvoreno	\N	\N	\N	\N
+336	80	2026-01-27 09:20:00	2026-01-28 15:20:00	141400	432.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	nisko	zatvoreno	\N	\N	\N	\N
+337	80	2026-02-08 09:20:00	2026-02-09 15:20:00	141920	469.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	23	srednje	zatvoreno	\N	\N	\N	\N
+338	80	2026-02-20 09:20:00	2026-02-21 15:20:00	142440	686.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	24	visoko	zatvoreno	\N	\N	\N	\N
+339	80	2026-03-04 09:20:00	2026-03-05 15:20:00	142960	543.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	nisko	zatvoreno	\N	\N	\N	\N
+340	80	2026-03-16 09:20:00	2026-03-17 15:20:00	143480	580.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	srednje	zatvoreno	\N	\N	\N	\N
+341	81	2025-11-30 09:20:00	2025-12-01 15:20:00	141600	250.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	srednje	zatvoreno	\N	\N	\N	\N
+342	81	2025-12-12 09:20:00	2025-12-13 15:20:00	142120	287.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	srednje	zatvoreno	\N	\N	\N	\N
+343	81	2025-12-24 09:20:00	2025-12-25 15:20:00	142640	324.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	38	nisko	zatvoreno	\N	\N	\N	\N
+344	81	2026-01-05 09:20:00	2026-01-06 15:20:00	143160	541.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	23	visoko	zatvoreno	\N	\N	\N	\N
+345	81	2026-01-17 09:20:00	2026-01-18 15:20:00	143680	398.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	srednje	zatvoreno	\N	\N	\N	\N
+346	81	2026-01-29 09:20:00	2026-01-30 15:20:00	144200	435.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	nisko	zatvoreno	\N	\N	\N	\N
+347	81	2026-02-10 09:20:00	2026-02-11 15:20:00	144720	472.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	26	srednje	zatvoreno	\N	\N	\N	\N
+348	81	2026-02-22 09:20:00	2026-02-23 15:20:00	145240	689.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	27	visoko	zatvoreno	\N	\N	\N	\N
+349	81	2026-03-06 09:20:00	2026-03-07 15:20:00	145760	546.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	nisko	zatvoreno	\N	\N	\N	\N
+350	81	2026-03-18 09:20:00	2026-03-19 15:20:00	146280	583.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	srednje	zatvoreno	\N	\N	\N	\N
+351	82	2025-12-02 09:20:00	2025-12-03 15:20:00	144400	253.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	srednje	zatvoreno	\N	\N	\N	\N
+352	82	2025-12-14 09:20:00	2025-12-15 15:20:00	144920	290.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	srednje	zatvoreno	\N	\N	\N	\N
+353	82	2025-12-26 09:20:00	2025-12-27 15:20:00	145440	327.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	25	nisko	zatvoreno	\N	\N	\N	\N
+354	82	2026-01-07 09:20:00	2026-01-08 15:20:00	145960	544.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	26	visoko	zatvoreno	\N	\N	\N	\N
+355	82	2026-01-19 09:20:00	2026-01-20 15:20:00	146480	401.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	srednje	zatvoreno	\N	\N	\N	\N
+356	82	2026-01-31 09:20:00	2026-02-01 15:20:00	147000	438.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	nisko	zatvoreno	\N	\N	\N	\N
+357	82	2026-02-12 09:20:00	2026-02-13 15:20:00	147520	475.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	29	srednje	zatvoreno	\N	\N	\N	\N
+358	82	2026-02-24 09:20:00	2026-02-25 15:20:00	148040	692.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	30	visoko	zatvoreno	\N	\N	\N	\N
+359	82	2026-03-08 09:20:00	2026-03-09 15:20:00	148560	549.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	nisko	zatvoreno	\N	\N	\N	\N
+360	82	2026-03-20 09:20:00	2026-03-21 15:20:00	149080	586.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	srednje	zatvoreno	\N	\N	\N	\N
+361	83	2025-12-04 09:20:00	2025-12-05 15:20:00	147200	256.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N	\N	\N	\N
+362	83	2025-12-16 09:20:00	2025-12-17 15:20:00	147720	293.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	srednje	zatvoreno	\N	\N	\N	\N
+363	83	2025-12-28 09:20:00	2025-12-29 15:20:00	148240	330.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	nisko	zatvoreno	\N	\N	\N	\N
+364	83	2026-01-09 09:20:00	2026-01-10 15:20:00	148760	547.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N	\N	\N	\N
+365	83	2026-01-21 09:20:00	2026-01-22 15:20:00	149280	404.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	srednje	zatvoreno	\N	\N	\N	\N
+366	83	2026-02-02 09:20:00	2026-02-03 15:20:00	149800	441.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	nisko	zatvoreno	\N	\N	\N	\N
+367	83	2026-02-14 09:20:00	2026-02-15 15:20:00	150320	478.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	32	srednje	zatvoreno	\N	\N	\N	\N
+368	83	2026-02-26 09:20:00	2026-02-27 15:20:00	150840	695.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	33	visoko	zatvoreno	\N	\N	\N	\N
+369	83	2026-03-10 09:20:00	2026-03-11 15:20:00	151360	552.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	34	nisko	zatvoreno	\N	\N	\N	\N
+370	83	2026-03-22 09:20:00	2026-03-23 15:20:00	151880	589.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	35	srednje	zatvoreno	\N	\N	\N	\N
+371	84	2025-12-06 09:20:00	2025-12-07 15:20:00	150000	259.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N	\N	\N	\N
+372	84	2025-12-18 09:20:00	2025-12-19 15:20:00	150520	296.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	srednje	zatvoreno	\N	\N	\N	\N
+373	84	2025-12-30 09:20:00	2025-12-31 15:20:00	151040	333.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	nisko	zatvoreno	\N	\N	\N	\N
+374	84	2026-01-11 09:20:00	2026-01-12 15:20:00	151560	550.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N	\N	\N	\N
+375	84	2026-01-23 09:20:00	2026-01-24 15:20:00	152080	407.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	srednje	zatvoreno	\N	\N	\N	\N
+376	84	2026-02-04 09:20:00	2026-02-05 15:20:00	152600	444.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	nisko	zatvoreno	\N	\N	\N	\N
+377	84	2026-02-16 09:20:00	2026-02-17 15:20:00	153120	481.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	35	srednje	zatvoreno	\N	\N	\N	\N
+378	84	2026-02-28 09:20:00	2026-03-01 15:20:00	153640	698.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	36	visoko	zatvoreno	\N	\N	\N	\N
+379	84	2026-03-12 09:20:00	2026-03-13 15:20:00	154160	555.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	37	nisko	zatvoreno	\N	\N	\N	\N
+380	84	2026-03-24 09:20:00	2026-03-25 15:20:00	154680	592.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	38	srednje	zatvoreno	\N	\N	\N	\N
+381	85	2025-12-08 09:20:00	2025-12-09 15:20:00	152800	262.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N	\N	\N	\N
+382	85	2025-12-20 09:20:00	2025-12-21 15:20:00	153320	299.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	srednje	zatvoreno	\N	\N	\N	\N
+383	85	2026-01-01 09:20:00	2026-01-02 15:20:00	153840	336.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	nisko	zatvoreno	\N	\N	\N	\N
+384	85	2026-01-13 09:20:00	2026-01-14 15:20:00	154360	553.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N	\N	\N	\N
+385	85	2026-01-25 09:20:00	2026-01-26 15:20:00	154880	410.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	srednje	zatvoreno	\N	\N	\N	\N
+386	85	2026-02-06 09:20:00	2026-02-07 15:20:00	155400	447.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	nisko	zatvoreno	\N	\N	\N	\N
+387	85	2026-02-18 09:20:00	2026-02-19 15:20:00	155920	484.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	38	srednje	zatvoreno	\N	\N	\N	\N
+388	85	2026-03-02 09:20:00	2026-03-03 15:20:00	156440	701.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	23	visoko	zatvoreno	\N	\N	\N	\N
+389	85	2026-03-14 09:20:00	2026-03-15 15:20:00	156960	558.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	24	nisko	zatvoreno	\N	\N	\N	\N
+390	85	2026-03-26 09:20:00	2026-03-27 15:20:00	157480	595.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	25	srednje	zatvoreno	\N	\N	\N	\N
+391	86	2025-12-10 09:20:00	2025-12-11 15:20:00	155600	265.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N	\N	\N	\N
+392	86	2025-12-22 09:20:00	2025-12-23 15:20:00	156120	302.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	srednje	zatvoreno	\N	\N	\N	\N
+393	86	2026-01-03 09:20:00	2026-01-04 15:20:00	156640	339.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	nisko	zatvoreno	\N	\N	\N	\N
+394	86	2026-01-15 09:20:00	2026-01-16 15:20:00	157160	556.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N	\N	\N	\N
+395	86	2026-01-27 09:20:00	2026-01-28 15:20:00	157680	413.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	srednje	zatvoreno	\N	\N	\N	\N
+396	86	2026-02-08 09:20:00	2026-02-09 15:20:00	158200	450.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	nisko	zatvoreno	\N	\N	\N	\N
+397	86	2026-02-20 09:20:00	2026-02-21 15:20:00	158720	487.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	25	srednje	zatvoreno	\N	\N	\N	\N
+398	86	2026-03-04 09:20:00	2026-03-05 15:20:00	159240	704.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	26	visoko	zatvoreno	\N	\N	\N	\N
+399	86	2026-03-16 09:20:00	2026-03-17 15:20:00	159760	561.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	27	nisko	zatvoreno	\N	\N	\N	\N
+400	86	2026-03-28 09:20:00	2026-03-29 15:20:00	160280	598.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	28	srednje	zatvoreno	\N	\N	\N	\N
+401	87	2025-12-12 09:20:00	2025-12-13 15:20:00	158400	268.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	38	srednje	zatvoreno	\N	\N	\N	\N
+402	87	2025-12-24 09:20:00	2025-12-25 15:20:00	158920	305.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	23	srednje	zatvoreno	\N	\N	\N	\N
+403	87	2026-01-05 09:20:00	2026-01-06 15:20:00	159440	342.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	24	nisko	zatvoreno	\N	\N	\N	\N
+404	87	2026-01-17 09:20:00	2026-01-18 15:20:00	159960	559.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	25	visoko	zatvoreno	\N	\N	\N	\N
+405	87	2026-01-29 09:20:00	2026-01-30 15:20:00	160480	416.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	26	srednje	zatvoreno	\N	\N	\N	\N
+406	87	2026-02-10 09:20:00	2026-02-11 15:20:00	161000	453.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	27	nisko	zatvoreno	\N	\N	\N	\N
+407	87	2026-02-22 09:20:00	2026-02-23 15:20:00	161520	490.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	28	srednje	zatvoreno	\N	\N	\N	\N
+408	87	2026-03-06 09:20:00	2026-03-07 15:20:00	162040	707.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	29	visoko	zatvoreno	\N	\N	\N	\N
+409	87	2026-03-18 09:20:00	2026-03-19 15:20:00	162560	564.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	30	nisko	zatvoreno	\N	\N	\N	\N
+410	87	2026-03-30 09:20:00	2026-03-31 15:20:00	163080	601.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	31	srednje	zatvoreno	\N	\N	\N	\N
+411	88	2025-12-14 09:20:00	2025-12-15 15:20:00	161200	271.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	25	srednje	zatvoreno	\N	\N	\N	\N
+412	88	2025-12-26 09:20:00	2025-12-27 15:20:00	161720	308.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	26	srednje	zatvoreno	\N	\N	\N	\N
+413	88	2026-01-07 09:20:00	2026-01-08 15:20:00	162240	345.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	27	nisko	zatvoreno	\N	\N	\N	\N
+414	88	2026-01-19 09:20:00	2026-01-20 15:20:00	162760	562.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	28	visoko	zatvoreno	\N	\N	\N	\N
+415	88	2026-01-31 09:20:00	2026-02-01 15:20:00	163280	419.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	29	srednje	zatvoreno	\N	\N	\N	\N
+416	88	2026-02-12 09:20:00	2026-02-13 15:20:00	163800	456.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	30	nisko	zatvoreno	\N	\N	\N	\N
+417	88	2026-02-24 09:20:00	2026-02-25 15:20:00	164320	493.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	31	srednje	zatvoreno	\N	\N	\N	\N
+418	88	2026-03-08 09:20:00	2026-03-09 15:20:00	164840	710.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	32	visoko	zatvoreno	\N	\N	\N	\N
+419	88	2026-03-20 09:20:00	2026-03-21 15:20:00	165360	567.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	33	nisko	zatvoreno	\N	\N	\N	\N
+421	89	2025-12-16 09:20:00	2025-12-17 15:20:00	164000	274.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	28	srednje	zatvoreno	\N	\N	\N	\N
+422	89	2025-12-28 09:20:00	2025-12-29 15:20:00	164520	311.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	29	srednje	zatvoreno	\N	\N	\N	\N
+423	89	2026-01-09 09:20:00	2026-01-10 15:20:00	165040	348.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	30	nisko	zatvoreno	\N	\N	\N	\N
+424	89	2026-01-21 09:20:00	2026-01-22 15:20:00	165560	565.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	31	visoko	zatvoreno	\N	\N	\N	\N
+425	89	2026-02-02 09:20:00	2026-02-03 15:20:00	166080	422.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	5	32	srednje	zatvoreno	\N	\N	\N	\N
+426	89	2026-02-14 09:20:00	2026-02-15 15:20:00	166600	459.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	33	nisko	zatvoreno	\N	\N	\N	\N
+427	89	2026-02-26 09:20:00	2026-02-27 15:20:00	167120	496.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	34	srednje	zatvoreno	\N	\N	\N	\N
+428	89	2026-03-10 09:20:00	2026-03-11 15:20:00	167640	713.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	35	visoko	zatvoreno	\N	\N	\N	\N
+429	89	2026-03-22 09:20:00	2026-03-23 15:20:00	168160	570.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	36	nisko	zatvoreno	\N	\N	\N	\N
+430	89	2026-04-03 09:20:00	2026-04-04 15:20:00	168680	607.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	37	srednje	zatvoreno	\N	\N	\N	\N
+431	90	2025-12-18 09:20:00	2025-12-19 15:20:00	166800	277.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	31	srednje	zatvoreno	\N	\N	\N	\N
+432	90	2025-12-30 09:20:00	2025-12-31 15:20:00	167320	314.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	32	srednje	zatvoreno	\N	\N	\N	\N
+433	90	2026-01-11 09:20:00	2026-01-12 15:20:00	167840	351.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	4	33	nisko	zatvoreno	\N	\N	\N	\N
+434	90	2026-01-23 09:20:00	2026-01-24 15:20:00	168360	568.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	34	visoko	zatvoreno	\N	\N	\N	\N
+435	90	2026-02-04 09:20:00	2026-02-05 15:20:00	168880	425.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	6	35	srednje	zatvoreno	\N	\N	\N	\N
+436	90	2026-02-16 09:20:00	2026-02-17 15:20:00	169400	462.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	7	36	nisko	zatvoreno	\N	\N	\N	\N
+437	90	2026-02-28 09:20:00	2026-03-01 15:20:00	169920	499.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	8	37	srednje	zatvoreno	\N	\N	\N	\N
+438	90	2026-03-12 09:20:00	2026-03-13 15:20:00	170440	716.00	Odraden veliki servis: filteri, ulje, remenje i detaljna kontrola sustava.	9	38	visoko	zatvoreno	\N	\N	\N	\N
+439	90	2026-03-24 09:20:00	2026-03-25 15:20:00	170960	573.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	2	23	nisko	zatvoreno	\N	\N	\N	\N
+440	90	2026-04-05 09:20:00	2026-04-06 15:20:00	171480	610.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	3	24	srednje	zatvoreno	\N	\N	\N	\N
+420	88	2026-04-01 09:20:00	2026-04-02 15:20:00	165880	604.00	Intervencija uspjesno evidentirana i zakljucena bez dodatnih rizika.	1	34	srednje	zatvoreno	\N	2026-05-12 15:42:34.543+00	44	Pogresno unesene informacije
 \.
 
 
 --
--- TOC entry 4010 (class 0 OID 20595)
--- Dependencies: 368
+-- TOC entry 4028 (class 0 OID 20595)
+-- Dependencies: 370
 -- Data for Name: statusi_vozila; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -3858,8 +3880,8 @@ COPY public.statusi_vozila (id, naziv) FROM stdin;
 
 
 --
--- TOC entry 4008 (class 0 OID 20589)
--- Dependencies: 366
+-- TOC entry 4026 (class 0 OID 20589)
+-- Dependencies: 368
 -- Data for Name: tipovi_goriva; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -3870,8 +3892,8 @@ COPY public.tipovi_goriva (id, naziv) FROM stdin;
 
 
 --
--- TOC entry 4002 (class 0 OID 20571)
--- Dependencies: 360
+-- TOC entry 4020 (class 0 OID 20571)
+-- Dependencies: 362
 -- Data for Name: uloge; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -3883,58 +3905,58 @@ COPY public.uloge (id, naziv) FROM stdin;
 
 
 --
--- TOC entry 4016 (class 0 OID 20630)
--- Dependencies: 374
+-- TOC entry 4034 (class 0 OID 20630)
+-- Dependencies: 376
 -- Data for Name: vozila; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY public.vozila (id, model_id, status_id, mjesto_id, broj_sasije, godina_proizvodnje, datum_kupovine, nabavna_vrijednost, trenutna_km, zadnji_mali_servis_km, zadnji_veliki_servis_km, zadnji_mali_servis_datum, zadnji_veliki_servis_datum, is_aktivan, razlog_deaktivacije) FROM stdin;
-52	2	2	68	SEEDV000000000002	2018	2018-04-15	14900.00	65320	51400	35600	2025-05-18	2023-10-26	t	\N
-53	3	2	60	SEEDV000000000003	2017	2017-04-15	15850.00	68120	54200	35067	2025-05-18	2023-10-26	t	\N
-54	4	2	68	SEEDV000000000004	2016	2016-04-15	16800.00	70920	52000	31200	2025-05-18	2023-10-26	t	\N
-55	5	1	60	SEEDV000000000005	2020	2020-04-14	17750.00	73720	65667	24000	2025-02-07	2023-10-26	t	\N
-56	6	1	68	SEEDV000000000006	2019	2019-04-15	18700.00	76520	70133	36800	2025-02-07	2023-10-26	t	\N
-57	7	1	60	SEEDV000000000007	2018	2018-04-15	19650.00	79320	72100	0	2025-10-25	2023-10-26	t	\N
-58	8	1	68	SEEDV000000000008	2017	2017-04-15	20600.00	82120	74900	0	2025-10-25	2023-10-26	t	\N
-59	9	1	60	SEEDV000000000009	2016	2016-04-15	21550.00	84920	77700	35200	2025-10-25	2020-04-04	t	\N
-60	10	1	68	SEEDV000000000010	2020	2020-04-14	22500.00	87720	83000	74667	2025-10-25	2020-04-04	t	\N
-61	1	3	60	SEEDV000000000011	2019	2019-04-15	23450.00	90800	83300	57467	2025-10-25	2023-10-26	t	\N
-62	2	3	68	SEEDV000000000012	2018	2018-04-15	24400.00	93600	86100	63600	2025-10-25	2023-10-26	t	\N
-63	3	3	60	SEEDV000000000013	2017	2017-04-15	25350.00	96400	88900	63067	2025-10-25	2023-10-26	t	\N
-64	4	3	68	SEEDV000000000014	2016	2016-04-15	26300.00	99200	89200	59200	2025-10-25	2023-10-26	t	\N
-65	5	3	60	SEEDV000000000015	2020	2020-04-14	27250.00	102000	89500	52000	2025-10-25	2023-10-26	t	\N
-66	6	3	68	SEEDV000000000016	2019	2019-04-15	28200.00	104800	94800	64800	2025-10-25	2023-10-26	t	\N
-67	7	3	60	SEEDV000000000017	2018	2018-04-15	29150.00	107600	100100	67600	2025-10-25	2023-10-26	t	\N
-68	8	3	68	SEEDV000000000018	2017	2017-04-15	30100.00	110400	102900	80400	2025-10-25	2023-10-26	t	\N
-69	9	1	60	SEEDV000000000019	2016	2016-04-15	31050.00	112920	105700	63200	2025-10-25	2023-10-26	t	\N
-70	10	1	68	SEEDV000000000020	2020	2020-04-14	32000.00	115720	111000	102667	2025-10-25	2023-10-26	t	\N
-71	1	1	60	SEEDV000000000021	2019	2019-04-15	32950.00	118520	111300	85467	2025-10-25	2023-10-26	t	\N
-72	2	1	68	SEEDV000000000022	2018	2018-04-15	33900.00	121320	114100	91600	2025-10-25	2023-10-26	t	\N
-73	3	1	60	SEEDV000000000023	2017	2017-04-15	34850.00	124120	116900	91067	2025-10-25	2023-10-26	t	\N
-74	4	1	68	SEEDV000000000024	2016	2016-04-15	35800.00	126920	117200	87200	2025-10-25	2023-10-26	t	\N
-75	5	1	60	SEEDV000000000025	2020	2020-04-14	36750.00	129720	117500	80000	2025-10-25	2023-10-26	t	\N
-76	6	1	68	SEEDV000000000026	2019	2019-04-15	37700.00	132520	122800	92800	2025-10-25	2023-10-26	t	\N
-77	7	1	60	SEEDV000000000027	2018	2018-04-15	38650.00	135320	128100	95600	2025-10-25	2023-10-26	t	\N
-78	8	1	68	SEEDV000000000028	2017	2017-04-15	39600.00	138120	130900	108400	2025-10-25	2023-10-26	t	\N
-79	9	1	60	SEEDV000000000029	2016	2016-04-15	40550.00	140920	133700	91200	2025-10-25	2023-10-26	t	\N
-80	10	1	68	SEEDV000000000030	2020	2020-04-14	41500.00	143720	139000	130667	2025-10-25	2023-10-26	t	\N
-81	1	1	60	SEEDV000000000031	2019	2019-04-15	42450.00	146520	139300	113467	2025-10-25	2023-10-26	t	\N
-82	2	1	68	SEEDV000000000032	2018	2018-04-15	43400.00	149320	142100	119600	2025-10-25	2023-10-26	t	\N
-83	3	1	60	SEEDV000000000033	2017	2017-04-15	44350.00	152120	144900	119067	2025-10-25	2023-10-26	t	\N
-84	4	1	68	SEEDV000000000034	2016	2016-04-15	45300.00	154920	145200	115200	2025-10-25	2023-10-26	t	\N
-85	5	1	60	SEEDV000000000035	2020	2020-04-14	46250.00	157720	145500	108000	2025-10-25	2023-10-26	t	\N
-86	6	1	68	SEEDV000000000036	2019	2019-04-15	47200.00	160520	150800	120800	2025-10-25	2023-10-26	t	\N
-87	7	1	60	SEEDV000000000037	2018	2018-04-15	48150.00	163320	156100	123600	2025-10-25	2023-10-26	t	\N
-88	8	1	68	SEEDV000000000038	2017	2017-04-15	49100.00	166120	158900	136400	2025-10-25	2023-10-26	t	\N
-89	9	1	60	SEEDV000000000039	2016	2016-04-15	50050.00	168920	161700	119200	2025-10-25	2023-10-26	t	\N
-90	10	1	68	SEEDV000000000040	2020	2020-04-14	51000.00	171720	167000	158667	2025-10-25	2023-10-26	t	\N
-51	1	1	60	SEEDV000000000001	2019	2019-04-15	13950.00	62520	48600	29467	2025-05-18	2023-10-26	t	\N
+COPY public.vozila (id, model_id, status_id, mjesto_id, broj_sasije, godina_proizvodnje, datum_kupovine, nabavna_vrijednost, trenutna_km, zadnji_mali_servis_km, zadnji_veliki_servis_km, zadnji_mali_servis_datum, zadnji_veliki_servis_datum, is_aktivan, razlog_deaktivacije, obrisano_u, obrisao_zaposlenik_id) FROM stdin;
+52	2	2	68	SEEDV000000000002	2018	2018-04-15	14900.00	65320	51400	35600	2025-05-18	2023-10-26	t	\N	\N	\N
+53	3	2	60	SEEDV000000000003	2017	2017-04-15	15850.00	68120	54200	35067	2025-05-18	2023-10-26	t	\N	\N	\N
+55	5	1	60	SEEDV000000000005	2020	2020-04-14	17750.00	73720	65667	24000	2025-02-07	2023-10-26	t	\N	\N	\N
+56	6	1	68	SEEDV000000000006	2019	2019-04-15	18700.00	76520	70133	36800	2025-02-07	2023-10-26	t	\N	\N	\N
+57	7	1	60	SEEDV000000000007	2018	2018-04-15	19650.00	79320	72100	0	2025-10-25	2023-10-26	t	\N	\N	\N
+58	8	1	68	SEEDV000000000008	2017	2017-04-15	20600.00	82120	74900	0	2025-10-25	2023-10-26	t	\N	\N	\N
+59	9	1	60	SEEDV000000000009	2016	2016-04-15	21550.00	84920	77700	35200	2025-10-25	2020-04-04	t	\N	\N	\N
+60	10	1	68	SEEDV000000000010	2020	2020-04-14	22500.00	87720	83000	74667	2025-10-25	2020-04-04	t	\N	\N	\N
+61	1	3	60	SEEDV000000000011	2019	2019-04-15	23450.00	90800	83300	57467	2025-10-25	2023-10-26	t	\N	\N	\N
+62	2	3	68	SEEDV000000000012	2018	2018-04-15	24400.00	93600	86100	63600	2025-10-25	2023-10-26	t	\N	\N	\N
+63	3	3	60	SEEDV000000000013	2017	2017-04-15	25350.00	96400	88900	63067	2025-10-25	2023-10-26	t	\N	\N	\N
+64	4	3	68	SEEDV000000000014	2016	2016-04-15	26300.00	99200	89200	59200	2025-10-25	2023-10-26	t	\N	\N	\N
+65	5	3	60	SEEDV000000000015	2020	2020-04-14	27250.00	102000	89500	52000	2025-10-25	2023-10-26	t	\N	\N	\N
+66	6	3	68	SEEDV000000000016	2019	2019-04-15	28200.00	104800	94800	64800	2025-10-25	2023-10-26	t	\N	\N	\N
+67	7	3	60	SEEDV000000000017	2018	2018-04-15	29150.00	107600	100100	67600	2025-10-25	2023-10-26	t	\N	\N	\N
+68	8	3	68	SEEDV000000000018	2017	2017-04-15	30100.00	110400	102900	80400	2025-10-25	2023-10-26	t	\N	\N	\N
+69	9	1	60	SEEDV000000000019	2016	2016-04-15	31050.00	112920	105700	63200	2025-10-25	2023-10-26	t	\N	\N	\N
+70	10	1	68	SEEDV000000000020	2020	2020-04-14	32000.00	115720	111000	102667	2025-10-25	2023-10-26	t	\N	\N	\N
+71	1	1	60	SEEDV000000000021	2019	2019-04-15	32950.00	118520	111300	85467	2025-10-25	2023-10-26	t	\N	\N	\N
+72	2	1	68	SEEDV000000000022	2018	2018-04-15	33900.00	121320	114100	91600	2025-10-25	2023-10-26	t	\N	\N	\N
+73	3	1	60	SEEDV000000000023	2017	2017-04-15	34850.00	124120	116900	91067	2025-10-25	2023-10-26	t	\N	\N	\N
+74	4	1	68	SEEDV000000000024	2016	2016-04-15	35800.00	126920	117200	87200	2025-10-25	2023-10-26	t	\N	\N	\N
+75	5	1	60	SEEDV000000000025	2020	2020-04-14	36750.00	129720	117500	80000	2025-10-25	2023-10-26	t	\N	\N	\N
+76	6	1	68	SEEDV000000000026	2019	2019-04-15	37700.00	132520	122800	92800	2025-10-25	2023-10-26	t	\N	\N	\N
+77	7	1	60	SEEDV000000000027	2018	2018-04-15	38650.00	135320	128100	95600	2025-10-25	2023-10-26	t	\N	\N	\N
+78	8	1	68	SEEDV000000000028	2017	2017-04-15	39600.00	138120	130900	108400	2025-10-25	2023-10-26	t	\N	\N	\N
+79	9	1	60	SEEDV000000000029	2016	2016-04-15	40550.00	140920	133700	91200	2025-10-25	2023-10-26	t	\N	\N	\N
+80	10	1	68	SEEDV000000000030	2020	2020-04-14	41500.00	143720	139000	130667	2025-10-25	2023-10-26	t	\N	\N	\N
+81	1	1	60	SEEDV000000000031	2019	2019-04-15	42450.00	146520	139300	113467	2025-10-25	2023-10-26	t	\N	\N	\N
+82	2	1	68	SEEDV000000000032	2018	2018-04-15	43400.00	149320	142100	119600	2025-10-25	2023-10-26	t	\N	\N	\N
+83	3	1	60	SEEDV000000000033	2017	2017-04-15	44350.00	152120	144900	119067	2025-10-25	2023-10-26	t	\N	\N	\N
+84	4	1	68	SEEDV000000000034	2016	2016-04-15	45300.00	154920	145200	115200	2025-10-25	2023-10-26	t	\N	\N	\N
+85	5	1	60	SEEDV000000000035	2020	2020-04-14	46250.00	157720	145500	108000	2025-10-25	2023-10-26	t	\N	\N	\N
+86	6	1	68	SEEDV000000000036	2019	2019-04-15	47200.00	160520	150800	120800	2025-10-25	2023-10-26	t	\N	\N	\N
+87	7	1	60	SEEDV000000000037	2018	2018-04-15	48150.00	163320	156100	123600	2025-10-25	2023-10-26	t	\N	\N	\N
+88	8	1	68	SEEDV000000000038	2017	2017-04-15	49100.00	166120	158900	136400	2025-10-25	2023-10-26	t	\N	\N	\N
+89	9	1	60	SEEDV000000000039	2016	2016-04-15	50050.00	168920	161700	119200	2025-10-25	2023-10-26	t	\N	\N	\N
+90	10	1	68	SEEDV000000000040	2020	2020-04-14	51000.00	171720	167000	158667	2025-10-25	2023-10-26	t	\N	\N	\N
+51	1	1	60	SEEDV000000000001	2019	2019-04-15	13950.00	62520	48600	29467	2025-05-18	2023-10-26	t	\N	\N	\N
+54	4	1	68	SEEDV000000000004	2016	2016-04-15	16800.00	70920	52000	31200	2025-05-18	2023-10-26	t	\N	\N	\N
 \.
 
 
 --
--- TOC entry 4020 (class 0 OID 20676)
--- Dependencies: 378
+-- TOC entry 4038 (class 0 OID 20676)
+-- Dependencies: 380
 -- Data for Name: zaduzenja; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -4343,8 +4365,8 @@ COPY public.zaduzenja (id, vozilo_id, zaposlenik_id, datum_od, datum_do, km_poce
 
 
 --
--- TOC entry 4018 (class 0 OID 20656)
--- Dependencies: 376
+-- TOC entry 4036 (class 0 OID 20656)
+-- Dependencies: 378
 -- Data for Name: zaposlenici; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -4369,14 +4391,14 @@ COPY public.zaposlenici (id, ime, prezime, korisnicko_ime, lozinka, uloga_id, mj
 40	Dalibor	Maric	seed.voditelj02	Test1234!	2	68	seed.voditelj02@carlytics.test	\N	\N	t	\N
 41	Ivan	Brkic	seed.admin01	Test1234!	1	60	seed.admin01@carlytics.test	\N	\N	t	\N
 42	Mladen	Knez	seed.admin02	Test1234!	1	68	seed.admin02@carlytics.test	\N	\N	t	\N
-43	Demo	Administrator	seed.admin03	Test1234!	1	60	seed.admin03@carlytics.test	\N	\N	t	\N
-44	Portfolio	Admin	seed.admin04	Test1234!	1	68	seed.admin04@carlytics.test	\N	\N	t	\N
+43	Matej	Kraljević	matejkraljevic	$argon2id$v=19$m=19456,t=2,p=1$7zMsj0e1L2fSthWub71gsg$VQg1xCCMfPy9BRoOnAYy953mOqSqfLa1MINCgkd/uPc	1	60	matejkraljevic321@gmail.com	\N	\N	t	\N
+44	Petar	Krvavac	petarkrvavac	123	1	68	petar.krvavac@gmail.com	\N	\N	t	\N
 \.
 
 
 --
--- TOC entry 3998 (class 0 OID 20549)
--- Dependencies: 356
+-- TOC entry 4016 (class 0 OID 20549)
+-- Dependencies: 358
 -- Data for Name: zupanije; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
@@ -4402,17 +4424,17 @@ COPY public.zupanije (id, naziv, drzava_id) FROM stdin;
 
 
 --
--- TOC entry 4076 (class 0 OID 0)
--- Dependencies: 387
+-- TOC entry 4094 (class 0 OID 0)
+-- Dependencies: 389
 -- Name: app_events_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public.app_events_id_seq', 1742, true);
+SELECT pg_catalog.setval('public.app_events_id_seq', 1745, true);
 
 
 --
--- TOC entry 4077 (class 0 OID 0)
--- Dependencies: 353
+-- TOC entry 4095 (class 0 OID 0)
+-- Dependencies: 355
 -- Name: drzave_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4420,8 +4442,8 @@ SELECT pg_catalog.setval('public.drzave_id_seq', 1, true);
 
 
 --
--- TOC entry 4078 (class 0 OID 0)
--- Dependencies: 383
+-- TOC entry 4096 (class 0 OID 0)
+-- Dependencies: 385
 -- Name: evidencija_goriva_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4429,8 +4451,8 @@ SELECT pg_catalog.setval('public.evidencija_goriva_id_seq', 448, true);
 
 
 --
--- TOC entry 4079 (class 0 OID 0)
--- Dependencies: 385
+-- TOC entry 4097 (class 0 OID 0)
+-- Dependencies: 387
 -- Name: evidencija_guma_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4438,8 +4460,8 @@ SELECT pg_catalog.setval('public.evidencija_guma_id_seq', 188, true);
 
 
 --
--- TOC entry 4080 (class 0 OID 0)
--- Dependencies: 369
+-- TOC entry 4098 (class 0 OID 0)
+-- Dependencies: 371
 -- Name: kategorije_kvarova_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4447,8 +4469,8 @@ SELECT pg_catalog.setval('public.kategorije_kvarova_id_seq', 10, true);
 
 
 --
--- TOC entry 4081 (class 0 OID 0)
--- Dependencies: 363
+-- TOC entry 4099 (class 0 OID 0)
+-- Dependencies: 365
 -- Name: kategorije_vozila_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4456,8 +4478,8 @@ SELECT pg_catalog.setval('public.kategorije_vozila_id_seq', 3, true);
 
 
 --
--- TOC entry 4082 (class 0 OID 0)
--- Dependencies: 357
+-- TOC entry 4100 (class 0 OID 0)
+-- Dependencies: 359
 -- Name: mjesta_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4465,8 +4487,8 @@ SELECT pg_catalog.setval('public.mjesta_id_seq', 143, true);
 
 
 --
--- TOC entry 4083 (class 0 OID 0)
--- Dependencies: 371
+-- TOC entry 4101 (class 0 OID 0)
+-- Dependencies: 373
 -- Name: modeli_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4474,8 +4496,8 @@ SELECT pg_catalog.setval('public.modeli_id_seq', 10, true);
 
 
 --
--- TOC entry 4084 (class 0 OID 0)
--- Dependencies: 361
+-- TOC entry 4102 (class 0 OID 0)
+-- Dependencies: 363
 -- Name: proizvodjaci_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4483,17 +4505,17 @@ SELECT pg_catalog.setval('public.proizvodjaci_id_seq', 6, true);
 
 
 --
--- TOC entry 4085 (class 0 OID 0)
--- Dependencies: 379
+-- TOC entry 4103 (class 0 OID 0)
+-- Dependencies: 381
 -- Name: registracije_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public.registracije_id_seq', 212, true);
+SELECT pg_catalog.setval('public.registracije_id_seq', 213, true);
 
 
 --
--- TOC entry 4086 (class 0 OID 0)
--- Dependencies: 381
+-- TOC entry 4104 (class 0 OID 0)
+-- Dependencies: 383
 -- Name: servisne_intervencije_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4501,8 +4523,8 @@ SELECT pg_catalog.setval('public.servisne_intervencije_id_seq', 440, true);
 
 
 --
--- TOC entry 4087 (class 0 OID 0)
--- Dependencies: 367
+-- TOC entry 4105 (class 0 OID 0)
+-- Dependencies: 369
 -- Name: statusi_vozila_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4510,8 +4532,8 @@ SELECT pg_catalog.setval('public.statusi_vozila_id_seq', 4, true);
 
 
 --
--- TOC entry 4088 (class 0 OID 0)
--- Dependencies: 365
+-- TOC entry 4106 (class 0 OID 0)
+-- Dependencies: 367
 -- Name: tipovi_goriva_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4519,8 +4541,8 @@ SELECT pg_catalog.setval('public.tipovi_goriva_id_seq', 2, true);
 
 
 --
--- TOC entry 4089 (class 0 OID 0)
--- Dependencies: 359
+-- TOC entry 4107 (class 0 OID 0)
+-- Dependencies: 361
 -- Name: uloge_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4528,8 +4550,8 @@ SELECT pg_catalog.setval('public.uloge_id_seq', 3, true);
 
 
 --
--- TOC entry 4090 (class 0 OID 0)
--- Dependencies: 373
+-- TOC entry 4108 (class 0 OID 0)
+-- Dependencies: 375
 -- Name: vozila_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4537,8 +4559,8 @@ SELECT pg_catalog.setval('public.vozila_id_seq', 90, true);
 
 
 --
--- TOC entry 4091 (class 0 OID 0)
--- Dependencies: 377
+-- TOC entry 4109 (class 0 OID 0)
+-- Dependencies: 379
 -- Name: zaduzenja_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4546,8 +4568,8 @@ SELECT pg_catalog.setval('public.zaduzenja_id_seq', 497, true);
 
 
 --
--- TOC entry 4092 (class 0 OID 0)
--- Dependencies: 375
+-- TOC entry 4110 (class 0 OID 0)
+-- Dependencies: 377
 -- Name: zaposlenici_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4555,8 +4577,8 @@ SELECT pg_catalog.setval('public.zaposlenici_id_seq', 44, true);
 
 
 --
--- TOC entry 4093 (class 0 OID 0)
--- Dependencies: 355
+-- TOC entry 4111 (class 0 OID 0)
+-- Dependencies: 357
 -- Name: zupanije_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
@@ -4564,7 +4586,7 @@ SELECT pg_catalog.setval('public.zupanije_id_seq', 5, true);
 
 
 --
--- TOC entry 3802 (class 2606 OID 23335)
+-- TOC entry 3816 (class 2606 OID 23335)
 -- Name: app_events app_events_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4573,7 +4595,7 @@ ALTER TABLE ONLY public.app_events
 
 
 --
--- TOC entry 3757 (class 2606 OID 20547)
+-- TOC entry 3765 (class 2606 OID 20547)
 -- Name: drzave drzave_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4582,7 +4604,7 @@ ALTER TABLE ONLY public.drzave
 
 
 --
--- TOC entry 3797 (class 2606 OID 20740)
+-- TOC entry 3811 (class 2606 OID 20740)
 -- Name: evidencija_goriva evidencija_goriva_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4591,7 +4613,7 @@ ALTER TABLE ONLY public.evidencija_goriva
 
 
 --
--- TOC entry 3799 (class 2606 OID 20752)
+-- TOC entry 3813 (class 2606 OID 20752)
 -- Name: evidencija_guma evidencija_guma_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4600,7 +4622,7 @@ ALTER TABLE ONLY public.evidencija_guma
 
 
 --
--- TOC entry 3773 (class 2606 OID 20605)
+-- TOC entry 3781 (class 2606 OID 20605)
 -- Name: kategorije_kvarova kategorije_kvarova_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4609,7 +4631,7 @@ ALTER TABLE ONLY public.kategorije_kvarova
 
 
 --
--- TOC entry 3767 (class 2606 OID 20587)
+-- TOC entry 3775 (class 2606 OID 20587)
 -- Name: kategorije_vozila kategorije_vozila_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4618,7 +4640,7 @@ ALTER TABLE ONLY public.kategorije_vozila
 
 
 --
--- TOC entry 3761 (class 2606 OID 20564)
+-- TOC entry 3769 (class 2606 OID 20564)
 -- Name: mjesta mjesta_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4627,7 +4649,7 @@ ALTER TABLE ONLY public.mjesta
 
 
 --
--- TOC entry 3775 (class 2606 OID 20613)
+-- TOC entry 3783 (class 2606 OID 20613)
 -- Name: modeli modeli_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4636,7 +4658,7 @@ ALTER TABLE ONLY public.modeli
 
 
 --
--- TOC entry 3765 (class 2606 OID 20581)
+-- TOC entry 3773 (class 2606 OID 20581)
 -- Name: proizvodjaci proizvodjaci_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4645,7 +4667,7 @@ ALTER TABLE ONLY public.proizvodjaci
 
 
 --
--- TOC entry 3792 (class 2606 OID 20698)
+-- TOC entry 3804 (class 2606 OID 20698)
 -- Name: registracije registracije_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4654,7 +4676,7 @@ ALTER TABLE ONLY public.registracije
 
 
 --
--- TOC entry 3795 (class 2606 OID 20712)
+-- TOC entry 3809 (class 2606 OID 20712)
 -- Name: servisne_intervencije servisne_intervencije_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4663,7 +4685,7 @@ ALTER TABLE ONLY public.servisne_intervencije
 
 
 --
--- TOC entry 3771 (class 2606 OID 20599)
+-- TOC entry 3779 (class 2606 OID 20599)
 -- Name: statusi_vozila statusi_vozila_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4672,7 +4694,7 @@ ALTER TABLE ONLY public.statusi_vozila
 
 
 --
--- TOC entry 3769 (class 2606 OID 20593)
+-- TOC entry 3777 (class 2606 OID 20593)
 -- Name: tipovi_goriva tipovi_goriva_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4681,7 +4703,7 @@ ALTER TABLE ONLY public.tipovi_goriva
 
 
 --
--- TOC entry 3763 (class 2606 OID 20575)
+-- TOC entry 3771 (class 2606 OID 20575)
 -- Name: uloge uloge_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4690,7 +4712,7 @@ ALTER TABLE ONLY public.uloge
 
 
 --
--- TOC entry 3777 (class 2606 OID 20639)
+-- TOC entry 3788 (class 2606 OID 20639)
 -- Name: vozila vozila_broj_sasije_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4699,7 +4721,7 @@ ALTER TABLE ONLY public.vozila
 
 
 --
--- TOC entry 3779 (class 2606 OID 20637)
+-- TOC entry 3790 (class 2606 OID 20637)
 -- Name: vozila vozila_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4708,7 +4730,7 @@ ALTER TABLE ONLY public.vozila
 
 
 --
--- TOC entry 3790 (class 2606 OID 20682)
+-- TOC entry 3801 (class 2606 OID 20682)
 -- Name: zaduzenja zaduzenja_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4717,7 +4739,7 @@ ALTER TABLE ONLY public.zaduzenja
 
 
 --
--- TOC entry 3782 (class 2606 OID 23353)
+-- TOC entry 3793 (class 2606 OID 23353)
 -- Name: zaposlenici zaposlenici_email_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4726,7 +4748,7 @@ ALTER TABLE ONLY public.zaposlenici
 
 
 --
--- TOC entry 3784 (class 2606 OID 20664)
+-- TOC entry 3795 (class 2606 OID 20664)
 -- Name: zaposlenici zaposlenici_korisnicko_ime_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4735,7 +4757,7 @@ ALTER TABLE ONLY public.zaposlenici
 
 
 --
--- TOC entry 3786 (class 2606 OID 20662)
+-- TOC entry 3797 (class 2606 OID 20662)
 -- Name: zaposlenici zaposlenici_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4744,7 +4766,7 @@ ALTER TABLE ONLY public.zaposlenici
 
 
 --
--- TOC entry 3788 (class 2606 OID 23355)
+-- TOC entry 3799 (class 2606 OID 23355)
 -- Name: zaposlenici zaposlenici_pozivnica_token_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4753,7 +4775,7 @@ ALTER TABLE ONLY public.zaposlenici
 
 
 --
--- TOC entry 3759 (class 2606 OID 20553)
+-- TOC entry 3767 (class 2606 OID 20553)
 -- Name: zupanije zupanije_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4762,7 +4784,7 @@ ALTER TABLE ONLY public.zupanije
 
 
 --
--- TOC entry 3800 (class 1259 OID 23336)
+-- TOC entry 3814 (class 1259 OID 23336)
 -- Name: app_events_created_at_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4770,7 +4792,7 @@ CREATE INDEX app_events_created_at_idx ON public.app_events USING btree (kreiran
 
 
 --
--- TOC entry 3803 (class 1259 OID 23337)
+-- TOC entry 3817 (class 1259 OID 23337)
 -- Name: app_events_source_created_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4778,7 +4800,31 @@ CREATE INDEX app_events_source_created_idx ON public.app_events USING btree (izv
 
 
 --
--- TOC entry 3793 (class 1259 OID 24495)
+-- TOC entry 3802 (class 1259 OID 41978)
+-- Name: idx_registracije_vozilo_istek; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_registracije_vozilo_istek ON public.registracije USING btree (vozilo_id, datum_isteka DESC);
+
+
+--
+-- TOC entry 3805 (class 1259 OID 41980)
+-- Name: idx_servis_datum_zavrsetka; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_servis_datum_zavrsetka ON public.servisne_intervencije USING btree (datum_zavrsetka DESC);
+
+
+--
+-- TOC entry 3806 (class 1259 OID 41979)
+-- Name: idx_servis_filteri; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_servis_filteri ON public.servisne_intervencije USING btree (obrisano_u, vozilo_id, kategorija_id, status_prijave, hitnost, datum_pocetka DESC);
+
+
+--
+-- TOC entry 3807 (class 1259 OID 24495)
 -- Name: idx_servis_kategorija; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4786,7 +4832,31 @@ CREATE INDEX idx_servis_kategorija ON public.servisne_intervencije USING btree (
 
 
 --
--- TOC entry 3780 (class 1259 OID 23357)
+-- TOC entry 3784 (class 1259 OID 41977)
+-- Name: idx_vozila_mjesto; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_vozila_mjesto ON public.vozila USING btree (mjesto_id);
+
+
+--
+-- TOC entry 3785 (class 1259 OID 41976)
+-- Name: idx_vozila_model_status; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_vozila_model_status ON public.vozila USING btree (model_id, status_id);
+
+
+--
+-- TOC entry 3786 (class 1259 OID 41975)
+-- Name: idx_vozila_obrisano_u; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_vozila_obrisano_u ON public.vozila USING btree (obrisano_u);
+
+
+--
+-- TOC entry 3791 (class 1259 OID 23357)
 -- Name: idx_zaposlenici_aktivan; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4794,7 +4864,7 @@ CREATE INDEX idx_zaposlenici_aktivan ON public.zaposlenici USING btree (is_aktiv
 
 
 --
--- TOC entry 3824 (class 2620 OID 23340)
+-- TOC entry 3842 (class 2620 OID 23340)
 -- Name: evidencija_goriva trg_emit_app_event_evidencija_goriva; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -4802,7 +4872,23 @@ CREATE TRIGGER trg_emit_app_event_evidencija_goriva AFTER INSERT OR DELETE OR UP
 
 
 --
--- TOC entry 3822 (class 2620 OID 23342)
+-- TOC entry 3840 (class 2620 OID 41982)
+-- Name: registracije trg_emit_app_event_registracije; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_emit_app_event_registracije AFTER INSERT OR DELETE OR UPDATE ON public.registracije FOR EACH ROW EXECUTE FUNCTION public.emit_app_event();
+
+
+--
+-- TOC entry 3838 (class 2620 OID 41981)
+-- Name: vozila trg_emit_app_event_vozila; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_emit_app_event_vozila AFTER INSERT OR DELETE OR UPDATE ON public.vozila FOR EACH ROW EXECUTE FUNCTION public.emit_app_event();
+
+
+--
+-- TOC entry 3839 (class 2620 OID 23342)
 -- Name: zaduzenja trg_emit_app_event_zaduzenja; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -4810,7 +4896,7 @@ CREATE TRIGGER trg_emit_app_event_zaduzenja AFTER INSERT OR DELETE OR UPDATE ON 
 
 
 --
--- TOC entry 3823 (class 2620 OID 24504)
+-- TOC entry 3841 (class 2620 OID 24504)
 -- Name: servisne_intervencije trg_servisne_intervencije_event; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -4818,7 +4904,7 @@ CREATE TRIGGER trg_servisne_intervencije_event AFTER INSERT OR UPDATE ON public.
 
 
 --
--- TOC entry 3820 (class 2606 OID 20741)
+-- TOC entry 3836 (class 2606 OID 20741)
 -- Name: evidencija_goriva evidencija_goriva_zaduzenje_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4827,7 +4913,7 @@ ALTER TABLE ONLY public.evidencija_goriva
 
 
 --
--- TOC entry 3821 (class 2606 OID 20753)
+-- TOC entry 3837 (class 2606 OID 20753)
 -- Name: evidencija_guma evidencija_guma_vozilo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4836,7 +4922,7 @@ ALTER TABLE ONLY public.evidencija_guma
 
 
 --
--- TOC entry 3805 (class 2606 OID 20565)
+-- TOC entry 3819 (class 2606 OID 20565)
 -- Name: mjesta mjesta_zupanija_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4845,7 +4931,7 @@ ALTER TABLE ONLY public.mjesta
 
 
 --
--- TOC entry 3806 (class 2606 OID 20619)
+-- TOC entry 3820 (class 2606 OID 20619)
 -- Name: modeli modeli_kategorija_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4854,7 +4940,7 @@ ALTER TABLE ONLY public.modeli
 
 
 --
--- TOC entry 3807 (class 2606 OID 20614)
+-- TOC entry 3821 (class 2606 OID 20614)
 -- Name: modeli modeli_proizvodjac_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4863,7 +4949,7 @@ ALTER TABLE ONLY public.modeli
 
 
 --
--- TOC entry 3808 (class 2606 OID 20624)
+-- TOC entry 3822 (class 2606 OID 20624)
 -- Name: modeli modeli_tip_goriva_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4872,7 +4958,7 @@ ALTER TABLE ONLY public.modeli
 
 
 --
--- TOC entry 3816 (class 2606 OID 20699)
+-- TOC entry 3831 (class 2606 OID 20699)
 -- Name: registracije registracije_vozilo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4881,7 +4967,7 @@ ALTER TABLE ONLY public.registracije
 
 
 --
--- TOC entry 3817 (class 2606 OID 24490)
+-- TOC entry 3832 (class 2606 OID 24490)
 -- Name: servisne_intervencije servisne_intervencije_kategorija_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4890,7 +4976,16 @@ ALTER TABLE ONLY public.servisne_intervencije
 
 
 --
--- TOC entry 3818 (class 2606 OID 20713)
+-- TOC entry 3833 (class 2606 OID 41968)
+-- Name: servisne_intervencije servisne_intervencije_obrisao_zaposlenik_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.servisne_intervencije
+    ADD CONSTRAINT servisne_intervencije_obrisao_zaposlenik_id_fkey FOREIGN KEY (obrisao_zaposlenik_id) REFERENCES public.zaposlenici(id);
+
+
+--
+-- TOC entry 3834 (class 2606 OID 20713)
 -- Name: servisne_intervencije servisne_intervencije_vozilo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4899,7 +4994,7 @@ ALTER TABLE ONLY public.servisne_intervencije
 
 
 --
--- TOC entry 3819 (class 2606 OID 24497)
+-- TOC entry 3835 (class 2606 OID 24497)
 -- Name: servisne_intervencije servisne_intervencije_zaposlenik_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4908,7 +5003,7 @@ ALTER TABLE ONLY public.servisne_intervencije
 
 
 --
--- TOC entry 3809 (class 2606 OID 20650)
+-- TOC entry 3823 (class 2606 OID 20650)
 -- Name: vozila vozila_mjesto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4917,7 +5012,7 @@ ALTER TABLE ONLY public.vozila
 
 
 --
--- TOC entry 3810 (class 2606 OID 20640)
+-- TOC entry 3824 (class 2606 OID 20640)
 -- Name: vozila vozila_model_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4926,7 +5021,16 @@ ALTER TABLE ONLY public.vozila
 
 
 --
--- TOC entry 3811 (class 2606 OID 20645)
+-- TOC entry 3825 (class 2606 OID 41963)
+-- Name: vozila vozila_obrisao_zaposlenik_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.vozila
+    ADD CONSTRAINT vozila_obrisao_zaposlenik_id_fkey FOREIGN KEY (obrisao_zaposlenik_id) REFERENCES public.zaposlenici(id);
+
+
+--
+-- TOC entry 3826 (class 2606 OID 20645)
 -- Name: vozila vozila_status_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4935,7 +5039,7 @@ ALTER TABLE ONLY public.vozila
 
 
 --
--- TOC entry 3814 (class 2606 OID 20683)
+-- TOC entry 3829 (class 2606 OID 20683)
 -- Name: zaduzenja zaduzenja_vozilo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4944,7 +5048,7 @@ ALTER TABLE ONLY public.zaduzenja
 
 
 --
--- TOC entry 3815 (class 2606 OID 20688)
+-- TOC entry 3830 (class 2606 OID 20688)
 -- Name: zaduzenja zaduzenja_zaposlenik_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4953,7 +5057,7 @@ ALTER TABLE ONLY public.zaduzenja
 
 
 --
--- TOC entry 3812 (class 2606 OID 20670)
+-- TOC entry 3827 (class 2606 OID 20670)
 -- Name: zaposlenici zaposlenici_mjesto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4962,7 +5066,7 @@ ALTER TABLE ONLY public.zaposlenici
 
 
 --
--- TOC entry 3813 (class 2606 OID 20665)
+-- TOC entry 3828 (class 2606 OID 20665)
 -- Name: zaposlenici zaposlenici_uloga_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4971,7 +5075,7 @@ ALTER TABLE ONLY public.zaposlenici
 
 
 --
--- TOC entry 3804 (class 2606 OID 20554)
+-- TOC entry 3818 (class 2606 OID 20554)
 -- Name: zupanije zupanije_drzava_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4980,15 +5084,15 @@ ALTER TABLE ONLY public.zupanije
 
 
 --
--- TOC entry 3990 (class 0 OID 23325)
--- Dependencies: 388
+-- TOC entry 4008 (class 0 OID 23325)
+-- Dependencies: 390
 -- Name: app_events; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.app_events ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3991 (class 3256 OID 23338)
+-- TOC entry 4009 (class 3256 OID 23338)
 -- Name: app_events app_events_select_realtime; Type: POLICY; Schema: public; Owner: postgres
 --
 
@@ -4996,143 +5100,143 @@ CREATE POLICY app_events_select_realtime ON public.app_events FOR SELECT TO auth
 
 
 --
--- TOC entry 3973 (class 0 OID 20543)
--- Dependencies: 354
+-- TOC entry 3991 (class 0 OID 20543)
+-- Dependencies: 356
 -- Name: drzave; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.drzave ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3988 (class 0 OID 20734)
--- Dependencies: 384
+-- TOC entry 4006 (class 0 OID 20734)
+-- Dependencies: 386
 -- Name: evidencija_goriva; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.evidencija_goriva ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3989 (class 0 OID 20747)
--- Dependencies: 386
+-- TOC entry 4007 (class 0 OID 20747)
+-- Dependencies: 388
 -- Name: evidencija_guma; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.evidencija_guma ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3981 (class 0 OID 20601)
--- Dependencies: 370
+-- TOC entry 3999 (class 0 OID 20601)
+-- Dependencies: 372
 -- Name: kategorije_kvarova; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.kategorije_kvarova ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3978 (class 0 OID 20583)
--- Dependencies: 364
+-- TOC entry 3996 (class 0 OID 20583)
+-- Dependencies: 366
 -- Name: kategorije_vozila; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.kategorije_vozila ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3975 (class 0 OID 20560)
--- Dependencies: 358
+-- TOC entry 3993 (class 0 OID 20560)
+-- Dependencies: 360
 -- Name: mjesta; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.mjesta ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3982 (class 0 OID 20607)
--- Dependencies: 372
+-- TOC entry 4000 (class 0 OID 20607)
+-- Dependencies: 374
 -- Name: modeli; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.modeli ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3977 (class 0 OID 20577)
--- Dependencies: 362
+-- TOC entry 3995 (class 0 OID 20577)
+-- Dependencies: 364
 -- Name: proizvodjaci; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.proizvodjaci ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3986 (class 0 OID 20694)
--- Dependencies: 380
+-- TOC entry 4004 (class 0 OID 20694)
+-- Dependencies: 382
 -- Name: registracije; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.registracije ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3987 (class 0 OID 20705)
--- Dependencies: 382
+-- TOC entry 4005 (class 0 OID 20705)
+-- Dependencies: 384
 -- Name: servisne_intervencije; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.servisne_intervencije ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3980 (class 0 OID 20595)
--- Dependencies: 368
+-- TOC entry 3998 (class 0 OID 20595)
+-- Dependencies: 370
 -- Name: statusi_vozila; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.statusi_vozila ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3979 (class 0 OID 20589)
--- Dependencies: 366
+-- TOC entry 3997 (class 0 OID 20589)
+-- Dependencies: 368
 -- Name: tipovi_goriva; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.tipovi_goriva ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3976 (class 0 OID 20571)
--- Dependencies: 360
+-- TOC entry 3994 (class 0 OID 20571)
+-- Dependencies: 362
 -- Name: uloge; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.uloge ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3983 (class 0 OID 20630)
--- Dependencies: 374
+-- TOC entry 4001 (class 0 OID 20630)
+-- Dependencies: 376
 -- Name: vozila; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.vozila ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3985 (class 0 OID 20676)
--- Dependencies: 378
+-- TOC entry 4003 (class 0 OID 20676)
+-- Dependencies: 380
 -- Name: zaduzenja; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.zaduzenja ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3984 (class 0 OID 20656)
--- Dependencies: 376
+-- TOC entry 4002 (class 0 OID 20656)
+-- Dependencies: 378
 -- Name: zaposlenici; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.zaposlenici ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 3974 (class 0 OID 20549)
--- Dependencies: 356
+-- TOC entry 3992 (class 0 OID 20549)
+-- Dependencies: 358
 -- Name: zupanije; Type: ROW SECURITY; Schema: public; Owner: postgres
 --
 
 ALTER TABLE public.zupanije ENABLE ROW LEVEL SECURITY;
 
 --
--- TOC entry 4037 (class 0 OID 0)
+-- TOC entry 4055 (class 0 OID 0)
 -- Dependencies: 97
 -- Name: SCHEMA public; Type: ACL; Schema: -; Owner: pg_database_owner
 --
@@ -5144,8 +5248,8 @@ GRANT USAGE ON SCHEMA public TO service_role;
 
 
 --
--- TOC entry 4038 (class 0 OID 0)
--- Dependencies: 506
+-- TOC entry 4056 (class 0 OID 0)
+-- Dependencies: 510
 -- Name: FUNCTION emit_app_event(); Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5155,8 +5259,8 @@ GRANT ALL ON FUNCTION public.emit_app_event() TO service_role;
 
 
 --
--- TOC entry 4039 (class 0 OID 0)
--- Dependencies: 479
+-- TOC entry 4057 (class 0 OID 0)
+-- Dependencies: 483
 -- Name: FUNCTION rls_auto_enable(); Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5166,8 +5270,8 @@ GRANT ALL ON FUNCTION public.rls_auto_enable() TO service_role;
 
 
 --
--- TOC entry 4040 (class 0 OID 0)
--- Dependencies: 388
+-- TOC entry 4058 (class 0 OID 0)
+-- Dependencies: 390
 -- Name: TABLE app_events; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5177,8 +5281,8 @@ GRANT ALL ON TABLE public.app_events TO service_role;
 
 
 --
--- TOC entry 4041 (class 0 OID 0)
--- Dependencies: 387
+-- TOC entry 4059 (class 0 OID 0)
+-- Dependencies: 389
 -- Name: SEQUENCE app_events_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5188,8 +5292,8 @@ GRANT ALL ON SEQUENCE public.app_events_id_seq TO service_role;
 
 
 --
--- TOC entry 4042 (class 0 OID 0)
--- Dependencies: 354
+-- TOC entry 4060 (class 0 OID 0)
+-- Dependencies: 356
 -- Name: TABLE drzave; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5199,8 +5303,8 @@ GRANT ALL ON TABLE public.drzave TO service_role;
 
 
 --
--- TOC entry 4043 (class 0 OID 0)
--- Dependencies: 353
+-- TOC entry 4061 (class 0 OID 0)
+-- Dependencies: 355
 -- Name: SEQUENCE drzave_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5210,8 +5314,8 @@ GRANT ALL ON SEQUENCE public.drzave_id_seq TO service_role;
 
 
 --
--- TOC entry 4044 (class 0 OID 0)
--- Dependencies: 384
+-- TOC entry 4062 (class 0 OID 0)
+-- Dependencies: 386
 -- Name: TABLE evidencija_goriva; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5221,8 +5325,8 @@ GRANT ALL ON TABLE public.evidencija_goriva TO service_role;
 
 
 --
--- TOC entry 4045 (class 0 OID 0)
--- Dependencies: 383
+-- TOC entry 4063 (class 0 OID 0)
+-- Dependencies: 385
 -- Name: SEQUENCE evidencija_goriva_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5232,8 +5336,8 @@ GRANT ALL ON SEQUENCE public.evidencija_goriva_id_seq TO service_role;
 
 
 --
--- TOC entry 4046 (class 0 OID 0)
--- Dependencies: 386
+-- TOC entry 4064 (class 0 OID 0)
+-- Dependencies: 388
 -- Name: TABLE evidencija_guma; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5243,8 +5347,8 @@ GRANT ALL ON TABLE public.evidencija_guma TO service_role;
 
 
 --
--- TOC entry 4047 (class 0 OID 0)
--- Dependencies: 385
+-- TOC entry 4065 (class 0 OID 0)
+-- Dependencies: 387
 -- Name: SEQUENCE evidencija_guma_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5254,8 +5358,8 @@ GRANT ALL ON SEQUENCE public.evidencija_guma_id_seq TO service_role;
 
 
 --
--- TOC entry 4048 (class 0 OID 0)
--- Dependencies: 370
+-- TOC entry 4066 (class 0 OID 0)
+-- Dependencies: 372
 -- Name: TABLE kategorije_kvarova; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5265,8 +5369,8 @@ GRANT ALL ON TABLE public.kategorije_kvarova TO service_role;
 
 
 --
--- TOC entry 4049 (class 0 OID 0)
--- Dependencies: 369
+-- TOC entry 4067 (class 0 OID 0)
+-- Dependencies: 371
 -- Name: SEQUENCE kategorije_kvarova_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5276,8 +5380,8 @@ GRANT ALL ON SEQUENCE public.kategorije_kvarova_id_seq TO service_role;
 
 
 --
--- TOC entry 4050 (class 0 OID 0)
--- Dependencies: 364
+-- TOC entry 4068 (class 0 OID 0)
+-- Dependencies: 366
 -- Name: TABLE kategorije_vozila; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5287,8 +5391,8 @@ GRANT ALL ON TABLE public.kategorije_vozila TO service_role;
 
 
 --
--- TOC entry 4051 (class 0 OID 0)
--- Dependencies: 363
+-- TOC entry 4069 (class 0 OID 0)
+-- Dependencies: 365
 -- Name: SEQUENCE kategorije_vozila_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5298,8 +5402,8 @@ GRANT ALL ON SEQUENCE public.kategorije_vozila_id_seq TO service_role;
 
 
 --
--- TOC entry 4052 (class 0 OID 0)
--- Dependencies: 358
+-- TOC entry 4070 (class 0 OID 0)
+-- Dependencies: 360
 -- Name: TABLE mjesta; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5309,8 +5413,8 @@ GRANT ALL ON TABLE public.mjesta TO service_role;
 
 
 --
--- TOC entry 4053 (class 0 OID 0)
--- Dependencies: 357
+-- TOC entry 4071 (class 0 OID 0)
+-- Dependencies: 359
 -- Name: SEQUENCE mjesta_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5320,8 +5424,8 @@ GRANT ALL ON SEQUENCE public.mjesta_id_seq TO service_role;
 
 
 --
--- TOC entry 4054 (class 0 OID 0)
--- Dependencies: 372
+-- TOC entry 4072 (class 0 OID 0)
+-- Dependencies: 374
 -- Name: TABLE modeli; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5331,8 +5435,8 @@ GRANT ALL ON TABLE public.modeli TO service_role;
 
 
 --
--- TOC entry 4055 (class 0 OID 0)
--- Dependencies: 371
+-- TOC entry 4073 (class 0 OID 0)
+-- Dependencies: 373
 -- Name: SEQUENCE modeli_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5342,8 +5446,8 @@ GRANT ALL ON SEQUENCE public.modeli_id_seq TO service_role;
 
 
 --
--- TOC entry 4056 (class 0 OID 0)
--- Dependencies: 362
+-- TOC entry 4074 (class 0 OID 0)
+-- Dependencies: 364
 -- Name: TABLE proizvodjaci; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5353,8 +5457,8 @@ GRANT ALL ON TABLE public.proizvodjaci TO service_role;
 
 
 --
--- TOC entry 4057 (class 0 OID 0)
--- Dependencies: 361
+-- TOC entry 4075 (class 0 OID 0)
+-- Dependencies: 363
 -- Name: SEQUENCE proizvodjaci_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5364,8 +5468,8 @@ GRANT ALL ON SEQUENCE public.proizvodjaci_id_seq TO service_role;
 
 
 --
--- TOC entry 4058 (class 0 OID 0)
--- Dependencies: 380
+-- TOC entry 4076 (class 0 OID 0)
+-- Dependencies: 382
 -- Name: TABLE registracije; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5375,8 +5479,8 @@ GRANT ALL ON TABLE public.registracije TO service_role;
 
 
 --
--- TOC entry 4059 (class 0 OID 0)
--- Dependencies: 379
+-- TOC entry 4077 (class 0 OID 0)
+-- Dependencies: 381
 -- Name: SEQUENCE registracije_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5386,8 +5490,8 @@ GRANT ALL ON SEQUENCE public.registracije_id_seq TO service_role;
 
 
 --
--- TOC entry 4060 (class 0 OID 0)
--- Dependencies: 382
+-- TOC entry 4078 (class 0 OID 0)
+-- Dependencies: 384
 -- Name: TABLE servisne_intervencije; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5397,8 +5501,8 @@ GRANT ALL ON TABLE public.servisne_intervencije TO service_role;
 
 
 --
--- TOC entry 4061 (class 0 OID 0)
--- Dependencies: 381
+-- TOC entry 4079 (class 0 OID 0)
+-- Dependencies: 383
 -- Name: SEQUENCE servisne_intervencije_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5408,8 +5512,8 @@ GRANT ALL ON SEQUENCE public.servisne_intervencije_id_seq TO service_role;
 
 
 --
--- TOC entry 4062 (class 0 OID 0)
--- Dependencies: 368
+-- TOC entry 4080 (class 0 OID 0)
+-- Dependencies: 370
 -- Name: TABLE statusi_vozila; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5419,8 +5523,8 @@ GRANT ALL ON TABLE public.statusi_vozila TO service_role;
 
 
 --
--- TOC entry 4063 (class 0 OID 0)
--- Dependencies: 367
+-- TOC entry 4081 (class 0 OID 0)
+-- Dependencies: 369
 -- Name: SEQUENCE statusi_vozila_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5430,8 +5534,8 @@ GRANT ALL ON SEQUENCE public.statusi_vozila_id_seq TO service_role;
 
 
 --
--- TOC entry 4064 (class 0 OID 0)
--- Dependencies: 366
+-- TOC entry 4082 (class 0 OID 0)
+-- Dependencies: 368
 -- Name: TABLE tipovi_goriva; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5441,8 +5545,8 @@ GRANT ALL ON TABLE public.tipovi_goriva TO service_role;
 
 
 --
--- TOC entry 4065 (class 0 OID 0)
--- Dependencies: 365
+-- TOC entry 4083 (class 0 OID 0)
+-- Dependencies: 367
 -- Name: SEQUENCE tipovi_goriva_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5452,8 +5556,8 @@ GRANT ALL ON SEQUENCE public.tipovi_goriva_id_seq TO service_role;
 
 
 --
--- TOC entry 4066 (class 0 OID 0)
--- Dependencies: 360
+-- TOC entry 4084 (class 0 OID 0)
+-- Dependencies: 362
 -- Name: TABLE uloge; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5463,8 +5567,8 @@ GRANT ALL ON TABLE public.uloge TO service_role;
 
 
 --
--- TOC entry 4067 (class 0 OID 0)
--- Dependencies: 359
+-- TOC entry 4085 (class 0 OID 0)
+-- Dependencies: 361
 -- Name: SEQUENCE uloge_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5474,8 +5578,8 @@ GRANT ALL ON SEQUENCE public.uloge_id_seq TO service_role;
 
 
 --
--- TOC entry 4068 (class 0 OID 0)
--- Dependencies: 374
+-- TOC entry 4086 (class 0 OID 0)
+-- Dependencies: 376
 -- Name: TABLE vozila; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5485,8 +5589,8 @@ GRANT ALL ON TABLE public.vozila TO service_role;
 
 
 --
--- TOC entry 4069 (class 0 OID 0)
--- Dependencies: 373
+-- TOC entry 4087 (class 0 OID 0)
+-- Dependencies: 375
 -- Name: SEQUENCE vozila_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5496,8 +5600,8 @@ GRANT ALL ON SEQUENCE public.vozila_id_seq TO service_role;
 
 
 --
--- TOC entry 4070 (class 0 OID 0)
--- Dependencies: 378
+-- TOC entry 4088 (class 0 OID 0)
+-- Dependencies: 380
 -- Name: TABLE zaduzenja; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5507,8 +5611,8 @@ GRANT ALL ON TABLE public.zaduzenja TO service_role;
 
 
 --
--- TOC entry 4071 (class 0 OID 0)
--- Dependencies: 377
+-- TOC entry 4089 (class 0 OID 0)
+-- Dependencies: 379
 -- Name: SEQUENCE zaduzenja_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5518,8 +5622,8 @@ GRANT ALL ON SEQUENCE public.zaduzenja_id_seq TO service_role;
 
 
 --
--- TOC entry 4072 (class 0 OID 0)
--- Dependencies: 376
+-- TOC entry 4090 (class 0 OID 0)
+-- Dependencies: 378
 -- Name: TABLE zaposlenici; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5529,8 +5633,8 @@ GRANT ALL ON TABLE public.zaposlenici TO service_role;
 
 
 --
--- TOC entry 4073 (class 0 OID 0)
--- Dependencies: 375
+-- TOC entry 4091 (class 0 OID 0)
+-- Dependencies: 377
 -- Name: SEQUENCE zaposlenici_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5540,8 +5644,8 @@ GRANT ALL ON SEQUENCE public.zaposlenici_id_seq TO service_role;
 
 
 --
--- TOC entry 4074 (class 0 OID 0)
--- Dependencies: 356
+-- TOC entry 4092 (class 0 OID 0)
+-- Dependencies: 358
 -- Name: TABLE zupanije; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5551,8 +5655,8 @@ GRANT ALL ON TABLE public.zupanije TO service_role;
 
 
 --
--- TOC entry 4075 (class 0 OID 0)
--- Dependencies: 355
+-- TOC entry 4093 (class 0 OID 0)
+-- Dependencies: 357
 -- Name: SEQUENCE zupanije_id_seq; Type: ACL; Schema: public; Owner: postgres
 --
 
@@ -5562,7 +5666,7 @@ GRANT ALL ON SEQUENCE public.zupanije_id_seq TO service_role;
 
 
 --
--- TOC entry 2495 (class 826 OID 16494)
+-- TOC entry 2503 (class 826 OID 16494)
 -- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: public; Owner: postgres
 --
 
@@ -5573,7 +5677,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENC
 
 
 --
--- TOC entry 2496 (class 826 OID 16495)
+-- TOC entry 2504 (class 826 OID 16495)
 -- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: public; Owner: supabase_admin
 --
 
@@ -5584,7 +5688,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON S
 
 
 --
--- TOC entry 2494 (class 826 OID 16493)
+-- TOC entry 2502 (class 826 OID 16493)
 -- Name: DEFAULT PRIVILEGES FOR FUNCTIONS; Type: DEFAULT ACL; Schema: public; Owner: postgres
 --
 
@@ -5595,7 +5699,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIO
 
 
 --
--- TOC entry 2498 (class 826 OID 16497)
+-- TOC entry 2506 (class 826 OID 16497)
 -- Name: DEFAULT PRIVILEGES FOR FUNCTIONS; Type: DEFAULT ACL; Schema: public; Owner: supabase_admin
 --
 
@@ -5606,7 +5710,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON F
 
 
 --
--- TOC entry 2493 (class 826 OID 16492)
+-- TOC entry 2501 (class 826 OID 16492)
 -- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: postgres
 --
 
@@ -5617,7 +5721,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES 
 
 
 --
--- TOC entry 2497 (class 826 OID 16496)
+-- TOC entry 2505 (class 826 OID 16496)
 -- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: supabase_admin
 --
 
@@ -5627,8 +5731,9 @@ ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON T
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 
 
--- Completed on 2026-05-05 15:46:56
+-- Completed on 2026-05-12 18:00:33
 
 --
 -- PostgreSQL database dump complete
 --
+

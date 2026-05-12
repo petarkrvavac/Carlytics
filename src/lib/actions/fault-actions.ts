@@ -36,6 +36,49 @@ const faultStatusUpdateSchema = z.object({
   statusPrijave: z.enum(["novo", "u_obradi", "zatvoreno"]),
 });
 
+const serviceInterventionUpdateSchema = z.object({
+  interventionId: z.coerce.number().int().positive("Servisna intervencija je obavezna."),
+  voziloId: z.coerce.number().int().positive("Vozilo je obavezno."),
+  opis: z.string().trim().min(8, "Opis mora imati barem 8 znakova."),
+  kategorijaId: z.coerce.number().int().positive().nullable().optional(),
+  hitnost: z.enum(["nisko", "srednje", "visoko", "kriticno"]),
+  statusPrijave: z.enum(["novo", "u_obradi", "zatvoreno"]),
+  datumPocetka: z.string().min(1, "Datum početka je obavezan."),
+  datumZavrsetka: z.preprocess((value) => {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+
+    return String(value);
+  }, z.string().nullable()),
+  kmUTomTrenutku: z.coerce
+    .number()
+    .int("Kilometraža mora biti cijeli broj.")
+    .nonnegative("Kilometraža ne može biti negativna."),
+  cijena: z.preprocess((value) => {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+
+    if (typeof value === "string") {
+      return Number(value.replace(",", ".").trim());
+    }
+
+    return value;
+  }, z.number().finite("Cijena mora biti broj.").nonnegative("Cijena ne može biti negativna.").nullable()),
+});
+
+const serviceInterventionLifecycleSchema = z.object({
+  interventionId: z.coerce.number().int().positive("Servisna intervencija je obavezna."),
+  razlogBrisanja: z.preprocess((value) => {
+    if (value === null || value === undefined) {
+      return "";
+    }
+
+    return String(value).trim();
+  }, z.string()),
+});
+
 const faultCloseCostSchema = z.preprocess(
   (value) => {
     if (typeof value === "string") {
@@ -702,6 +745,174 @@ export async function updateFaultStatusAction(formData: FormData) {
 
   if (error) {
     console.error("[carlytics] Neuspjelo ažuriranje statusa prijave:", error.message);
+    return;
+  }
+
+  revalidateFaultPaths();
+}
+
+export async function updateServiceInterventionAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = serviceInterventionUpdateSchema.safeParse({
+    interventionId: formData.get("interventionId"),
+    voziloId: formData.get("voziloId"),
+    opis: formData.get("opis"),
+    kategorijaId: formData.get("kategorijaId") || null,
+    hitnost: formData.get("hitnost") || "srednje",
+    statusPrijave: formData.get("statusPrijave") || "novo",
+    datumPocetka: formData.get("datumPocetka"),
+    datumZavrsetka: formData.get("datumZavrsetka"),
+    kmUTomTrenutku: formData.get("kmUTomTrenutku"),
+    cijena: formData.get("cijena"),
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Provjeri podatke servisne intervencije.",
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    };
+  }
+
+  await requireSessionUser({
+    allowedRoles: ["admin", "voditelj_flote"],
+    redirectTo: "/prijava",
+    forbiddenRedirectTo: "/m",
+  });
+
+  const client = getDbClient();
+
+  if (!client) {
+    return {
+      status: "error",
+      message: "Supabase nije konfiguriran. Intervencija nije ažurirana.",
+    };
+  }
+
+  if (parsed.data.statusPrijave === "zatvoreno" && !parsed.data.datumZavrsetka) {
+    return {
+      status: "error",
+      message: "Za zatvorenu intervenciju unesi datum završetka.",
+      fieldErrors: {
+        datumZavrsetka: ["Datum završetka je obavezan za zatvoreni status."],
+      },
+    };
+  }
+
+  const updatePayload: TablesUpdate<"servisne_intervencije"> = {
+    vozilo_id: parsed.data.voziloId,
+    opis: parsed.data.opis,
+    kategorija_id: parsed.data.kategorijaId ?? null,
+    hitnost: parsed.data.hitnost,
+    status_prijave: parsed.data.statusPrijave,
+    datum_pocetka: parsed.data.datumPocetka,
+    datum_zavrsetka: parsed.data.datumZavrsetka,
+    km_u_tom_trenutku: parsed.data.kmUTomTrenutku,
+    cijena: parsed.data.cijena,
+  };
+
+  const { error } = await client
+    .from("servisne_intervencije")
+    .update(updatePayload)
+    .eq("id", parsed.data.interventionId)
+    .is("obrisano_u", null);
+
+  if (error) {
+    console.error("[carlytics] Neuspjelo uređivanje servisne intervencije:", error.message);
+    return {
+      status: "error",
+      message: "Intervencija nije ažurirana. Pokušaj ponovno.",
+    };
+  }
+
+  revalidateFaultPaths();
+  revalidatePath(`/flota/${parsed.data.voziloId}`);
+
+  return {
+    status: "success",
+    message: "Servisna intervencija je uspješno ažurirana.",
+  };
+}
+
+export async function deleteServiceInterventionAction(formData: FormData) {
+  const parsed = serviceInterventionLifecycleSchema.safeParse({
+    interventionId: formData.get("interventionId"),
+    razlogBrisanja: formData.get("razlogBrisanja"),
+  });
+
+  if (!parsed.success || parsed.data.razlogBrisanja.length < 3) {
+    console.warn("[carlytics] Brisanje servisne intervencije odbijeno: neispravan payload ili razlog.");
+    return;
+  }
+
+  const sessionUser = await requireSessionUser({
+    allowedRoles: ["admin", "voditelj_flote"],
+    redirectTo: "/prijava",
+    forbiddenRedirectTo: "/m",
+  });
+
+  const client = getDbClient();
+
+  if (!client) {
+    console.error("[carlytics] Supabase nije konfiguriran za deleteServiceInterventionAction.");
+    return;
+  }
+
+  const { error } = await client
+    .from("servisne_intervencije")
+    .update({
+      obrisano_u: getCurrentIsoTimestamp(),
+      obrisao_zaposlenik_id: sessionUser.employeeId,
+      razlog_brisanja: parsed.data.razlogBrisanja,
+    })
+    .eq("id", parsed.data.interventionId)
+    .is("obrisano_u", null);
+
+  if (error) {
+    console.error("[carlytics] Neuspjelo soft brisanje servisne intervencije:", error.message);
+    return;
+  }
+
+  revalidateFaultPaths();
+}
+
+export async function restoreServiceInterventionAction(formData: FormData) {
+  const parsed = serviceInterventionLifecycleSchema.safeParse({
+    interventionId: formData.get("interventionId"),
+    razlogBrisanja: "",
+  });
+
+  if (!parsed.success) {
+    console.warn("[carlytics] Vraćanje servisne intervencije odbijeno: neispravan payload.");
+    return;
+  }
+
+  await requireSessionUser({
+    allowedRoles: ["admin", "voditelj_flote"],
+    redirectTo: "/prijava",
+    forbiddenRedirectTo: "/m",
+  });
+
+  const client = getDbClient();
+
+  if (!client) {
+    console.error("[carlytics] Supabase nije konfiguriran za restoreServiceInterventionAction.");
+    return;
+  }
+
+  const { error } = await client
+    .from("servisne_intervencije")
+    .update({
+      obrisano_u: null,
+      obrisao_zaposlenik_id: null,
+      razlog_brisanja: null,
+    })
+    .eq("id", parsed.data.interventionId);
+
+  if (error) {
+    console.error("[carlytics] Neuspjelo vraćanje servisne intervencije:", error.message);
     return;
   }
 

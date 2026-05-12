@@ -13,6 +13,7 @@ import { FallbackChip } from "@/components/dashboard/fallback-chip";
 import { VehicleHistoryPaginationSections } from "@/components/fleet/vehicle-history-pagination-sections";
 import { VehicleCostBreakdownChart } from "@/components/fleet/vehicle-cost-breakdown-chart";
 import { VehicleActivationControls } from "@/components/fleet/vehicle-activation-controls";
+import { VehicleEditModal } from "@/components/fleet/vehicle-edit-modal";
 import { RegistrationExtensionForm } from "@/components/fleet/registration-extension-form";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -20,6 +21,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import type { FaultQueueItem } from "@/lib/fleet/operations-service";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import { getVehicleDigitalTwinData } from "@/lib/fleet/vehicle-digital-twin-service";
+import { getVehicleFormContext } from "@/lib/fleet/vehicle-form-context-service";
 import { formatDate, formatDateTime } from "@/lib/utils/date-format";
 import { parsePageParam } from "@/lib/utils/page-params";
 
@@ -199,7 +201,10 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
     notFound();
   }
 
-  const digitalTwinData = await getVehicleDigitalTwinData(vehicleId);
+  const [digitalTwinData, vehicleFormContext] = await Promise.all([
+    getVehicleDigitalTwinData(vehicleId),
+    getVehicleFormContext(),
+  ]);
 
   if (!digitalTwinData.vehicle) {
     notFound();
@@ -287,7 +292,8 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
                   {vehicle.isActive ? "Aktivno vozilo" : "Deaktivirano vozilo"}
                 </Badge>
               </div>
-              <div className="w-full sm:w-auto">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:justify-end">
+                <VehicleEditModal vehicle={vehicle} formContext={vehicleFormContext} />
                 <VehicleActivationControls vehicleId={vehicle.id} isActive={vehicle.isActive} />
               </div>
             </div>
@@ -339,6 +345,12 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
             ) : null}
             {!vehicle.isActive && vehicle.deactivationReason ? (
               <Badge variant="danger">Razlog deaktivacije: {vehicle.deactivationReason}</Badge>
+            ) : null}
+            {!vehicle.isActive && vehicle.deactivatedAtIso ? (
+              <Badge variant="danger">Deaktivirano: {formatDateTime(vehicle.deactivatedAtIso)}</Badge>
+            ) : null}
+            {!vehicle.isActive && vehicle.deactivatedByName ? (
+              <Badge variant="danger">Deaktivirao: {vehicle.deactivatedByName}</Badge>
             ) : null}
           </div>
 

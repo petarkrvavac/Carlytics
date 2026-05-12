@@ -459,6 +459,7 @@ export async function assignWorkerVehicleAction(
     .from("vozila")
     .select("id, status_id, trenutna_km")
     .eq("id", parsed.data.vehicleId)
+    .eq("is_aktivan", true)
     .maybeSingle();
 
   if (vehicleError || !vehicleRow) {

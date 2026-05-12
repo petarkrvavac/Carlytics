@@ -31,12 +31,18 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const selectedVehicleId = parsePositiveNumberParam(url.searchParams.get("vozilo"));
   const selectedPeriod = parsePeriod(url.searchParams.get("period"));
+  const selectedCategoryId = parsePositiveNumberParam(url.searchParams.get("kategorija"));
+  const dateFrom = url.searchParams.get("od") ?? "";
+  const dateTo = url.searchParams.get("do") ?? "";
 
   const [timelineData, headerData] = await Promise.all([
     getServiceCenterTimelineData(),
     getServiceCenterHeaderData({
       vehicleId: selectedVehicleId,
       period: selectedPeriod,
+      categoryId: selectedCategoryId,
+      dateFrom,
+      dateTo,
     }),
   ]);
 

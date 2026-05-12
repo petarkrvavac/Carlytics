@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { Download, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 
 import {
   AddVehicleForm,
@@ -16,6 +16,7 @@ import type { VehicleListItem } from "@/lib/fleet/types";
 import type { VehicleFormContext } from "@/lib/fleet/vehicle-form-context-service";
 import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
 import { cn } from "@/lib/utils/cn";
+import { replaceCurrentUrlQueryParams } from "@/lib/utils/url-query";
 
 const ITEMS_PER_PAGE = 12;
 const LIVE_FLEET_SOURCE_TABLES = [
@@ -27,11 +28,16 @@ const LIVE_FLEET_SOURCE_TABLES = [
 ];
 
 export type FleetStatusFilter = "sve" | "slobodno" | "zauzeto" | "servis" | "neaktivna";
+export type FleetRiskFilter = "sve" | "servis" | "registracija" | "kvar";
 
 interface FleetSectionContentProps {
   vehicles: VehicleListItem[];
   formContext: VehicleFormContext;
   initialFilter: FleetStatusFilter;
+  initialSearchQuery: string;
+  initialManufacturerId: number | null;
+  initialModelId: number | null;
+  initialRiskFilter: FleetRiskFilter;
 }
 
 const FILTERS: Array<{
@@ -43,6 +49,13 @@ const FILTERS: Array<{
   { key: "zauzeto", label: "Zauzeto" },
   { key: "servis", label: "Na servisu" },
   { key: "neaktivna", label: "Neaktivna vozila" },
+];
+
+const RISK_FILTERS: Array<{ key: FleetRiskFilter; label: string }> = [
+  { key: "sve", label: "Svi rizici" },
+  { key: "servis", label: "Servis" },
+  { key: "registracija", label: "Registracija" },
+  { key: "kvar", label: "Kvar" },
 ];
 
 function matchesVehicleSearch(vehicle: VehicleListItem, normalizedSearchQuery: string) {
@@ -61,52 +74,110 @@ function getFilteredVehicles(
   vehicles: VehicleListItem[],
   filter: FleetStatusFilter,
   searchQuery: string,
+  manufacturerId: number | null,
+  modelId: number | null,
+  riskFilter: FleetRiskFilter,
 ) {
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const applyCommonFilters = (vehicle: VehicleListItem) => {
+    if (!matchesVehicleSearch(vehicle, normalizedSearchQuery)) {
+      return false;
+    }
+
+    if (manufacturerId && vehicle.manufacturerId !== manufacturerId) {
+      return false;
+    }
+
+    if (modelId && vehicle.modelId !== modelId) {
+      return false;
+    }
+
+    if (riskFilter === "servis") {
+      return vehicle.isServiceDue || vehicle.serviceDueKm <= 2000;
+    }
+
+    if (riskFilter === "registracija") {
+      return vehicle.registrationExpiryDays !== null && vehicle.registrationExpiryDays <= 30;
+    }
+
+    if (riskFilter === "kvar") {
+      return vehicle.openFaultCount > 0;
+    }
+
+    return true;
+  };
 
   if (filter === "neaktivna") {
-    return vehicles.filter(
-      (vehicle) => !vehicle.isActive && matchesVehicleSearch(vehicle, normalizedSearchQuery),
-    );
+    return vehicles.filter((vehicle) => !vehicle.isActive && applyCommonFilters(vehicle));
   }
 
   const activeVehicles = vehicles.filter((vehicle) => vehicle.isActive);
 
   if (filter === "slobodno") {
     return activeVehicles.filter(
-      (vehicle) =>
-        vehicle.status === "Slobodno" && matchesVehicleSearch(vehicle, normalizedSearchQuery),
+      (vehicle) => vehicle.status === "Slobodno" && applyCommonFilters(vehicle),
     );
   }
 
   if (filter === "zauzeto") {
     return activeVehicles.filter(
-      (vehicle) =>
-        vehicle.status === "Zauzeto" && matchesVehicleSearch(vehicle, normalizedSearchQuery),
+      (vehicle) => vehicle.status === "Zauzeto" && applyCommonFilters(vehicle),
     );
   }
 
   if (filter === "servis") {
     return activeVehicles.filter(
       (vehicle) =>
-        (vehicle.openFaultCount > 0 || vehicle.status === "Na servisu") &&
-        matchesVehicleSearch(vehicle, normalizedSearchQuery),
+        (vehicle.openFaultCount > 0 || vehicle.status === "Na servisu") && applyCommonFilters(vehicle),
     );
   }
 
-  return activeVehicles.filter((vehicle) => matchesVehicleSearch(vehicle, normalizedSearchQuery));
+  return activeVehicles.filter((vehicle) => applyCommonFilters(vehicle));
 }
 
 export function FleetSectionContent({
   vehicles,
   formContext,
   initialFilter,
+  initialSearchQuery,
+  initialManufacturerId,
+  initialModelId,
+  initialRiskFilter,
 }: FleetSectionContentProps) {
   const [fleetVehicles, setFleetVehicles] = useState(vehicles);
   const [activeFilter, setActiveFilter] = useState<FleetStatusFilter>(initialFilter);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
+  const [manufacturerId, setManufacturerId] = useState<number | null>(initialManufacturerId);
+  const [modelId, setModelId] = useState<number | null>(initialModelId);
+  const [riskFilter, setRiskFilter] = useState<FleetRiskFilter>(initialRiskFilter);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+
+  const syncFiltersToUrl = useCallback((next: {
+    status?: FleetStatusFilter;
+    q?: string;
+    manufacturerId?: number | null;
+    modelId?: number | null;
+    risk?: FleetRiskFilter;
+  }) => {
+    const resolvedStatus = next.status ?? activeFilter;
+    const resolvedSearch = next.q ?? searchQuery;
+    const resolvedManufacturerId =
+      Object.prototype.hasOwnProperty.call(next, "manufacturerId")
+        ? next.manufacturerId
+        : manufacturerId;
+    const resolvedModelId =
+      Object.prototype.hasOwnProperty.call(next, "modelId") ? next.modelId : modelId;
+    const resolvedRisk = next.risk ?? riskFilter;
+
+    replaceCurrentUrlQueryParams({
+      status: resolvedStatus === "sve" ? null : resolvedStatus,
+      q: resolvedSearch.trim() || null,
+      proizvodjac: resolvedManufacturerId ? String(resolvedManufacturerId) : null,
+      model: resolvedModelId ? String(resolvedModelId) : null,
+      rizik: resolvedRisk === "sve" ? null : resolvedRisk,
+    });
+  }, [activeFilter, manufacturerId, modelId, riskFilter, searchQuery]);
 
   const refreshFleetSnapshot = useCallback(async () => {
     const response = await fetch("/api/live/fleet", {
@@ -136,9 +207,29 @@ export function FleetSectionContent({
   }, [vehicles]);
 
   const visibleVehicles = useMemo(
-    () => getFilteredVehicles(fleetVehicles, activeFilter, searchQuery),
-    [activeFilter, fleetVehicles, searchQuery],
+    () =>
+      getFilteredVehicles(
+        fleetVehicles,
+        activeFilter,
+        searchQuery,
+        manufacturerId,
+        modelId,
+        riskFilter,
+      ),
+    [activeFilter, fleetVehicles, manufacturerId, modelId, riskFilter, searchQuery],
   );
+  const fleetReportHref = useMemo(() => {
+    const params = new URLSearchParams();
+
+    if (activeFilter !== "sve") params.set("status", activeFilter);
+    if (searchQuery.trim()) params.set("q", searchQuery.trim());
+    if (manufacturerId) params.set("proizvodjac", String(manufacturerId));
+    if (modelId) params.set("model", String(modelId));
+    if (riskFilter !== "sve") params.set("rizik", riskFilter);
+
+    const query = params.toString();
+    return query ? `/api/reports/fleet.csv?${query}` : "/api/reports/fleet.csv";
+  }, [activeFilter, manufacturerId, modelId, riskFilter, searchQuery]);
 
   const totalPages = Math.max(1, Math.ceil(visibleVehicles.length / ITEMS_PER_PAGE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -192,14 +283,23 @@ export function FleetSectionContent({
         title="Flota"
         description="Pregled svih vozila, servisnog rizika i operativnog statusa s fokusom na brzu akciju."
         actions={
-          <button
-            type="button"
-            onClick={openModal}
-            className="inline-flex h-10 items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
-          >
-            <Plus size={15} />
-            Dodaj vozilo
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={fleetReportHref}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+            >
+              <Download size={15} />
+              CSV
+            </a>
+            <button
+              type="button"
+              onClick={openModal}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
+            >
+              <Plus size={15} />
+              Dodaj vozilo
+            </button>
+          </div>
         }
       />
 
@@ -216,8 +316,10 @@ export function FleetSectionContent({
               type="search"
               value={searchQuery}
               onChange={(event) => {
-                setSearchQuery(event.target.value);
+                const nextQuery = event.target.value;
+                setSearchQuery(nextQuery);
                 setCurrentPage(1);
+                syncFiltersToUrl({ q: nextQuery });
               }}
               placeholder="Pretraži proizvođača, model, registraciju ili VIN"
               className="h-full w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
@@ -234,6 +336,7 @@ export function FleetSectionContent({
               onClick={() => {
                 setActiveFilter(filter.key);
                 setCurrentPage(1);
+                syncFiltersToUrl({ status: filter.key });
               }}
               className={cn(
                 "inline-flex h-8 items-center rounded-lg border px-3 text-xs font-semibold uppercase tracking-[0.14em] transition",
@@ -245,6 +348,64 @@ export function FleetSectionContent({
               {filter.label}
             </button>
           ))}
+        </div>
+
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <select
+            value={manufacturerId ?? ""}
+            onChange={(event) => {
+              const nextManufacturerId = event.target.value ? Number(event.target.value) : null;
+              setManufacturerId(nextManufacturerId);
+              setModelId(null);
+              setCurrentPage(1);
+              syncFiltersToUrl({ manufacturerId: nextManufacturerId, modelId: null });
+            }}
+            className="carlytics-select h-9 rounded-lg px-3 text-xs"
+          >
+            <option value="">Svi proizvođači</option>
+            {formContext.manufacturerOptions.map((manufacturer) => (
+              <option key={manufacturer.id} value={manufacturer.id}>
+                {manufacturer.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={modelId ?? ""}
+            onChange={(event) => {
+              const nextModelId = event.target.value ? Number(event.target.value) : null;
+              setModelId(nextModelId);
+              setCurrentPage(1);
+              syncFiltersToUrl({ modelId: nextModelId });
+            }}
+            className="carlytics-select h-9 rounded-lg px-3 text-xs"
+          >
+            <option value="">Svi modeli</option>
+            {formContext.modelOptions
+              .filter((model) => !manufacturerId || model.manufacturerId === manufacturerId)
+              .map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                </option>
+              ))}
+          </select>
+
+          <select
+            value={riskFilter}
+            onChange={(event) => {
+              const nextRisk = event.target.value as FleetRiskFilter;
+              setRiskFilter(nextRisk);
+              setCurrentPage(1);
+              syncFiltersToUrl({ risk: nextRisk });
+            }}
+            className="carlytics-select h-9 rounded-lg px-3 text-xs"
+          >
+            {RISK_FILTERS.map((filter) => (
+              <option key={filter.key} value={filter.key}>
+                {filter.label}
+              </option>
+            ))}
+          </select>
         </div>
       </Card>
 

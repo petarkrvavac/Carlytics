@@ -53,6 +53,7 @@ Carlytics centralizes all fleet-related data into one operational platform. Data
 - Service, maintenance, registration, and tire history
 - Fuel tracking with cost analytics
 - Fault/incident reporting with image attachments
+- CSV and print/PDF-friendly fleet, service, and fuel reports
 - Employee management and invitation-based onboarding
 - Role-based desktop and mobile workflows
 - Real-time dashboard, fleet, fuel, assignment, employee, and service updates
@@ -131,9 +132,11 @@ Import the provided PostgreSQL dump before running the app:
 ```bash
 createdb carlytics
 psql -d carlytics -f database-sql/database.sql
+psql -d carlytics -f database-sql/2026-05-12-soft-delete-crud-reports.sql
 ```
 
-For Supabase, import `database-sql/database.sql` into a fresh project through the SQL editor or a direct `psql` connection.
+For Supabase, import `database-sql/database.sql` first, then run
+`database-sql/2026-05-12-soft-delete-crud-reports.sql` through the SQL editor or a direct `psql` connection.
 
 ### 5. Run Development Server
 
@@ -194,7 +197,7 @@ This bucket is used for uploaded fault/incident images. If realtime updates do n
 ## 🔮 Future Improvements
 
 - Automatic VIN-based vehicle detection
-- Advanced analytics and exportable fleet reports
+- Scheduled report delivery and deeper forecast analytics
 - More granular RLS policies for user-scoped database access
 - Automated email delivery for employee invitations
 - PWA/offline support for field employees

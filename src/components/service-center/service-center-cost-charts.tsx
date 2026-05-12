@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   ArcElement,
   CategoryScale,
@@ -37,6 +37,7 @@ interface ServiceCenterCostChartsProps {
   serviceTimeline: ServiceTimelineItem[];
   showTopVehicles?: boolean;
   initialPeriod?: PeriodFilter;
+  selectedCategoryId?: number | null;
 }
 
 interface TopVehicleLeaderboardItem {
@@ -157,11 +158,12 @@ export function ServiceCenterCostCharts({
   serviceTimeline,
   showTopVehicles = true,
   initialPeriod = "6",
+  selectedCategoryId = null,
 }: ServiceCenterCostChartsProps) {
   const isLightTheme = useIsLightTheme();
 
-  const [selectedCategory, setSelectedCategory] = useState("sve");
   const selectedPeriod = initialPeriod;
+  const hasSingleCategoryFilter = Boolean(selectedCategoryId);
 
   const completedServices = useMemo(() => {
     return serviceTimeline.filter((service) => !service.isOpen && service.cost > 0);
@@ -169,18 +171,9 @@ export function ServiceCenterCostCharts({
 
   const currentPeriodMonthKeys = useMemo(() => getMonthsForPeriod(selectedPeriod), [selectedPeriod]);
 
-  const categoryOptions = useMemo(() => {
-    const labels = new Set<string>();
-
-    for (const service of completedServices) {
-      labels.add(service.categoryLabel ?? "Nekategorizirano");
-    }
-
-    return ["sve", ...Array.from(labels).sort((left, right) => left.localeCompare(right, "hr"))];
-  }, [completedServices]);
-  const effectiveSelectedCategory = categoryOptions.includes(selectedCategory)
-    ? selectedCategory
-    : "sve";
+  const selectedCategoryLabel = hasSingleCategoryFilter
+    ? (completedServices.find((service) => service.categoryId === selectedCategoryId)?.categoryLabel ?? "Odabrana kategorija")
+    : null;
 
   const categoryTotals = useMemo(() => {
     const totals = new Map<string, number>();
@@ -203,13 +196,6 @@ export function ServiceCenterCostCharts({
     const totalsByMonth = new Map<string, number>();
 
     for (const service of completedServices) {
-      if (
-        effectiveSelectedCategory !== "sve" &&
-        (service.categoryLabel ?? "Nekategorizirano") !== effectiveSelectedCategory
-      ) {
-        continue;
-      }
-
       const date = parseDate(service.endedAtIso ?? service.startedAtIso);
 
       if (!date) {
@@ -235,7 +221,7 @@ export function ServiceCenterCostCharts({
       monthLabel: toMonthLabel(monthKey),
       total: Number((totalsByMonth.get(monthKey) ?? 0).toFixed(2)),
     }));
-  }, [completedServices, currentPeriodMonthKeys, effectiveSelectedCategory, selectedPeriod]);
+  }, [completedServices, currentPeriodMonthKeys, selectedPeriod]);
 
   const topVehicleLeaderboard = useMemo<TopVehicleLeaderboardItem[]>(() => {
     const periodMonthSet = new Set(currentPeriodMonthKeys);
@@ -419,10 +405,7 @@ export function ServiceCenterCostCharts({
     labels: monthlySeries.map((entry) => entry.monthLabel),
     datasets: [
       {
-        label:
-          effectiveSelectedCategory === "sve"
-            ? "Ukupni trošak"
-            : `Trošak: ${effectiveSelectedCategory}`,
+        label: selectedCategoryLabel ? `Trošak: ${selectedCategoryLabel}` : "Ukupni trošak",
         data: monthlySeries.map((entry) => entry.total),
         borderColor: palette.line,
         backgroundColor: "rgba(34,211,238,0.2)",
@@ -484,7 +467,8 @@ export function ServiceCenterCostCharts({
   }
 
   return (
-    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-[1.1fr_0.9fr]">
+    <div className={hasSingleCategoryFilter ? "grid gap-5" : "grid gap-5 md:grid-cols-2 xl:grid-cols-[1.1fr_0.9fr]"}>
+      {!hasSingleCategoryFilter ? (
       <Card>
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">
@@ -497,6 +481,7 @@ export function ServiceCenterCostCharts({
           <Pie data={pieData} options={pieOptions} />
         </div>
       </Card>
+      ) : null}
 
       <Card>
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -504,22 +489,10 @@ export function ServiceCenterCostCharts({
             Trend troška
           </h3>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={effectiveSelectedCategory}
-              onChange={(event) => setSelectedCategory(event.target.value)}
-              className="carlytics-select h-9 rounded-lg px-3 text-xs"
-            >
-              {categoryOptions.map((category) => (
-                <option key={category} value={category}>
-                  {category === "sve" ? "Sve kategorije" : category}
-                </option>
-              ))}
-            </select>
-          </div>
+          {selectedCategoryLabel ? <Badge variant="info">{selectedCategoryLabel}</Badge> : null}
         </div>
 
-        <div className="h-64 rounded-xl border border-border bg-surface-elevated p-3 sm:h-80">
+        <div className={hasSingleCategoryFilter ? "h-72 rounded-xl border border-border bg-surface-elevated p-3 sm:h-96" : "h-64 rounded-xl border border-border bg-surface-elevated p-3 sm:h-80"}>
           <Line data={lineData} options={lineOptions} />
         </div>
       </Card>

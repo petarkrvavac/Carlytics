@@ -32,6 +32,8 @@ type InterventionRow = Pick<
   | "kategorija_id"
   | "hitnost"
   | "status_prijave"
+  | "obrisano_u"
+  | "razlog_brisanja"
 >;
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -126,6 +128,12 @@ export interface ServiceTimelineItem {
   description: string;
   cost: number;
   isOpen: boolean;
+  priority?: FaultPriority;
+  statusRaw?: string | null;
+  employeeId?: number | null;
+  reporterName?: string;
+  deletedAtIso?: string | null;
+  deletionReason?: string | null;
   categoryId?: number | null;
   categoryLabel?: string;
 }
@@ -376,6 +384,9 @@ function compareDatesDesc(leftIso: string | null | undefined, rightIso: string |
 interface ServiceCenterHeaderOptions {
   vehicleId?: number | null;
   period?: "3" | "6" | "12" | "all";
+  categoryId?: number | null;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 function getPeriodStartDate(period: "3" | "6" | "12" | "all") {
@@ -414,6 +425,10 @@ export async function getServiceCenterHeaderData(
       interventionsQuery = interventionsQuery.eq("vozilo_id", options.vehicleId);
     }
 
+    if (options.categoryId) {
+      interventionsQuery = interventionsQuery.eq("kategorija_id", options.categoryId);
+    }
+
     const { data: interventionsData, error: interventionsError } = await interventionsQuery;
 
     if (interventionsError) {
@@ -423,12 +438,33 @@ export async function getServiceCenterHeaderData(
     const periodStartDate = getPeriodStartDate(options.period ?? "all");
     const interventionRows = (interventionsData ?? []).filter((service) => {
       if (!periodStartDate) {
+        const referenceDate = parseDate(service.datum_zavrsetka ?? service.datum_pocetka);
+        const referenceDateKey = referenceDate?.toISOString().slice(0, 10) ?? "";
+
+        if (options.dateFrom && referenceDateKey && referenceDateKey < options.dateFrom) {
+          return false;
+        }
+
+        if (options.dateTo && referenceDateKey && referenceDateKey > options.dateTo) {
+          return false;
+        }
+
         return true;
       }
 
       const referenceDate = parseDate(service.datum_zavrsetka ?? service.datum_pocetka);
 
       if (!referenceDate) {
+        return false;
+      }
+
+      const referenceDateKey = referenceDate.toISOString().slice(0, 10);
+
+      if (options.dateFrom && referenceDateKey < options.dateFrom) {
+        return false;
+      }
+
+      if (options.dateTo && referenceDateKey > options.dateTo) {
         return false;
       }
 
@@ -457,7 +493,9 @@ export async function getServiceCenterHeaderData(
   }
 }
 
-export async function getServiceCenterTimelineData(): Promise<ServiceCenterTimelineData> {
+export async function getServiceCenterTimelineData(
+  options: { includeDeleted?: boolean } = {},
+): Promise<ServiceCenterTimelineData> {
   const serviceRoleClient = createOptionalServiceRoleSupabaseClient();
   const client = serviceRoleClient ?? createOptionalServerSupabaseClient();
 
@@ -466,12 +504,20 @@ export async function getServiceCenterTimelineData(): Promise<ServiceCenterTimel
   }
 
   try {
+    const servicesQuery = client
+      .from("servisne_intervencije")
+      .select("id, datum_pocetka, datum_zavrsetka, attachment_url, vozilo_id, zaposlenik_id, km_u_tom_trenutku, opis, cijena, kategorija_id, hitnost, status_prijave, obrisano_u, razlog_brisanja");
+    const visibleServicesQuery = options.includeDeleted
+      ? servicesQuery
+      : applyInterventionVisibilityFilter(servicesQuery);
+
     const [
       vehiclesResult,
       modelsResult,
       manufacturersResult,
       registrationsResult,
       categoriesResult,
+      employeesResult,
       servicesResult,
     ] = await Promise.all([
       client.from("vozila").select("id, model_id, trenutna_km"),
@@ -481,11 +527,8 @@ export async function getServiceCenterTimelineData(): Promise<ServiceCenterTimel
         .from("registracije")
         .select("vozilo_id, registracijska_oznaka, datum_isteka"),
       client.from("kategorije_kvarova").select("id, naziv"),
-      applyInterventionVisibilityFilter(
-        client
-          .from("servisne_intervencije")
-          .select("id, datum_pocetka, datum_zavrsetka, attachment_url, vozilo_id, km_u_tom_trenutku, opis, cijena, kategorija_id"),
-      ),
+      client.from("zaposlenici").select("id, ime, prezime, korisnicko_ime"),
+      visibleServicesQuery,
     ] as const);
 
     const queryError = [
@@ -494,6 +537,7 @@ export async function getServiceCenterTimelineData(): Promise<ServiceCenterTimel
       manufacturersResult.error,
       registrationsResult.error,
       categoriesResult.error,
+      employeesResult.error,
       servicesResult.error,
     ].find((error) => Boolean(error));
 
@@ -510,10 +554,14 @@ export async function getServiceCenterTimelineData(): Promise<ServiceCenterTimel
     const categoryById = new Map(
       ((categoriesResult.data ?? []) as ServiceCategoryRow[]).map((category) => [category.id, category]),
     );
+    const employeeLookup = buildEmployeeLookup(employeesResult.data ?? []);
 
     const mappedServiceTimeline = (servicesResult.data ?? [])
       .map<ServiceTimelineItem>((service) => {
         const vehicle = service.vozilo_id ? vehicleLookup.get(service.vozilo_id) : null;
+        const reporter = service.zaposlenik_id
+          ? employeeLookup.get(service.zaposlenik_id)
+          : null;
 
         return {
           id: service.id,
@@ -526,7 +574,13 @@ export async function getServiceCenterTimelineData(): Promise<ServiceCenterTimel
           kmAtMoment: service.km_u_tom_trenutku,
           description: service.opis?.trim() || "Bez opisa zahvata",
           cost: service.cijena ?? 0,
-          isOpen: !service.datum_zavrsetka,
+          isOpen: isInterventionOpen(service.status_prijave, service.datum_zavrsetka),
+          priority: normalizeFaultPriority(service.hitnost),
+          statusRaw: service.status_prijave,
+          employeeId: service.zaposlenik_id ?? null,
+          reporterName: reporter?.fullName ?? "Nepoznati zaposlenik",
+          deletedAtIso: service.obrisano_u ?? null,
+          deletionReason: service.razlog_brisanja ?? null,
           categoryId: service.kategorija_id,
           categoryLabel: service.kategorija_id
             ? (categoryById.get(service.kategorija_id)?.naziv ?? "Nekategorizirano")
@@ -906,7 +960,9 @@ export async function getOperationsOverviewData(): Promise<OperationsOverviewDat
           kmAtMoment: service.km_u_tom_trenutku,
           description: service.opis?.trim() || "Bez opisa zahvata",
           cost: service.cijena ?? 0,
-          isOpen: !service.datum_zavrsetka,
+          isOpen: isInterventionOpen(service.status_prijave, service.datum_zavrsetka),
+          priority: normalizeFaultPriority(service.hitnost),
+          statusRaw: service.status_prijave,
           categoryId: service.kategorija_id,
           categoryLabel: service.kategorija_id
             ? (categoryById.get(service.kategorija_id)?.naziv ?? "Nekategorizirano")

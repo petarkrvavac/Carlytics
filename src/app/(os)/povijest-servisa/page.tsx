@@ -7,7 +7,14 @@ import {
 import { parsePageParam, parsePositiveIntegerParam } from "@/lib/utils/page-params";
 
 interface PovijestServisaPageProps {
-  searchParams?: Promise<{ vozilo?: string; stranica?: string; period?: string }>;
+  searchParams?: Promise<{
+    vozilo?: string;
+    stranica?: string;
+    period?: string;
+    kategorija?: string;
+    od?: string;
+    do?: string;
+  }>;
 }
 
 const PERIOD_FILTERS: PeriodFilter[] = ["3", "6", "12", "all"];
@@ -27,20 +34,32 @@ export default async function PovijestServisaPage({ searchParams }: PovijestServ
   const selectedVehicleId = parsePositiveIntegerParam(resolvedSearchParams?.vozilo);
   const currentPage = parsePageParam(resolvedSearchParams?.stranica);
   const selectedPeriod = parsePeriodFilter(resolvedSearchParams?.period);
+  const selectedCategoryId = parsePositiveIntegerParam(resolvedSearchParams?.kategorija);
+  const dateFrom = resolvedSearchParams?.od ?? "";
+  const dateTo = resolvedSearchParams?.do ?? "";
 
   const [timelineData, headerData] = await Promise.all([
     getServiceCenterTimelineData(),
-    getServiceCenterHeaderData({ vehicleId: selectedVehicleId, period: selectedPeriod }),
+    getServiceCenterHeaderData({
+      vehicleId: selectedVehicleId,
+      period: selectedPeriod,
+      categoryId: selectedCategoryId,
+      dateFrom,
+      dateTo,
+    }),
   ]);
 
   return (
     <PovijestServisaLivePageContent
-      key={`${selectedVehicleId ?? "all"}-${selectedPeriod}-${currentPage}`}
+      key={`${selectedVehicleId ?? "all"}-${selectedPeriod}-${selectedCategoryId ?? "all"}-${dateFrom}-${dateTo}-${currentPage}`}
       initialTimelineData={timelineData}
       initialHeaderData={headerData}
       selectedVehicleId={selectedVehicleId}
       currentPage={currentPage}
       selectedPeriod={selectedPeriod}
+      selectedCategoryId={selectedCategoryId}
+      dateFrom={dateFrom}
+      dateTo={dateTo}
     />
   );
 }

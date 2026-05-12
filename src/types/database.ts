@@ -300,7 +300,10 @@ export type Database = {
           id: number
           kategorija_id: number | null
           km_u_tom_trenutku: number
+          obrisano_u: string | null
+          obrisao_zaposlenik_id: number | null
           opis: string | null
+          razlog_brisanja: string | null
           status_prijave: string | null
           vozilo_id: number | null
           zaposlenik_id: number | null
@@ -314,7 +317,10 @@ export type Database = {
           id?: never
           kategorija_id?: number | null
           km_u_tom_trenutku: number
+          obrisano_u?: string | null
+          obrisao_zaposlenik_id?: number | null
           opis?: string | null
+          razlog_brisanja?: string | null
           status_prijave?: string | null
           vozilo_id?: number | null
           zaposlenik_id?: number | null
@@ -328,7 +334,10 @@ export type Database = {
           id?: never
           kategorija_id?: number | null
           km_u_tom_trenutku?: number
+          obrisano_u?: string | null
+          obrisao_zaposlenik_id?: number | null
           opis?: string | null
+          razlog_brisanja?: string | null
           status_prijave?: string | null
           vozilo_id?: number | null
           zaposlenik_id?: number | null
@@ -339,6 +348,13 @@ export type Database = {
             columns: ["kategorija_id"]
             isOneToOne: false
             referencedRelation: "kategorije_kvarova"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "servisne_intervencije_obrisao_zaposlenik_id_fkey"
+            columns: ["obrisao_zaposlenik_id"]
+            isOneToOne: false
+            referencedRelation: "zaposlenici"
             referencedColumns: ["id"]
           },
           {
@@ -412,6 +428,8 @@ export type Database = {
           mjesto_id: number | null
           model_id: number | null
           nabavna_vrijednost: number | null
+          obrisano_u: string | null
+          obrisao_zaposlenik_id: number | null
           razlog_deaktivacije: string | null
           status_id: number | null
           trenutna_km: number | null
@@ -429,6 +447,8 @@ export type Database = {
           mjesto_id?: number | null
           model_id?: number | null
           nabavna_vrijednost?: number | null
+          obrisano_u?: string | null
+          obrisao_zaposlenik_id?: number | null
           razlog_deaktivacije?: string | null
           status_id?: number | null
           trenutna_km?: number | null
@@ -446,6 +466,8 @@ export type Database = {
           mjesto_id?: number | null
           model_id?: number | null
           nabavna_vrijednost?: number | null
+          obrisano_u?: string | null
+          obrisao_zaposlenik_id?: number | null
           razlog_deaktivacije?: string | null
           status_id?: number | null
           trenutna_km?: number | null
@@ -467,6 +489,13 @@ export type Database = {
             columns: ["model_id"]
             isOneToOne: false
             referencedRelation: "modeli"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vozila_obrisao_zaposlenik_id_fkey"
+            columns: ["obrisao_zaposlenik_id"]
+            isOneToOne: false
+            referencedRelation: "zaposlenici"
             referencedColumns: ["id"]
           },
           {

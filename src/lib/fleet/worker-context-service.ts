@@ -242,7 +242,10 @@ export async function getAvailableWorkerVehicles(
     categoriesResult,
   ] =
     await Promise.all([
-      client.from("vozila").select("id, model_id, status_id, trenutna_km"),
+      client
+        .from("vozila")
+        .select("id, model_id, status_id, trenutna_km")
+        .eq("is_aktivan", true),
       client
         .from("modeli")
         .select("id, naziv, proizvodjac_id, kapacitet_rezervoara, kategorija_id"),

@@ -17,7 +17,7 @@ const SOFT_DELETE_BOOLEAN_COLUMN = normalizeEnvColumn(
   process.env.CARLYTICS_INTERVENTIONS_SOFT_DELETE_BOOLEAN_COLUMN,
 );
 const SOFT_DELETE_TIMESTAMP_COLUMN = normalizeEnvColumn(
-  process.env.CARLYTICS_INTERVENTIONS_SOFT_DELETE_TIMESTAMP_COLUMN,
+  process.env.CARLYTICS_INTERVENTIONS_SOFT_DELETE_TIMESTAMP_COLUMN ?? "obrisano_u",
 );
 
 export function isInterventionOpen(status: string | null, endedAt: string | null | undefined) {

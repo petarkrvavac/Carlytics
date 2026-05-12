@@ -8,7 +8,8 @@ import { requireSessionUser } from "@/lib/auth/session";
 import { getFleetVehiclesSnapshot } from "@/lib/fleet/dashboard-service";
 import { createOptionalServerSupabaseClient } from "@/lib/supabase/server";
 import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
-import { toDateOnlyInZagreb } from "@/lib/utils/date-format";
+import { getCurrentIsoTimestamp, toDateOnlyInZagreb } from "@/lib/utils/date-format";
+import type { TablesUpdate } from "@/types/database";
 
 function basicValidacija(vin: string) {
   if (vin.length !== 17) {
@@ -127,6 +128,37 @@ const updateVehicleActivationSchema = z.object({
 
     return String(value).trim();
   }, z.string()),
+});
+
+const updateVehicleSchema = z.object({
+  vehicleId: z.coerce.number().int().positive("Vozilo je obavezno."),
+  brojSasije: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine((value) => basicValidacija(value), {
+      message: "VIN mora imati 17 znakova i ne smije sadržavati I, O ili Q.",
+    }),
+  modelId: z.coerce.number().int().positive("Model je obavezan."),
+  statusId: z.coerce.number().int().positive("Status je obavezan."),
+  mjestoId: optionalIntegerSchema,
+  trenutnaKm: z.coerce
+    .number()
+    .int("Kilometraža mora biti cijeli broj.")
+    .nonnegative("Kilometraža ne može biti negativna."),
+  godinaProizvodnje: z.preprocess((value) => {
+    if (value === null || value === undefined || value === "") {
+      return undefined;
+    }
+
+    return Number(value);
+  }, z.number().int().min(1950, "Godina je preniska.").max(2100, "Godina je previsoka.").optional()),
+  datumKupovine: optionalDateSchema,
+  nabavnaVrijednost: optionalNumberSchema,
+  zadnjiMaliServisDatum: optionalDateSchema,
+  zadnjiMaliServisKm: optionalKmIntervalSchema,
+  zadnjiVelikiServisDatum: optionalDateSchema,
+  zadnjiVelikiServisKm: optionalKmIntervalSchema,
 });
 
 function getDbClient() {
@@ -316,7 +348,7 @@ export async function updateVehicleActivationAction(formData: FormData) {
     return;
   }
 
-  await requireSessionUser({
+  const sessionUser = await requireSessionUser({
     allowedRoles: ["admin", "voditelj_flote"],
     redirectTo: "/prijava",
     forbiddenRedirectTo: "/m",
@@ -342,6 +374,8 @@ export async function updateVehicleActivationAction(formData: FormData) {
     .update({
       is_aktivan: nextIsActive,
       razlog_deaktivacije: nextIsActive ? null : deactivationReason,
+      obrisano_u: nextIsActive ? null : getCurrentIsoTimestamp(),
+      obrisao_zaposlenik_id: nextIsActive ? null : sessionUser.employeeId,
     })
     .eq("id", parsed.data.vehicleId);
 
@@ -353,6 +387,104 @@ export async function updateVehicleActivationAction(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/flota");
   revalidatePath(`/flota/${parsed.data.vehicleId}`);
+}
+
+export async function updateVehicleAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = updateVehicleSchema.safeParse({
+    vehicleId: formData.get("vehicleId"),
+    brojSasije: formData.get("brojSasije"),
+    modelId: formData.get("modelId"),
+    statusId: formData.get("statusId"),
+    mjestoId: formData.get("mjestoId"),
+    trenutnaKm: formData.get("trenutnaKm"),
+    godinaProizvodnje: formData.get("godinaProizvodnje"),
+    datumKupovine: formData.get("datumKupovine"),
+    nabavnaVrijednost: formData.get("nabavnaVrijednost"),
+    zadnjiMaliServisDatum: formData.get("zadnjiMaliServisDatum"),
+    zadnjiMaliServisKm: formData.get("zadnjiMaliServisKm"),
+    zadnjiVelikiServisDatum: formData.get("zadnjiVelikiServisDatum"),
+    zadnjiVelikiServisKm: formData.get("zadnjiVelikiServisKm"),
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Provjeri unesene podatke vozila.",
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    };
+  }
+
+  await requireSessionUser({
+    allowedRoles: ["admin", "voditelj_flote"],
+    redirectTo: "/prijava",
+    forbiddenRedirectTo: "/m",
+  });
+
+  const client = getDbClient();
+
+  if (!client) {
+    return {
+      status: "error",
+      message: "Supabase nije konfiguriran. Vozilo nije ažurirano.",
+    };
+  }
+
+  const { data: existingVin } = await client
+    .from("vozila")
+    .select("id")
+    .eq("broj_sasije", parsed.data.brojSasije)
+    .neq("id", parsed.data.vehicleId)
+    .maybeSingle();
+
+  if (existingVin?.id) {
+    return {
+      status: "error",
+      message: `VIN je već pridružen vozilu #${existingVin.id}.`,
+      fieldErrors: {
+        brojSasije: ["VIN već postoji u sustavu."],
+      },
+    };
+  }
+
+  const updatePayload: TablesUpdate<"vozila"> = {
+    broj_sasije: parsed.data.brojSasije,
+    model_id: parsed.data.modelId,
+    status_id: parsed.data.statusId,
+    mjesto_id: parsed.data.mjestoId ?? null,
+    trenutna_km: parsed.data.trenutnaKm,
+    godina_proizvodnje: parsed.data.godinaProizvodnje ?? null,
+    datum_kupovine: parsed.data.datumKupovine ?? null,
+    nabavna_vrijednost: parsed.data.nabavnaVrijednost ?? null,
+    zadnji_mali_servis_datum: parsed.data.zadnjiMaliServisDatum ?? null,
+    zadnji_mali_servis_km: parsed.data.zadnjiMaliServisKm ?? null,
+    zadnji_veliki_servis_datum: parsed.data.zadnjiVelikiServisDatum ?? null,
+    zadnji_veliki_servis_km: parsed.data.zadnjiVelikiServisKm ?? null,
+  };
+
+  const { error } = await client
+    .from("vozila")
+    .update(updatePayload)
+    .eq("id", parsed.data.vehicleId);
+
+  if (error) {
+    console.error("[carlytics] Neuspjelo uređivanje vozila:", error.message);
+    return {
+      status: "error",
+      message: "Vozilo nije ažurirano. Pokušaj ponovno.",
+    };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/flota");
+  revalidatePath(`/flota/${parsed.data.vehicleId}`);
+
+  return {
+    status: "success",
+    message: "Vozilo je uspješno ažurirano.",
+  };
 }
 
 export async function submitNewVehicleAction(

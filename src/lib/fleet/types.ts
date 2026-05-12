@@ -25,7 +25,15 @@ export interface VehicleListItem {
   openFaultCount: number;
   isActive: boolean;
   deactivationReason: string | null;
+  deactivatedAtIso: string | null;
+  deactivatedByEmployeeId: number | null;
+  deactivatedByName: string | null;
   vin: string | null;
+  manufacturerId: number | null;
+  modelId: number | null;
+  statusId: number | null;
+  placeId: number | null;
+  purchaseDateIso: string | null;
   acquisitionValue: number | null;
   productionYear: number | null;
   registrationCity: string | null;

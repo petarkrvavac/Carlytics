@@ -22,7 +22,7 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <div className="ambient-bg min-h-screen">
-      <div className="mx-auto flex min-h-screen max-w-450">
+      <div className="flex min-h-screen w-full">
         <aside className="sticky top-0 hidden h-screen lg:block">
           <AppSidebar
             activeFaultCount={activeFaultCount}

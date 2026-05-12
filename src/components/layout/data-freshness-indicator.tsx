@@ -89,11 +89,7 @@ export function DataFreshnessIndicator({
   }, [eventVersion, isUsingFallbackData]);
 
   if (isUsingFallbackData) {
-    return (
-      <span className="inline-flex h-8 items-center rounded-lg border border-amber-500/30 bg-amber-500/12 px-3 text-xs font-medium text-amber-200">
-        Demo podaci
-      </span>
-    );
+    return null;
   }
 
   const referenceNowMs = nowMs;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Download } from "lucide-react";
 
 import { AttachmentViewerButton } from "@/components/attachments/attachment-viewer-button";
 import { FallbackChip } from "@/components/dashboard/fallback-chip";
@@ -8,6 +9,7 @@ import {
   ServiceCenterCostCharts,
   type PeriodFilter,
 } from "@/components/service-center/service-center-cost-charts";
+import { ServiceInterventionCrudControls } from "@/components/service-center/service-intervention-crud-controls";
 import { ServiceHistoryFilters } from "@/components/service-center/service-history-filters";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -27,6 +29,9 @@ interface PovijestServisaLivePageContentProps {
   selectedVehicleId: number | null;
   currentPage: number;
   selectedPeriod: PeriodFilter;
+  selectedCategoryId: number | null;
+  dateFrom: string;
+  dateTo: string;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -78,6 +83,9 @@ export function PovijestServisaLivePageContent({
   selectedVehicleId,
   currentPage,
   selectedPeriod,
+  selectedCategoryId,
+  dateFrom,
+  dateTo,
 }: PovijestServisaLivePageContentProps) {
   const [timelineData, setTimelineData] = useState(initialTimelineData);
   const [headerData, setHeaderData] = useState(initialHeaderData);
@@ -92,6 +100,18 @@ export function PovijestServisaLivePageContent({
 
     if (selectedPeriod) {
       query.set("period", selectedPeriod);
+    }
+
+    if (selectedCategoryId) {
+      query.set("kategorija", String(selectedCategoryId));
+    }
+
+    if (dateFrom) {
+      query.set("od", dateFrom);
+    }
+
+    if (dateTo) {
+      query.set("do", dateTo);
     }
 
     const queryString = query.toString();
@@ -119,7 +139,7 @@ export function PovijestServisaLivePageContent({
     if (payload.headerData) {
       setHeaderData(payload.headerData);
     }
-  }, [selectedPeriod, selectedVehicleId]);
+  }, [dateFrom, dateTo, selectedCategoryId, selectedPeriod, selectedVehicleId]);
 
   useLiveSourceRefresh({
     sourceTables: LIVE_SERVICE_CENTER_SOURCE_TABLES,
@@ -137,14 +157,60 @@ export function PovijestServisaLivePageContent({
       ).sort((left, right) => left.label.localeCompare(right.label, "hr")),
     [timelineData.serviceTimeline],
   );
-
+  const categoryOptions = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          timelineData.serviceTimeline
+            .filter((service) => service.categoryId && service.categoryLabel)
+            .map((service) => [service.categoryId!, { id: service.categoryId!, label: service.categoryLabel! }]),
+        ).values(),
+      ).sort((left, right) => left.label.localeCompare(right.label, "hr")),
+    [timelineData.serviceTimeline],
+  );
   const filteredTimeline = selectedVehicleId
     ? timelineData.serviceTimeline.filter((service) => service.vehicleId === selectedVehicleId)
     : timelineData.serviceTimeline;
 
-  const periodFilteredTimeline = filteredTimeline.filter((service) =>
-    isServiceWithinPeriod(service, selectedPeriod),
-  );
+  const serviceReportHref = useMemo(() => {
+    const params = new URLSearchParams();
+
+    if (selectedVehicleId) params.set("vozilo", String(selectedVehicleId));
+    params.set("period", selectedPeriod);
+    if (selectedCategoryId) params.set("kategorija", String(selectedCategoryId));
+    if (dateFrom) params.set("od", dateFrom);
+    if (dateTo) params.set("do", dateTo);
+
+    const query = params.toString();
+    return query
+      ? `/api/reports/service-interventions.csv?${query}`
+      : "/api/reports/service-interventions.csv";
+  }, [dateFrom, dateTo, selectedCategoryId, selectedPeriod, selectedVehicleId]);
+
+  const periodFilteredTimeline = filteredTimeline.filter((service) => {
+    if (!isServiceWithinPeriod(service, selectedPeriod)) {
+      return false;
+    }
+
+    if (selectedCategoryId && service.categoryId !== selectedCategoryId) {
+      return false;
+    }
+
+    const referenceDate = new Date(service.endedAtIso ?? service.startedAtIso);
+    const referenceDateKey = Number.isNaN(referenceDate.getTime())
+      ? ""
+      : referenceDate.toISOString().slice(0, 10);
+
+    if (dateFrom && referenceDateKey && referenceDateKey < dateFrom) {
+      return false;
+    }
+
+    if (dateTo && referenceDateKey && referenceDateKey > dateTo) {
+      return false;
+    }
+
+    return true;
+  });
 
   const completedTimeline = periodFilteredTimeline
     .filter((service) => !service.isOpen)
@@ -165,9 +231,19 @@ export function PovijestServisaLivePageContent({
     replaceCurrentUrlQueryParams({
       vozilo: selectedVehicleId ? String(selectedVehicleId) : null,
       period: selectedPeriod,
+      kategorija: selectedCategoryId ? String(selectedCategoryId) : null,
+      od: dateFrom || null,
+      do: dateTo || null,
       stranica: safeCurrentPage > 1 ? String(safeCurrentPage) : null,
     });
-  }, [safeCurrentPage, selectedPeriod, selectedVehicleId]);
+  }, [
+    dateFrom,
+    dateTo,
+    safeCurrentPage,
+    selectedCategoryId,
+    selectedPeriod,
+    selectedVehicleId,
+  ]);
 
   return (
     <div className="space-y-5">
@@ -180,11 +256,22 @@ export function PovijestServisaLivePageContent({
               selectedVehicleId={selectedVehicleId}
               selectedPeriod={selectedPeriod}
               vehicleOptions={vehicleOptions}
+              categoryOptions={categoryOptions}
+              selectedCategoryId={selectedCategoryId}
+              dateFrom={dateFrom}
+              dateTo={dateTo}
             />
 
             <FallbackChip
               isUsingFallbackData={headerData.isUsingFallbackData || timelineData.isUsingFallbackData}
             />
+            <a
+              href={serviceReportHref}
+              className="inline-flex h-8 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs font-medium text-foreground transition hover:border-cyan-500/45 hover:text-cyan-700 dark:hover:text-cyan-200"
+            >
+              <Download size={13} />
+              CSV
+            </a>
 
             <div className="flex flex-wrap items-center gap-1.5">
               <Badge
@@ -211,9 +298,10 @@ export function PovijestServisaLivePageContent({
       />
 
       <ServiceCenterCostCharts
-        serviceTimeline={filteredTimeline}
+        serviceTimeline={periodFilteredTimeline}
         showTopVehicles={!selectedVehicleId}
         initialPeriod={selectedPeriod}
+        selectedCategoryId={selectedCategoryId}
       />
 
       <Card>
@@ -250,7 +338,9 @@ export function PovijestServisaLivePageContent({
                       />
                       <div className="flex flex-wrap gap-1">
                         {service.categoryLabel ? <Badge variant="neutral">{service.categoryLabel}</Badge> : null}
-                        <Badge variant="success">Završeno</Badge>
+                        <Badge variant={service.deletedAtIso ? "danger" : "success"}>
+                          {service.deletedAtIso ? "Arhiva" : "Završeno"}
+                        </Badge>
                       </div>
                     </div>
                   </div>
@@ -267,6 +357,13 @@ export function PovijestServisaLivePageContent({
                       <span className="ml-1 text-xs text-amber-300">EUR</span>
                     </p>
                   </div>
+                  <div className="mt-2 flex justify-end">
+                    <ServiceInterventionCrudControls
+                      service={service}
+                      vehicleOptions={vehicleOptions}
+                      categoryOptions={categoryOptions}
+                    />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -282,6 +379,7 @@ export function PovijestServisaLivePageContent({
                     <th className="sticky top-0 min-w-28 bg-surface px-3 py-2.5 text-right">Cijena</th>
                     <th className="sticky top-0 min-w-40 bg-surface px-3 py-2.5">Status</th>
                     <th className="sticky top-0 min-w-20 bg-surface px-3 py-2.5 text-right">Privitci</th>
+                    <th className="sticky top-0 min-w-28 bg-surface px-3 py-2.5 text-right">Akcije</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -308,13 +406,22 @@ export function PovijestServisaLivePageContent({
                       <td className="px-3 py-3 align-top">
                         <div className="flex flex-wrap gap-2">
                           {service.categoryLabel ? <Badge variant="neutral">{service.categoryLabel}</Badge> : null}
-                          <Badge variant="success">Završeno</Badge>
+                          <Badge variant={service.deletedAtIso ? "danger" : "success"}>
+                            {service.deletedAtIso ? "Arhiva" : "Završeno"}
+                          </Badge>
                         </div>
                       </td>
                       <td className="px-3 py-3 align-top text-right">
                         <AttachmentViewerButton
                           attachmentSource={service.attachmentUrl}
                           title={`${service.vehicleLabel} (${service.plate})`}
+                        />
+                      </td>
+                      <td className="px-3 py-3 align-top text-right">
+                        <ServiceInterventionCrudControls
+                          service={service}
+                          vehicleOptions={vehicleOptions}
+                          categoryOptions={categoryOptions}
                         />
                       </td>
                     </tr>

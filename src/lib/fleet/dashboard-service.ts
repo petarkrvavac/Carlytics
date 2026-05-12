@@ -50,6 +50,8 @@ type VehicleRow = Pick<
   | "is_aktivan"
   | "mjesto_id"
   | "nabavna_vrijednost"
+  | "obrisano_u"
+  | "obrisao_zaposlenik_id"
   | "razlog_deaktivacije"
   | "zadnji_mali_servis_datum"
   | "zadnji_mali_servis_km"
@@ -70,6 +72,7 @@ type ManufacturerRow = Pick<Tables<"proizvodjaci">, "id" | "naziv">;
 type FuelTypeRow = Pick<Tables<"tipovi_goriva">, "id" | "naziv">;
 type StatusRow = Pick<Tables<"statusi_vozila">, "id" | "naziv">;
 type PlaceRow = Pick<Tables<"mjesta">, "id" | "naziv">;
+type EmployeeRow = Pick<Tables<"zaposlenici">, "id" | "ime" | "prezime" | "korisnicko_ime">;
 type RegistrationRow = Pick<Tables<"registracije">, "vozilo_id" | "registracijska_oznaka" | "datum_isteka">;
 type FuelRow = Pick<Tables<"evidencija_goriva">, "datum" | "ukupni_iznos" | "cijena_po_litri" | "litraza">;
 type ServiceRow = Pick<Tables<"servisne_intervencije">, "datum_zavrsetka" | "cijena">;
@@ -277,6 +280,15 @@ function mapLocationByCity(places: PlaceRow[]) {
   return cityById;
 }
 
+function buildEmployeeLookup(employees: EmployeeRow[]) {
+  return new Map(
+    employees.map((employee) => [
+      employee.id,
+      `${employee.ime} ${employee.prezime}`.trim() || employee.korisnicko_ime,
+    ]),
+  );
+}
+
 function mapVehicles(params: {
   vehicles: VehicleRow[];
   models: ModelRow[];
@@ -284,6 +296,7 @@ function mapVehicles(params: {
   fuelTypes: FuelTypeRow[];
   statuses: StatusRow[];
   places: PlaceRow[];
+  employees: EmployeeRow[];
   registrations: RegistrationRow[];
   openInterventionCountByVehicle: Map<number, number>;
   inProgressInterventionVehicleIds: Set<number>;
@@ -296,6 +309,7 @@ function mapVehicles(params: {
   const fuelTypeById = new Map(params.fuelTypes.map((fuelType) => [fuelType.id, fuelType]));
   const statusById = new Map(params.statuses.map((status) => [status.id, status]));
   const cityById = mapLocationByCity(params.places);
+  const employeeById = buildEmployeeLookup(params.employees);
   const latestRegistrationByVehicle = getLatestRegistrations(params.registrations);
   const serviceDueDaysByVehicle = new Map<number, number | null>();
 
@@ -352,7 +366,18 @@ function mapVehicles(params: {
       openFaultCount: params.openInterventionCountByVehicle.get(vehicle.id) ?? 0,
       isActive,
       deactivationReason: vehicle.razlog_deaktivacije ?? null,
+      deactivatedAtIso: isActive ? null : (vehicle.obrisano_u ?? null),
+      deactivatedByEmployeeId: isActive ? null : (vehicle.obrisao_zaposlenik_id ?? null),
+      deactivatedByName:
+        !isActive && vehicle.obrisao_zaposlenik_id
+          ? (employeeById.get(vehicle.obrisao_zaposlenik_id) ?? null)
+          : null,
       vin: vehicle.broj_sasije,
+      manufacturerId: model?.proizvodjac_id ?? null,
+      modelId: vehicle.model_id,
+      statusId: vehicle.status_id,
+      placeId: vehicle.mjesto_id,
+      purchaseDateIso: vehicle.datum_kupovine,
       acquisitionValue: vehicle.nabavna_vrijednost,
       productionYear: vehicle.godina_proizvodnje,
       registrationCity: cityLabel,
@@ -631,6 +656,7 @@ export async function getDashboardData(
       fuelTypesResult,
       statusesResult,
       placesResult,
+      employeesResult,
       registrationsResult,
       assignmentsResult,
       fuelResult,
@@ -640,7 +666,7 @@ export async function getDashboardData(
       client
         .from("vozila")
         .select(
-          "id, broj_sasije, model_id, status_id, trenutna_km, datum_kupovine, godina_proizvodnje, is_aktivan, mjesto_id, nabavna_vrijednost, razlog_deaktivacije, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km",
+          "id, broj_sasije, model_id, status_id, trenutna_km, datum_kupovine, godina_proizvodnje, is_aktivan, mjesto_id, nabavna_vrijednost, obrisano_u, obrisao_zaposlenik_id, razlog_deaktivacije, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km",
         ),
       client
         .from("modeli")
@@ -651,6 +677,7 @@ export async function getDashboardData(
       client.from("tipovi_goriva").select("id, naziv"),
       client.from("statusi_vozila").select("id, naziv"),
       client.from("mjesta").select("id, naziv"),
+      client.from("zaposlenici").select("id, ime, prezime, korisnicko_ime"),
       client
         .from("registracije")
         .select("vozilo_id, registracijska_oznaka, datum_isteka"),
@@ -675,6 +702,7 @@ export async function getDashboardData(
       fuelTypesResult.error,
       statusesResult.error,
       placesResult.error,
+      employeesResult.error,
       registrationsResult.error,
       assignmentsResult.error,
       fuelResult.error,
@@ -719,6 +747,7 @@ export async function getDashboardData(
       fuelTypes: fuelTypesResult.data ?? [],
       statuses: statusesResult.data ?? [],
       places: placesResult.data ?? [],
+      employees: employeesResult.data ?? [],
       registrations: registrationsResult.data ?? [],
       openInterventionCountByVehicle,
       inProgressInterventionVehicleIds,
@@ -802,6 +831,7 @@ export async function getFleetVehiclesSnapshot() {
       fuelTypesResult,
       statusesResult,
       placesResult,
+      employeesResult,
       registrationsResult,
       assignmentsResult,
       faultsResult,
@@ -809,7 +839,7 @@ export async function getFleetVehiclesSnapshot() {
       client
         .from("vozila")
         .select(
-          "id, broj_sasije, model_id, status_id, trenutna_km, datum_kupovine, godina_proizvodnje, is_aktivan, mjesto_id, nabavna_vrijednost, razlog_deaktivacije, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km",
+          "id, broj_sasije, model_id, status_id, trenutna_km, datum_kupovine, godina_proizvodnje, is_aktivan, mjesto_id, nabavna_vrijednost, obrisano_u, obrisao_zaposlenik_id, razlog_deaktivacije, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km",
         ),
       client
         .from("modeli")
@@ -820,6 +850,7 @@ export async function getFleetVehiclesSnapshot() {
       client.from("tipovi_goriva").select("id, naziv"),
       client.from("statusi_vozila").select("id, naziv"),
       client.from("mjesta").select("id, naziv"),
+      client.from("zaposlenici").select("id, ime, prezime, korisnicko_ime"),
       client
         .from("registracije")
         .select("vozilo_id, registracijska_oznaka, datum_isteka"),
@@ -838,6 +869,7 @@ export async function getFleetVehiclesSnapshot() {
       fuelTypesResult.error,
       statusesResult.error,
       placesResult.error,
+      employeesResult.error,
       registrationsResult.error,
       assignmentsResult.error,
       faultsResult.error,
@@ -880,6 +912,7 @@ export async function getFleetVehiclesSnapshot() {
       fuelTypes: (fuelTypesResult.data ?? []) as FuelTypeRow[],
       statuses: (statusesResult.data ?? []) as StatusRow[],
       places: (placesResult.data ?? []) as PlaceRow[],
+      employees: (employeesResult.data ?? []) as EmployeeRow[],
       registrations: (registrationsResult.data ?? []) as RegistrationRow[],
       openInterventionCountByVehicle,
       inProgressInterventionVehicleIds,
@@ -915,7 +948,7 @@ export async function getAppShellMetrics() {
       client
         .from("vozila")
         .select(
-          "id, model_id, trenutna_km, datum_kupovine, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km, is_aktivan",
+          "id, broj_sasije, model_id, status_id, trenutna_km, datum_kupovine, godina_proizvodnje, is_aktivan, mjesto_id, nabavna_vrijednost, obrisano_u, obrisao_zaposlenik_id, razlog_deaktivacije, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km",
         ),
       client
         .from("modeli")

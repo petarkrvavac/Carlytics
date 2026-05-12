@@ -1,6 +1,7 @@
 import {
   CarFront,
   Fuel,
+  FileText,
   LayoutDashboard,
   TriangleAlert,
   Users,
@@ -47,6 +48,12 @@ export const APP_NAVIGATION_ITEMS: AppNavigationItem[] = [
     href: "/povijest-servisa",
     label: "Povijest servisa",
     icon: Wrench,
+    section: "glavno",
+  },
+  {
+    href: "/izvjesca",
+    label: "Izvješća",
+    icon: FileText,
     section: "glavno",
   },
   {

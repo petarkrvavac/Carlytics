@@ -25,11 +25,17 @@ export interface VehicleFuelTypeOption {
   label: string;
 }
 
+export interface VehiclePlaceOption {
+  id: number;
+  label: string;
+}
+
 export interface VehicleFormContext {
   modelOptions: VehicleModelOption[];
   statusOptions: VehicleStatusOption[];
   manufacturerOptions: VehicleManufacturerOption[];
   fuelTypeOptions: VehicleFuelTypeOption[];
+  placeOptions: VehiclePlaceOption[];
   isUsingFallbackData: boolean;
 }
 
@@ -43,15 +49,17 @@ export async function getVehicleFormContext(): Promise<VehicleFormContext> {
       statusOptions: [],
       manufacturerOptions: [],
       fuelTypeOptions: [],
+      placeOptions: [],
       isUsingFallbackData: true,
     };
   }
 
-  const [modelsResult, manufacturersResult, statusesResult, fuelTypesResult] = await Promise.all([
+  const [modelsResult, manufacturersResult, statusesResult, fuelTypesResult, placesResult] = await Promise.all([
     client.from("modeli").select("id, naziv, kapacitet_rezervoara, proizvodjac_id"),
     client.from("proizvodjaci").select("id, naziv"),
     client.from("statusi_vozila").select("id, naziv"),
     client.from("tipovi_goriva").select("id, naziv"),
+    client.from("mjesta").select("id, naziv"),
   ] as const);
 
   const queryError = [
@@ -59,6 +67,7 @@ export async function getVehicleFormContext(): Promise<VehicleFormContext> {
     manufacturersResult.error,
     statusesResult.error,
     fuelTypesResult.error,
+    placesResult.error,
   ].find((error) => Boolean(error));
 
   if (queryError) {
@@ -74,6 +83,7 @@ export async function getVehicleFormContext(): Promise<VehicleFormContext> {
       statusOptions: [],
       manufacturerOptions: [],
       fuelTypeOptions: [],
+      placeOptions: [],
       isUsingFallbackData: true,
     };
   }
@@ -125,11 +135,19 @@ export async function getVehicleFormContext(): Promise<VehicleFormContext> {
     }))
     .sort((left, right) => left.label.localeCompare(right.label, "hr"));
 
+  const placeOptions = (placesResult.data ?? [])
+    .map<VehiclePlaceOption>((place) => ({
+      id: place.id,
+      label: place.naziv,
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, "hr"));
+
   return {
     modelOptions,
     statusOptions,
     manufacturerOptions,
     fuelTypeOptions,
+    placeOptions,
     isUsingFallbackData: false,
   };
 }

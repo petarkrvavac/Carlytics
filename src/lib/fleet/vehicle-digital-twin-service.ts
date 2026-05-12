@@ -28,6 +28,8 @@ type VehicleRow = Pick<
   | "is_aktivan"
   | "mjesto_id"
   | "nabavna_vrijednost"
+  | "obrisano_u"
+  | "obrisao_zaposlenik_id"
   | "razlog_deaktivacije"
   | "zadnji_mali_servis_datum"
   | "zadnji_mali_servis_km"
@@ -456,11 +458,12 @@ async function getVehicleSnapshotById(vehicleId: number) {
       registrationsResult,
       assignmentsResult,
       interventionsResult,
+      employeesResult,
     ] = await Promise.all([
       client
         .from("vozila")
         .select(
-          "id, broj_sasije, model_id, status_id, trenutna_km, datum_kupovine, godina_proizvodnje, is_aktivan, mjesto_id, nabavna_vrijednost, razlog_deaktivacije, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km",
+          "id, broj_sasije, model_id, status_id, trenutna_km, datum_kupovine, godina_proizvodnje, is_aktivan, mjesto_id, nabavna_vrijednost, obrisano_u, obrisao_zaposlenik_id, razlog_deaktivacije, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km",
         )
         .eq("id", vehicleId)
         .maybeSingle(),
@@ -489,6 +492,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
           )
           .eq("vozilo_id", vehicleId),
       ),
+      client.from("zaposlenici").select("id, ime, prezime, korisnicko_ime"),
     ] as const);
 
     const queryError = [
@@ -501,6 +505,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
       registrationsResult.error,
       assignmentsResult.error,
       interventionsResult.error,
+      employeesResult.error,
     ].find((error) => Boolean(error));
 
     if (queryError) {
@@ -524,6 +529,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
     const registrations = (registrationsResult.data ?? []) as RegistrationRow[];
     const assignments = (assignmentsResult.data ?? []) as AssignmentRow[];
     const interventionRows = (interventionsResult.data ?? []) as InterventionRow[];
+    const employees = (employeesResult.data ?? []) as EmployeeRow[];
 
     const modelById = new Map(models.map((model: ModelRow) => [model.id, model]));
     const manufacturerById = new Map(
@@ -532,6 +538,7 @@ async function getVehicleSnapshotById(vehicleId: number) {
     const fuelTypeById = new Map(fuelTypes.map((fuelType: FuelTypeRow) => [fuelType.id, fuelType]));
     const statusById = new Map(statuses.map((status: StatusRow) => [status.id, status]));
     const cityById = mapLocationByCity(places);
+    const employeeLookup = buildEmployeeLookup(employees);
 
     const model = vehicleRow.model_id ? modelById.get(vehicleRow.model_id) : null;
     const manufacturer = model?.proizvodjac_id
@@ -549,6 +556,9 @@ async function getVehicleSnapshotById(vehicleId: number) {
     );
     const hasActiveAssignment = assignments.some((assignment) => assignment.is_aktivno);
     const isActive = vehicleRow.is_aktivan !== false;
+    const deactivatedBy = vehicleRow.obrisao_zaposlenik_id
+      ? employeeLookup.get(vehicleRow.obrisao_zaposlenik_id)
+      : null;
     const cityLabel = vehicleRow.mjesto_id ? (cityById.get(vehicleRow.mjesto_id) ?? null) : null;
 
     const currentKm = vehicleRow.trenutna_km ?? 0;
@@ -590,7 +600,15 @@ async function getVehicleSnapshotById(vehicleId: number) {
         openFaultCount,
         isActive,
         deactivationReason: vehicleRow.razlog_deaktivacije ?? null,
+        deactivatedAtIso: isActive ? null : (vehicleRow.obrisano_u ?? null),
+        deactivatedByEmployeeId: isActive ? null : (vehicleRow.obrisao_zaposlenik_id ?? null),
+        deactivatedByName: isActive ? null : (deactivatedBy?.fullName ?? null),
         vin: vehicleRow.broj_sasije,
+        manufacturerId: model?.proizvodjac_id ?? null,
+        modelId: vehicleRow.model_id,
+        statusId: vehicleRow.status_id,
+        placeId: vehicleRow.mjesto_id,
+        purchaseDateIso: vehicleRow.datum_kupovine,
         acquisitionValue: vehicleRow.nabavna_vrijednost,
         productionYear: vehicleRow.godina_proizvodnje,
         registrationCity: cityLabel,
