@@ -12,13 +12,13 @@ Carlytics centralizes vehicles, assignments, fuel logs, service history, inciden
 **🔴 Live Demo:** [carlytics-zeta.vercel.app](https://carlytics-zeta.vercel.app/)  
 **🟢 Tech:** Next.js • TypeScript • Supabase • PostgreSQL • Tailwind CSS
 
-## 📸 Preview
+## Preview
 
 ![Carlytics Dashboard](./docs/dashboard-screenshot.png)
 
 > Real-time dashboard with live fleet updates, service alerts, and centralized activity stream.
 
-## 🚀 Highlights
+## Highlights
 
 ### Real-time System
 
