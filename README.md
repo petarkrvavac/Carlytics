@@ -1,4 +1,4 @@
-# 🚗 Carlytics
+# Carlytics
 
 A real-time, event-driven fleet management platform built with modern full-stack architecture.
 
@@ -38,15 +38,15 @@ Carlytics centralizes vehicles, assignments, fuel logs, service history, inciden
 - Mobile-first workflow for field employees
 - Role-aware routing and protected routes
 
-## 🧩 Problem
+## Problem
 
 Fleet operations often spread vehicle data, service history, assignments, fuel logs, and incident reports across multiple tools. That makes it difficult to react quickly, track operational history, and keep teams synchronized in real time.
 
-## 💡 Solution
+## Solution
 
 Carlytics centralizes all fleet-related data into one operational platform. Database triggers convert important changes into events, Supabase Realtime streams those events to the frontend, and the UI refreshes affected views without requiring full page reloads.
 
-## ⚙️ Features
+## Features
 
 - Vehicle management and digital vehicle profiles
 - Active and historical vehicle assignments
@@ -58,7 +58,7 @@ Carlytics centralizes all fleet-related data into one operational platform. Data
 - Role-based desktop and mobile workflows
 - Real-time dashboard, fleet, fuel, assignment, employee, and service updates
 
-## 🏗 Architecture
+## Architecture
 
 The system follows an event-driven architecture:
 
@@ -89,11 +89,11 @@ Main event sources include:
 - `registracije`
 - `zaposlenici`
 
-## 🛠 Tech Stack
+## Tech Stack
 
 Next.js • React • TypeScript • Supabase PostgreSQL • Supabase Realtime • Supabase Storage • NextAuth • Tailwind CSS • Zod • Chart.js • Vercel
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Clone Repository
 
@@ -150,7 +150,7 @@ Open:
 http://localhost:3000
 ```
 
-## 🔐 Environment Variables
+## Environment Variables
 
 | Variable | Description |
 | --- | --- |
@@ -161,7 +161,7 @@ http://localhost:3000
 | `NEXTAUTH_SECRET` | Secret used to sign JWT sessions |
 | `SUPABASE_PROJECT_ID` | Supabase project id used for type generation |
 
-## 🗄 Database Setup
+## Database Setup
 
 The database schema and seed data are provided in:
 
@@ -194,7 +194,7 @@ This bucket is used for uploaded fault/incident images. If realtime updates do n
 | Fleet manager | `seed.voditelj01` | `Test1234!` |
 | Employee | `seed.radnik01` | `Test1234!` |
 
-## 🔮 Future Improvements
+## Future Improvements
 
 - Automatic VIN-based vehicle detection
 - Scheduled report delivery and deeper forecast analytics
@@ -202,7 +202,7 @@ This bucket is used for uploaded fault/incident images. If realtime updates do n
 - Automated email delivery for employee invitations
 - PWA/offline support for field employees
 
-## 👤 Author
+## Author
 
 **Petar Krvavac**  
 Computer Science Student @ FSRE Mostar
@@ -210,7 +210,7 @@ Computer Science Student @ FSRE Mostar
 - GitHub: [petarkrvavac](https://github.com/petarkrvavac)
 - Repository: [Carlytics](https://github.com/petarkrvavac/Carlytics)
 
-## 📄 License
+## License
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
