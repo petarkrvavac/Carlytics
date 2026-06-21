@@ -18,55 +18,23 @@ Carlytics centralizes vehicles, assignments, fuel logs, service history, inciden
 
 > Real-time dashboard with live fleet updates, service alerts, and centralized activity stream.
 
-## Highlights
+## Overview
 
-### Real-time System
+Fleet operations often spread vehicle data, service history, assignments, fuel logs, and incident reports across multiple tools, making it difficult to react quickly and keep teams synchronized in real time.
 
-- Supabase Realtime subscriptions
-- UI updates without full page reloads
-- Source-table filtering for targeted refreshes
+Carlytics solves this by centralizing all fleet-related data into one operational platform. PostgreSQL triggers detect important changes and convert them into normalized events, which Supabase Realtime streams to the frontend. This enables live UI updates without full page reloads, creating both a responsive user experience and a persistent audit trail.
 
-### Backend Design
-
-- PostgreSQL triggers for operational events
-- Centralized event stream in `app_events`
-- Persistent activity log for system changes
-
-### Product Workflow
-
-- Desktop Fleet OS for administrators and fleet managers
-- Mobile-first workflow for field employees
-- Role-aware routing and protected routes
-
-## Problem
-
-Fleet operations often spread vehicle data, service history, assignments, fuel logs, and incident reports across multiple tools. That makes it difficult to react quickly, track operational history, and keep teams synchronized in real time.
-
-## Solution
-
-Carlytics centralizes all fleet-related data into one operational platform. Database triggers convert important changes into events, Supabase Realtime streams those events to the frontend, and the UI refreshes affected views without requiring full page reloads.
-
-## Features
-
-- Vehicle management and digital vehicle profiles
-- Active and historical vehicle assignments
-- Service, maintenance, registration, and tire history
-- Fuel tracking with cost analytics
-- Fault/incident reporting with image attachments
-- CSV and print/PDF-friendly fleet, service, and fuel reports
-- Employee management and invitation-based onboarding
-- Role-based desktop and mobile workflows
-- Real-time dashboard, fleet, fuel, assignment, employee, and service updates
+The result is an event-driven, role-aware Fleet OS that supports desktop workflows for administrators and fleet managers, alongside mobile-first tools for field employees.
 
 ## Architecture
 
-The system follows an event-driven architecture:
+The system follows an event-driven, trigger-based architecture:
 
 - PostgreSQL triggers detect operational changes
 - Trigger function writes normalized events into `app_events`
 - Frontend subscribes to `app_events` using Supabase Realtime
 - Live refresh hooks filter events by source table
-- Lightweight API routes reload only the affected page data
+- Lightweight API endpoints and realtime hooks refresh only affected UI sections
 
 This approach reduces frontend complexity, minimizes duplicated realtime logic, and creates a persistent audit trail of important system activity.
 
@@ -89,9 +57,31 @@ Main event sources include:
 - `registracije`
 - `zaposlenici`
 
+## Key Features
+
+- **Vehicle Management** — Digital vehicle profiles with cost tracking and status monitoring
+- **Assignments** — Active and historical vehicle assignments with real-time updates
+- **Service History** — Maintenance, registration, and tire service records
+- **Fuel Tracking** — Comprehensive fuel logs with cost analytics
+- **Incident Reporting** — Fault reporting with image attachments
+- **Reports** — CSV and print/PDF-friendly fleet, service, and fuel reports
+- **Employee Management** — Team management with invitation-based onboarding
+- **Role-based Workflows** — Desktop OS for administrators, mobile-first tools for field employees
+- **Real-time Dashboard** — Live fleet updates, service alerts, and centralized activity stream
+
 ## Tech Stack
 
-Next.js • React • TypeScript • Supabase PostgreSQL • Supabase Realtime • Supabase Storage • NextAuth • Tailwind CSS • Zod • Chart.js • Vercel
+| Layer | Technology |
+|-------|-----------|
+| **Frontend** | Next.js 16+, React, TypeScript |
+| **Styling** | Tailwind CSS v4 |
+| **Backend** | Supabase PostgreSQL |
+| **Authentication** | NextAuth |
+| **Real-time** | Supabase Realtime |
+| **Storage** | Supabase Storage |
+| **Validation** | Zod |
+| **Charts** | Chart.js |
+| **Deployment** | Vercel |
 
 ## Getting Started
 
@@ -108,35 +98,38 @@ cd Carlytics
 npm install
 ```
 
-### 3. Setup Environment Variables
+### 3. Setup Database
 
-Create `.env.local` in the project root. You can use `.env.example` as a template:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
-
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=generate-a-long-random-secret
-
-SUPABASE_PROJECT_ID=your-supabase-project-id
-```
-
-### 4. Import Database
-
-Import the provided PostgreSQL dump before running the app:
-
-> Requires PostgreSQL installed locally.
+Import the provided SQL dump into PostgreSQL or Supabase:
 
 ```bash
 createdb carlytics
 psql -d carlytics -f database-sql/database.sql
-psql -d carlytics -f database-sql/2026-05-12-soft-delete-crud-reports.sql
 ```
 
-For Supabase, import `database-sql/database.sql` first, then run
-`database-sql/2026-05-12-soft-delete-crud-reports.sql` through the SQL editor or a direct `psql` connection.
+The dump includes:
+- Complete schema with tables, relationships, and indexes
+- Seed data for vehicles, employees, assignments, and more
+- PostgreSQL triggers for the event system
+- RLS (Row-Level Security) policies
+
+### 4. Configure Supabase
+
+The realtime features (live dashboard, real-time updates) require Supabase. Create `.env.local` in the project root:
+
+```env
+# Supabase Configuration (Required for realtime)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+SUPABASE_PROJECT_ID=your-supabase-project-id
+
+# NextAuth Configuration
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=generate-a-long-random-secret-here
+```
+
+> **Important:** Upload your PostgreSQL database to Supabase and enable realtime replication on the `app_events` table for live features to work.
 
 ### 5. Run Development Server
 
@@ -144,55 +137,45 @@ For Supabase, import `database-sql/database.sql` first, then run
 npm run dev
 ```
 
-Open:
+Open [http://localhost:3000](http://localhost:3000)
 
-```text
-http://localhost:3000
-```
+## Demo Accounts
 
-## Environment Variables
-
-| Variable | Description |
-| --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public anon key used by the client and realtime subscription |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-side key used for privileged reads/writes while RLS is enabled |
-| `NEXTAUTH_URL` | Base URL used by NextAuth |
-| `NEXTAUTH_SECRET` | Secret used to sign JWT sessions |
-| `SUPABASE_PROJECT_ID` | Supabase project id used for type generation |
-
-## Database Setup
-
-The database schema and seed data are provided in:
-
-```text
-database-sql/database.sql
-```
-
-The dump includes:
-
-- PostgreSQL tables, relationships, constraints, indexes, and sequences
-- Seed data for vehicles, employees, assignments, fuel, service history, roles, and lookup tables
-- `emit_app_event()` trigger function
-- Triggers for fuel entries, assignments, and service interventions
-- `app_events` table used by the realtime refresh system
-- RLS enabled on application tables
-
-After importing the database, create a Supabase Storage bucket named:
-
-```text
-kvarovi
-```
-
-This bucket is used for uploaded fault/incident images. If realtime updates do not appear, enable realtime replication for the `app_events` table in Supabase.
-
-### Demo Accounts
+Once the database is imported, use these credentials to test different roles:
 
 | Role | Username | Password |
 | --- | --- | --- |
 | Administrator | `seed.admin01` | `Test1234!` |
 | Fleet manager | `seed.voditelj01` | `Test1234!` |
 | Employee | `seed.radnik01` | `Test1234!` |
+
+## Project Structure
+
+```
+src/
+├── app/              # Routes and API endpoints
+├── components/       # Reusable UI components
+├── lib/              # Server actions and utilities
+├── hooks/            # Custom hooks
+├── types/            # TypeScript types
+database-sql/
+docs/
+public/
+```
+
+## Design Decisions
+
+- **Event-driven Architecture** — PostgreSQL triggers write normalized events into `app_events`, while Supabase Realtime streams changes to the frontend.
+
+- **Trigger-based Events** — A single trigger function centralizes realtime logic and reduces frontend complexity.
+
+- **Role-based Routing** — Desktop and mobile workflows are separated and protected through middleware and server actions.
+
+- **Soft Deletes & Audit Trail** — Historical data is preserved and operational events are stored permanently.
+
+- **Supabase Storage** — Images are stored outside the database for better scalability.
+
+- **SSR & Streaming** — Initial content is server-rendered and progressively streamed with React Suspense.
 
 ## Future Improvements
 

@@ -6,14 +6,16 @@ import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const expectedSecret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization");
 
-  if (!expectedSecret || authHeader !== `Bearer ${expectedSecret}`) {
+  const isCronRequest = request.headers.get("x-vercel-cron");
+
+  if (isCronRequest !== "1") {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const client = createOptionalServiceRoleSupabaseClient() ?? createOptionalServerSupabaseClient();
+  const client =
+    createOptionalServiceRoleSupabaseClient() ??
+    createOptionalServerSupabaseClient();
 
   if (!client) {
     return NextResponse.json(
@@ -22,11 +24,14 @@ export async function GET(request: Request) {
         timestamp: new Date().toISOString(),
         error: "Supabase is not configured.",
       },
-      { status: 503 },
+      { status: 503 }
     );
   }
 
-  const { error } = await client.from("app_events").select("id").limit(1);
+  const { error } = await client
+    .from("app_events")
+    .select("id")
+    .limit(1);
 
   if (error) {
     return NextResponse.json(
@@ -35,12 +40,15 @@ export async function GET(request: Request) {
         timestamp: new Date().toISOString(),
         error: error.message,
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 
-  return NextResponse.json({
-    ok: true,
-    timestamp: new Date().toISOString(),
-  });
+  return NextResponse.json(
+    {
+      ok: true,
+      timestamp: new Date().toISOString(),
+    },
+    { status: 200 }
+  );
 }
