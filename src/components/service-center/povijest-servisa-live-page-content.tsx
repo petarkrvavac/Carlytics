@@ -316,7 +316,7 @@ export function PovijestServisaLivePageContent({
           <p className="text-sm text-muted">Nema završenih servisa za odabrani filter.</p>
         ) : (
           <>
-            <ul className="max-h-[68vh] space-y-2 overflow-y-auto pr-1 md:hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <ul className="space-y-2 md:hidden">
               {pagedCompletedTimeline.map((service) => (
                 <li key={`mobile-${service.id}`} className="rounded-xl border border-border bg-slate-950/60 px-2.5 py-2">
                   <div className="flex flex-wrap items-start justify-between gap-2">
@@ -368,18 +368,18 @@ export function PovijestServisaLivePageContent({
               ))}
             </ul>
 
-            <div className="hidden max-h-[72vh] overflow-auto md:block">
-              <table className="min-w-230 text-left text-[13px]">
+            <div className="hidden md:block">
+              <table className="w-full table-fixed text-left text-[13px]">
                 <thead>
                   <tr className="border-b border-border bg-surface text-xs uppercase tracking-[0.2em] text-muted">
-                    <th className="sticky top-0 min-w-44 bg-surface px-3 py-2.5">Vozilo</th>
-                    <th className="sticky top-0 min-w-72 bg-surface px-3 py-2.5">Opis</th>
-                    <th className="sticky top-0 min-w-52 bg-surface px-3 py-2.5">Datumi</th>
-                    <th className="sticky top-0 min-w-24 bg-surface px-3 py-2.5 text-right">KM</th>
-                    <th className="sticky top-0 min-w-28 bg-surface px-3 py-2.5 text-right">Cijena</th>
-                    <th className="sticky top-0 min-w-40 bg-surface px-3 py-2.5">Status</th>
-                    <th className="sticky top-0 min-w-20 bg-surface px-3 py-2.5 text-right">Privitci</th>
-                    <th className="sticky top-0 min-w-28 bg-surface px-3 py-2.5 text-right">Akcije</th>
+                    <th className="sticky top-0 bg-surface px-3 py-2.5">Vozilo</th>
+                    <th className="sticky top-0 bg-surface px-3 py-2.5">Opis</th>
+                    <th className="sticky top-0 bg-surface px-3 py-2.5">Datumi</th>
+                    <th className="sticky top-0 bg-surface px-3 py-2.5 text-right">KM</th>
+                    <th className="sticky top-0 bg-surface px-3 py-2.5 text-right">Cijena</th>
+                    <th className="sticky top-0 bg-surface px-3 py-2.5">Status</th>
+                    <th className="sticky top-0 bg-surface px-3 py-2.5 text-right">Privitci</th>
+                    <th className="sticky top-0 bg-surface px-3 py-2.5 text-right">Akcije</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -389,7 +389,7 @@ export function PovijestServisaLivePageContent({
                         <p className="font-semibold text-slate-100">{service.vehicleLabel}</p>
                         <p className="text-xs text-slate-400">{service.plate}</p>
                       </td>
-                      <td className="px-3 py-3 align-top text-slate-200">{service.description}</td>
+                      <td className="px-3 py-3 align-top text-slate-200 wrap-break-word">{service.description}</td>
                       <td className="px-3 py-3 align-top text-xs text-muted">
                         <p>Start: {formatDate(service.startedAtIso)}</p>
                         <p>Kraj: {formatDate(service.endedAtIso ?? service.startedAtIso)}</p>
