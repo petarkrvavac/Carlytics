@@ -6,6 +6,7 @@ export const MOCK_DASHBOARD_DATA: DashboardData = {
   fleetHealth: {
     total: 20,
     operational: 18,
+    free: 7,
     occupied: 11,
     inService: 2,
     percentage: 90,
