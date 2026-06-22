@@ -14,11 +14,12 @@ import { VehicleHistoryPaginationSections } from "@/components/fleet/vehicle-his
 import { VehicleCostBreakdownChart } from "@/components/fleet/vehicle-cost-breakdown-chart";
 import { VehicleActivationControls } from "@/components/fleet/vehicle-activation-controls";
 import { VehicleEditModal } from "@/components/fleet/vehicle-edit-modal";
+import { VehicleServiceRecordForm } from "@/components/fleet/vehicle-service-record-form";
 import { RegistrationExtensionForm } from "@/components/fleet/registration-extension-form";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
-import type { FaultQueueItem } from "@/lib/fleet/operations-service";
+import { isVehicleServiceUrgent } from "@/lib/fleet/service-due";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import { getVehicleDigitalTwinData } from "@/lib/fleet/vehicle-digital-twin-service";
 import { getVehicleFormContext } from "@/lib/fleet/vehicle-form-context-service";
@@ -33,6 +34,8 @@ interface VehicleDetailPageProps {
 const MAX_DETAIL_ITEMS = 3;
 const TIRE_ITEMS_PER_PAGE = 5;
 const REGISTRATION_ITEMS_PER_PAGE = 3;
+const SMALL_SERVICE_INTERVAL_YEARS = 1;
+const LARGE_SERVICE_INTERVAL_YEARS = 5;
 
 function parseVehicleId(rawId: string) {
   const parsed = Number(rawId);
@@ -78,6 +81,25 @@ function formatServiceDueKm(value: number) {
   return `${value.toLocaleString("hr-HR")} km`;
 }
 
+function addYearsToDateIso(dateIso: string | null, years: number) {
+  if (!dateIso) {
+    return null;
+  }
+
+  const parsed = new Date(dateIso);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  const dueDate = new Date(parsed.getFullYear() + years, parsed.getMonth(), parsed.getDate());
+  const year = dueDate.getFullYear();
+  const month = String(dueDate.getMonth() + 1).padStart(2, "0");
+  const day = String(dueDate.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
 function getServiceProgressPercent(params: {
   currentKm: number;
   lastServiceKm: number | null;
@@ -109,24 +131,7 @@ function getVehicleStatusVariant(status: VehicleListItem["status"]) {
 
   return "success" as const;
 }
-
-function getFaultPriorityVariant(priority: FaultQueueItem["priority"]) {
-  if (priority === "kriticno") {
-    return "danger" as const;
-  }
-
-  if (priority === "visoko") {
-    return "warning" as const;
-  }
-
-  if (priority === "nisko") {
-    return "info" as const;
-  }
-
-  return "neutral" as const;
-}
-
-function getFaultPriorityLabel(priority: FaultQueueItem["priority"]) {
+function getFaultPriorityLabel(priority: "kriticno" | "visoko" | "nisko" | "srednje") {
   if (priority === "kriticno") {
     return "Kritično";
   }
@@ -140,26 +145,6 @@ function getFaultPriorityLabel(priority: FaultQueueItem["priority"]) {
   }
 
   return "Srednje";
-}
-
-function getFaultStatusVariant(statusLabel: string) {
-  const normalized = statusLabel.toLowerCase();
-
-  if (
-    normalized.includes("zat") ||
-    normalized.includes("rije") ||
-    normalized.includes("rijes") ||
-    normalized.includes("closed") ||
-    normalized.includes("res")
-  ) {
-    return "success" as const;
-  }
-
-  if (normalized.includes("obr")) {
-    return "warning" as const;
-  }
-
-  return "danger" as const;
 }
 
 function getRegistrationBadge(registrationExpiryDays: number | null) {
@@ -212,31 +197,16 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
 
   const vehicle = digitalTwinData.vehicle;
   const openFaultCount = digitalTwinData.faultHistory.filter((fault) => fault.isOpen).length;
-  const unifiedServiceHistory = [
-    ...digitalTwinData.serviceHistory.map((service) => ({
-      type: "service" as const,
-      sortAtIso: service.endedAtIso ?? service.startedAtIso,
-      payload: service,
-      isOpen: service.isOpen,
-    })),
-    ...digitalTwinData.faultHistory
-      .filter((fault) => fault.isOpen)
-      .map((fault) => ({
-        type: "fault" as const,
-        sortAtIso: fault.reportedAtIso,
-        payload: fault,
-        isOpen: fault.isOpen,
-      })),
-  ].sort((left, right) => {
-    const leftTime = new Date(left.sortAtIso).getTime();
-    const rightTime = new Date(right.sortAtIso).getTime();
+  const serviceHistory = [...digitalTwinData.serviceHistory].sort((left, right) => {
+    const leftTime = new Date(left.endedAtIso ?? left.startedAtIso).getTime();
+    const rightTime = new Date(right.endedAtIso ?? right.startedAtIso).getTime();
 
     const safeLeftTime = Number.isNaN(leftTime) ? 0 : leftTime;
     const safeRightTime = Number.isNaN(rightTime) ? 0 : rightTime;
     return safeRightTime - safeLeftTime;
   });
-  const openUnifiedServiceCount = unifiedServiceHistory.filter((item) => item.isOpen).length;
-  const isServiceUrgent = vehicle.serviceDueKm <= 2000;
+  const openUnifiedServiceCount = serviceHistory.filter((item) => item.isOpen).length;
+  const isServiceUrgent = isVehicleServiceUrgent(vehicle);
   const smallServiceProgress = getServiceProgressPercent({
     currentKm: vehicle.km,
     lastServiceKm: vehicle.lastSmallServiceKm,
@@ -252,6 +222,12 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
 
   const registrationState = getRegistrationBadge(vehicle.registrationExpiryDays);
   const shouldShowRegistrationBadge = vehicle.isActive || registrationState.variant !== "success";
+  const smallServiceDueByTime = (vehicle.smallServiceDueDays ?? null) !== null && (vehicle.smallServiceDueDays ?? 1) <= 0;
+  const smallServiceDueByKm = vehicle.smallServiceDueKm <= 0;
+  const largeServiceDueByTime = (vehicle.largeServiceDueDays ?? null) !== null && (vehicle.largeServiceDueDays ?? 1) <= 0;
+  const largeServiceDueByKm = vehicle.largeServiceDueKm <= 0;
+  const smallServiceDueDateIso = addYearsToDateIso(vehicle.lastSmallServiceDate, SMALL_SERVICE_INTERVAL_YEARS);
+  const largeServiceDueDateIso = addYearsToDateIso(vehicle.lastLargeServiceDate, LARGE_SERVICE_INTERVAL_YEARS);
 
   return (
     <div className="space-y-5">
@@ -371,16 +347,27 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
                 Kombinirani prikaz malog i velikog servisa prema kilometraži i vremenskom intervalu.
               </p>
             </div>
-            <Wrench className={isServiceUrgent ? "text-rose-300" : "text-cyan-300"} size={18} />
+            <div className="flex flex-col items-end gap-2">
+              <Wrench className={isServiceUrgent ? "text-rose-300" : "text-cyan-300"} size={18} />
+              {vehicle.isServiceDue ? <VehicleServiceRecordForm vehicle={vehicle} /> : null}
+            </div>
           </div>
 
           <div className="mt-6 space-y-3">
             <div className="rounded-xl border border-border bg-surface p-4">
               <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.18em]">
                 <span className="text-muted">Mali servis</span>
-                <span className={vehicle.smallServiceDueKm <= 2000 ? "text-amber-300" : "text-slate-200"}>
-                  {formatServiceDueKm(vehicle.smallServiceDueKm)}
+                <span className={smallServiceDueByTime || smallServiceDueByKm ? "text-rose-300" : "text-slate-200"}>
+                  {vehicle.serviceDueType === "mali" ? vehicle.serviceDueLabel : formatServiceDueKm(vehicle.smallServiceDueKm)}
                 </span>
+              </div>
+              <div className="grid gap-1 text-xs">
+                <p className={smallServiceDueByTime ? "text-rose-300" : "text-muted"}>
+                  Datum dospijeća: {smallServiceDueDateIso ? formatDate(smallServiceDueDateIso) : "N/A"}
+                </p>
+                <p className={smallServiceDueByKm ? "text-rose-300" : "text-muted"}>
+                  Preostalo km: {formatServiceDueKm(vehicle.smallServiceDueKm)}
+                </p>
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
                 <div
@@ -393,9 +380,19 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
             <div className="rounded-xl border border-border bg-surface p-4">
               <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.18em]">
                 <span className="text-muted">Veliki servis</span>
-                <span className={vehicle.largeServiceDueKm <= 5000 ? "text-amber-300" : "text-slate-200"}>
-                  {formatServiceDueKm(vehicle.largeServiceDueKm)}
+                <span className={largeServiceDueByTime || largeServiceDueByKm ? "text-rose-300" : "text-slate-200"}>
+                  {vehicle.serviceDueType === "veliki" || vehicle.serviceDueType === "oba"
+                    ? (vehicle.serviceDueType === "oba" ? "Veliki servis je potreban" : vehicle.serviceDueLabel)
+                    : formatServiceDueKm(vehicle.largeServiceDueKm)}
                 </span>
+              </div>
+              <div className="grid gap-1 text-xs">
+                <p className={largeServiceDueByTime ? "text-rose-300" : "text-muted"}>
+                  Datum dospijeća: {largeServiceDueDateIso ? formatDate(largeServiceDueDateIso) : "N/A"}
+                </p>
+                <p className={largeServiceDueByKm ? "text-rose-300" : "text-muted"}>
+                  Preostalo km: {formatServiceDueKm(vehicle.largeServiceDueKm)}
+                </p>
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
                 <div
@@ -454,66 +451,40 @@ export default async function FlotaVehicleDetailPage({ params, searchParams }: V
               Servisna povijest
             </h2>
             <Badge variant={openUnifiedServiceCount > 0 ? "warning" : "success"}>
-              Stavki: {unifiedServiceHistory.length}
+              Stavki: {serviceHistory.length}
             </Badge>
           </div>
 
-          {unifiedServiceHistory.length === 0 ? (
+          {serviceHistory.length === 0 ? (
             <p className="text-sm text-muted">Nema servisnih stavki za odabrano vozilo.</p>
           ) : (
             <ul className="space-y-3">
-              {unifiedServiceHistory.slice(0, MAX_DETAIL_ITEMS).map((historyItem) => {
-                if (historyItem.type === "service") {
-                  const service = historyItem.payload;
-
-                  return (
-                    <li key={`service-${service.id}`} className="rounded-xl border border-border bg-surface px-3 py-3">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <p className="text-sm font-medium text-slate-100">{service.description}</p>
-                        <div className="flex flex-wrap gap-2">
-                          {service.categoryLabel ? <Badge variant="neutral">{service.categoryLabel}</Badge> : null}
-                          <Badge variant={service.isOpen ? "warning" : "success"}>
-                            {service.isOpen ? "U tijeku" : "Završeno"}
-                          </Badge>
-                        </div>
-                      </div>
-                      <p className="mt-2 flex items-center gap-2 text-xs text-muted">
-                        <CalendarClock size={13} />
-                        {formatDate(service.startedAtIso)}
-                        {service.endedAtIso ? ` - ${formatDate(service.endedAtIso)}` : " - u tijeku"}
-                      </p>
-                      <div className="mt-2 flex items-center justify-between text-xs text-muted">
-                        <span>
-                          KM: <span className="data-font text-slate-200">{service.kmAtMoment.toLocaleString("hr-HR")}</span>
-                        </span>
-                        <span>
-                          Cijena: <span className="data-font text-amber-200">{formatAmount(service.cost)} EUR</span>
-                        </span>
-                      </div>
-                    </li>
-                  );
-                }
-
-                const fault = historyItem.payload;
-
-                return (
-                  <li key={`fault-${fault.id}`} className="rounded-xl border border-border bg-surface px-3 py-3">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <p className="text-sm font-medium text-slate-100">{fault.description}</p>
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant="neutral">Prijava kvara</Badge>
-                        <Badge variant={getFaultPriorityVariant(fault.priority)}>
-                          {getFaultPriorityLabel(fault.priority)}
-                        </Badge>
-                        <Badge variant={getFaultStatusVariant(fault.statusLabel)}>{fault.statusLabel}</Badge>
-                      </div>
+              {serviceHistory.slice(0, MAX_DETAIL_ITEMS).map((service) => (
+                <li key={`service-${service.id}`} className="rounded-xl border border-border bg-surface px-3 py-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <p className="text-sm font-medium text-slate-100">{service.description}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {service.categoryLabel ? <Badge variant="neutral">{service.categoryLabel}</Badge> : null}
+                      <Badge variant={service.isOpen ? "warning" : "success"}>
+                        {service.isOpen ? "U tijeku" : "Završeno"}
+                      </Badge>
                     </div>
-                    <p className="mt-2 text-xs text-muted">
-                      Prijavio: {fault.reporterName} • {formatDateTime(fault.reportedAtIso)}
-                    </p>
-                  </li>
-                );
-              })}
+                  </div>
+                  <p className="mt-2 flex items-center gap-2 text-xs text-muted">
+                    <CalendarClock size={13} />
+                    {formatDate(service.startedAtIso)}
+                    {service.endedAtIso ? ` - ${formatDate(service.endedAtIso)}` : " - u tijeku"}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between text-xs text-muted">
+                    <span>
+                      KM: <span className="data-font text-slate-200">{service.kmAtMoment.toLocaleString("hr-HR")}</span>
+                    </span>
+                    <span>
+                      Cijena: <span className="data-font text-amber-200">{formatAmount(service.cost)} EUR</span>
+                    </span>
+                  </div>
+                </li>
+              ))}
             </ul>
           )}
         </Card>

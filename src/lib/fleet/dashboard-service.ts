@@ -6,7 +6,7 @@ import {
   isInterventionOpen,
 } from "@/lib/fleet/intervention-utils";
 import { MOCK_DASHBOARD_DATA } from "@/lib/fleet/mock-dashboard-data";
-import { evaluateVehicleServiceDue } from "@/lib/fleet/service-due";
+import { evaluateVehicleServiceDue, isVehicleServiceUrgent } from "@/lib/fleet/service-due";
 import type {
   AlertSeverity,
   CostSeriesPoint,
@@ -353,6 +353,7 @@ function mapVehicles(params: {
       largeServiceDueKm: serviceDue.largeServiceDueKm,
       serviceDueKm: serviceDue.serviceDueKm,
       serviceDueType: serviceDue.serviceDueType,
+      dueReason: serviceDue.dueReason,
       serviceDueLabel: serviceDue.serviceDueLabel,
       serviceProgressIntervalKm: serviceDue.serviceProgressIntervalKm,
       isServiceDue: serviceDue.isServiceDue,
@@ -453,6 +454,7 @@ function mapVehicles(params: {
 function buildFleetHealth(vehicles: VehicleListItem[]): FleetHealthSummary {
   const activeVehicles = vehicles.filter((vehicle) => vehicle.isActive);
   const total = activeVehicles.length;
+  const free = activeVehicles.filter((vehicle) => vehicle.status === "Slobodno").length;
   const inService = activeVehicles.filter((vehicle) => vehicle.status === "Na servisu").length;
   const occupied = activeVehicles.filter((vehicle) => vehicle.status === "Zauzeto").length;
   const operational = total - inService;
@@ -460,6 +462,7 @@ function buildFleetHealth(vehicles: VehicleListItem[]): FleetHealthSummary {
   return {
     total,
     operational,
+    free,
     occupied,
     inService,
     percentage: total > 0 ? Math.round((operational / total) * 100) : 0,
@@ -759,7 +762,7 @@ export async function getDashboardData(
         return false;
       }
 
-      const hasServiceAction = vehicle.isServiceDue || vehicle.serviceDueKm <= KM_FOR_SERVICE_ALERT;
+      const hasServiceAction = isVehicleServiceUrgent(vehicle);
       const hasFaultAction = vehicle.openFaultCount > 0;
       const hasRegistrationAction =
         vehicle.registrationExpiryDays !== null &&
@@ -805,9 +808,9 @@ export async function getDashboardData(
       isUsingFallbackData: false,
     };
   } catch (error) {
-    console.error("[carlytics] Dashboard fallback zbog greške:", error);
+    console.warn("[carlytics] Dashboard fallback zbog greške:", error);
     if (!serviceRoleClient) {
-      console.error(
+      console.warn(
         "[carlytics] SUPABASE_SERVICE_ROLE_KEY nije postavljen; anon čitanje može biti ograničeno RLS pravilima.",
       );
     }
@@ -919,9 +922,9 @@ export async function getFleetVehiclesSnapshot() {
       assignedVehicleIds,
     });
   } catch (error) {
-    console.error("[carlytics] Fleet snapshot fallback zbog greške:", error);
+    console.warn("[carlytics] Fleet snapshot fallback zbog greške:", error);
     if (!serviceRoleClient) {
-      console.error(
+      console.warn(
         "[carlytics] SUPABASE_SERVICE_ROLE_KEY nije postavljen; anon čitanje može biti ograničeno RLS pravilima.",
       );
     }
@@ -1047,9 +1050,9 @@ export async function getAppShellMetrics() {
       hasCriticalAlerts: hasCriticalFault || hasExpiringRegistration || hasServiceOverdue,
     };
   } catch (error) {
-    console.error("[carlytics] App shell metrike fallback zbog greške:", error);
+    console.warn("[carlytics] App shell metrike fallback zbog greške:", error);
     if (!serviceRoleClient) {
-      console.error(
+      console.warn(
         "[carlytics] SUPABASE_SERVICE_ROLE_KEY nije postavljen; anon čitanje može biti ograničeno RLS pravilima.",
       );
     }

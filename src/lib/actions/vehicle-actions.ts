@@ -89,14 +89,26 @@ const addVehicleSchema = z.object({
   tipGorivaId: optionalIntegerSchema,
   maliServisIntervalKm: optionalKmIntervalSchema,
   velikiServisIntervalKm: optionalKmIntervalSchema,
+  mjestoId: optionalIntegerSchema,
   statusId: z.coerce.number().int().positive("Status je obavezan."),
   trenutnaKm: z.coerce
     .number()
     .int("Kilometraža mora biti cijeli broj.")
     .nonnegative("Kilometraža ne može biti negativna."),
+  godinaProizvodnje: z.preprocess((value) => {
+    if (value === null || value === undefined || value === "") {
+      return undefined;
+    }
+
+    return Number(value);
+  }, z.number().int().min(1950, "Godina je preniska.").max(2100, "Godina je previsoka.").optional()),
   datumKupovine: optionalDateSchema,
   nabavnaVrijednost: optionalNumberSchema,
   datumIstekaRegistracije: z.string().min(1, "Datum isteka registracije je obavezan."),
+  zadnjiMaliServisDatum: optionalDateSchema,
+  zadnjiMaliServisKm: optionalKmIntervalSchema,
+  zadnjiVelikiServisDatum: optionalDateSchema,
+  zadnjiVelikiServisKm: optionalKmIntervalSchema,
 });
 
 const extendVehicleRegistrationSchema = z.object({
@@ -502,11 +514,17 @@ export async function submitNewVehicleAction(
     tipGorivaId: formData.get("tipGorivaId"),
     maliServisIntervalKm: formData.get("maliServisIntervalKm"),
     velikiServisIntervalKm: formData.get("velikiServisIntervalKm"),
+    mjestoId: formData.get("mjestoId"),
     statusId: formData.get("statusId"),
     trenutnaKm: formData.get("trenutnaKm"),
+    godinaProizvodnje: formData.get("godinaProizvodnje"),
     datumKupovine: formData.get("datumKupovine"),
     nabavnaVrijednost: formData.get("nabavnaVrijednost"),
     datumIstekaRegistracije: formData.get("datumIstekaRegistracije"),
+    zadnjiMaliServisDatum: formData.get("zadnjiMaliServisDatum"),
+    zadnjiMaliServisKm: formData.get("zadnjiMaliServisKm"),
+    zadnjiVelikiServisDatum: formData.get("zadnjiVelikiServisDatum"),
+    zadnjiVelikiServisKm: formData.get("zadnjiVelikiServisKm"),
   });
 
   if (!parsed.success) {
@@ -734,7 +752,8 @@ export async function submitNewVehicleAction(
     };
   }
 
-  const initialServiceDate = parsed.data.datumKupovine ?? toDateOnlyInZagreb();
+  const today = toDateOnlyInZagreb();
+  const purchaseDate = parsed.data.datumKupovine ?? today;
 
   const { data: insertedVehicle, error: vehicleInsertError } = await client
     .from("vozila")
@@ -742,11 +761,13 @@ export async function submitNewVehicleAction(
       broj_sasije: normalizedVin,
       model_id: resolvedModelId,
       status_id: parsed.data.statusId,
+      mjesto_id: parsed.data.mjestoId ?? null,
       trenutna_km: parsed.data.trenutnaKm,
-      zadnji_mali_servis_datum: initialServiceDate,
-      zadnji_mali_servis_km: parsed.data.trenutnaKm,
-      zadnji_veliki_servis_datum: initialServiceDate,
-      zadnji_veliki_servis_km: parsed.data.trenutnaKm,
+      godina_proizvodnje: parsed.data.godinaProizvodnje ?? null,
+      zadnji_mali_servis_datum: parsed.data.zadnjiMaliServisDatum ?? purchaseDate,
+      zadnji_mali_servis_km: parsed.data.zadnjiMaliServisKm ?? 0,
+      zadnji_veliki_servis_datum: parsed.data.zadnjiVelikiServisDatum ?? purchaseDate,
+      zadnji_veliki_servis_km: parsed.data.zadnjiVelikiServisKm ?? 0,
       datum_kupovine: parsed.data.datumKupovine ?? null,
       nabavna_vrijednost: parsed.data.nabavnaVrijednost ?? null,
     })

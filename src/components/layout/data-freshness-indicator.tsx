@@ -10,6 +10,7 @@ const LIVE_UPDATE_PULSE_MS = 1000;
 interface DataFreshnessIndicatorProps {
   updatedAtIso: string;
   isUsingFallbackData: boolean;
+  renderedAtIso: string;
 }
 
 function formatRelativeAge(secondsOld: number) {
@@ -39,9 +40,13 @@ function formatRelativeAge(secondsOld: number) {
 export function DataFreshnessIndicator({
   updatedAtIso,
   isUsingFallbackData,
+  renderedAtIso,
 }: DataFreshnessIndicatorProps) {
   const { latestEventAtIso, eventVersion } = useLiveUpdates();
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(() => {
+    const parsed = new Date(renderedAtIso).getTime();
+    return Number.isNaN(parsed) ? Date.now() : parsed;
+  });
   const [isLivePulseActive, setIsLivePulseActive] = useState(false);
 
   const dashboardUpdatedAtMs = useMemo(() => {

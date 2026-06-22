@@ -13,6 +13,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     getDashboardData(),
     getOperationsOverviewData(),
   ]);
+  const renderedAtIso = new Date().toISOString();
 
   const currentAlertsPage = parsePageParam(resolvedSearchParams?.upozorenja);
   const currentVehiclesPage = parsePageParam(resolvedSearchParams?.nadzor);
@@ -24,6 +25,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       initialOperationsData={operationsData}
       initialAlertsPage={currentAlertsPage}
       initialVehiclesPage={currentVehiclesPage}
+      renderedAtIso={renderedAtIso}
     />
   );
 }

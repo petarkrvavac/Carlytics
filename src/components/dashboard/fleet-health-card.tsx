@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, Wrench } from "lucide-react";
+import { Activity } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
@@ -19,11 +19,11 @@ export function FleetHealthCard({ summary }: FleetHealthCardProps) {
           <div>
             <CardTitle>Stanje voznog parka</CardTitle>
             <CardDescription className="mt-1">
-              Operativna dostupnost vozila u stvarnom vremenu.
+              Slobodna, zauzeta, servisna i ukupna vozila u stvarnom vremenu.
             </CardDescription>
           </div>
           <Badge variant={summary.inService > 0 ? "warning" : "success"}>
-            {summary.operational}/{summary.total} operativno
+            {summary.total - summary.inService}/{summary.total} aktivno
           </Badge>
         </div>
 
@@ -47,34 +47,34 @@ export function FleetHealthCard({ summary }: FleetHealthCardProps) {
               href="/flota"
               className="flex h-full flex-col justify-center rounded-xl border border-border bg-surface p-2.5 transition hover:border-cyan-500/45"
             >
-              <p className="text-muted">Slobodna + zauzeta</p>
-              <p className="mt-1 text-base font-semibold leading-none text-foreground">{summary.operational}</p>
-            </Link>
-            <Link
-              href="/flota?status=servis"
-              className="flex h-full flex-col justify-center rounded-xl border border-border bg-surface p-2.5 transition hover:border-amber-500/45"
-            >
-              <p className="text-muted">Na servisu</p>
-              <p className="mt-1 text-base font-semibold leading-none text-amber-300">{summary.inService}</p>
-            </Link>
-            <Link
-              href="/flota"
-              className="flex h-full flex-col justify-center rounded-xl border border-border bg-surface p-2.5 transition hover:border-slate-600"
-            >
-              <p className="text-muted">Ukupno vozila</p>
-              <p className="mt-1 flex items-center gap-1.5 text-base font-semibold leading-none text-foreground">
-                <Activity size={15} className="text-cyan-300" />
-                {summary.total}
-              </p>
+              <p className="text-muted">Slobodna</p>
+              <p className="mt-1 text-base font-semibold leading-none text-cyan-300">{summary.free}</p>
             </Link>
             <Link
               href="/flota?status=zauzeto"
+              className="flex h-full flex-col justify-center rounded-xl border border-border bg-surface p-2.5 transition hover:border-amber-500/45"
+            >
+              <p className="text-muted">Zauzeta</p>
+              <p className="mt-1 text-base font-semibold leading-none text-cyan-300">{summary.occupied}</p>
+            </Link>
+            <Link
+              href="/flota?status=servis"
+              className="flex h-full flex-col justify-center rounded-xl border border-border bg-surface p-2.5 transition hover:border-slate-600"
+            >
+              <p className="text-muted">Na servisu</p>
+              <p className="mt-1 flex items-center gap-1.5 text-base font-semibold leading-none text-cyan-300">
+                <Activity size={15} className="text-cyan-300" />
+                {summary.inService}
+              </p>
+            </Link>
+            <Link
+              href="/flota"
               className="flex h-full flex-col justify-center rounded-xl border border-border bg-surface p-2.5 transition hover:border-sky-500/45"
             >
-              <p className="text-muted">Aktivna zauzeća</p>
-              <p className="mt-1 flex items-center gap-1.5 text-base font-semibold leading-none text-sky-300">
-                <Wrench size={15} className="text-sky-300" />
-                {summary.occupied}
+              <p className="text-muted">Ukupno</p>
+              <p className="mt-1 flex items-center gap-1.5 text-base font-semibold leading-none text-cyan-300">
+                <Activity size={15} className="text-cyan-300" />
+                {summary.total}
               </p>
             </Link>
         </div>

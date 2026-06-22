@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { PageHeader } from "@/components/ui/page-header";
+import { isVehicleServiceUrgent } from "@/lib/fleet/service-due";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import type { VehicleFormContext } from "@/lib/fleet/vehicle-form-context-service";
 import { useLiveSourceRefresh } from "@/lib/hooks/use-live-source-refresh";
@@ -93,7 +94,7 @@ function getFilteredVehicles(
     }
 
     if (riskFilter === "servis") {
-      return vehicle.isServiceDue || vehicle.serviceDueKm <= 2000;
+      return isVehicleServiceUrgent(vehicle);
     }
 
     if (riskFilter === "registracija") {
@@ -466,6 +467,7 @@ export function FleetSectionContent({
                 statusOptions={formContext.statusOptions}
                 manufacturerOptions={formContext.manufacturerOptions}
                 fuelTypeOptions={formContext.fuelTypeOptions}
+                placeOptions={formContext.placeOptions}
                 onCancel={closeModal}
                 onSuccess={handleFormSuccess}
                 mode="modal"

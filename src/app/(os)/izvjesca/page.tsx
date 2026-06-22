@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireSessionUser } from "@/lib/auth/session";
 import { getFleetVehiclesSnapshot } from "@/lib/fleet/dashboard-service";
+import { isVehicleServiceUrgent } from "@/lib/fleet/service-due";
 import {
   getOperationsOverviewData,
   getServiceCenterTimelineData,
@@ -58,9 +59,7 @@ export default async function IzvjescaPage() {
   const registrationRisk = activeVehicles.filter(
     (vehicle) => vehicle.registrationExpiryDays !== null && vehicle.registrationExpiryDays <= 30,
   );
-  const serviceRisk = activeVehicles.filter(
-    (vehicle) => vehicle.isServiceDue || vehicle.serviceDueKm <= 2000,
-  );
+  const serviceRisk = activeVehicles.filter((vehicle) => isVehicleServiceUrgent(vehicle));
   const completedServices = serviceData.serviceTimeline.filter((service) => !service.isOpen);
   const costByCategory = new Map<string, number>();
   const costByMonth = new Map<string, number>();

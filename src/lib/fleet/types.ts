@@ -2,6 +2,8 @@ export type VehicleStatus = "Slobodno" | "Zauzeto" | "Na servisu";
 
 export type ServiceDueType = "none" | "mali" | "veliki" | "oba";
 
+export type ServiceDueReason = "km" | "time" | "both";
+
 export type AlertSeverity = "kriticno" | "upozorenje" | "info";
 
 export interface VehicleListItem {
@@ -16,6 +18,10 @@ export interface VehicleListItem {
   largeServiceDueKm: number;
   serviceDueKm: number;
   serviceDueType: ServiceDueType;
+  dueReason: ServiceDueReason | null;
+  smallServiceDueDays?: number | null;
+  largeServiceDueDays?: number | null;
+  serviceDueDays?: number | null;
   serviceDueLabel: string;
   serviceProgressIntervalKm: number;
   isServiceDue: boolean;
@@ -47,6 +53,7 @@ export interface VehicleListItem {
 export interface FleetHealthSummary {
   total: number;
   operational: number;
+  free: number;
   occupied: number;
   inService: number;
   percentage: number;

@@ -24,6 +24,7 @@ interface DashboardLivePageContentProps {
   initialOperationsData: OperationsOverviewData;
   initialAlertsPage: number;
   initialVehiclesPage: number;
+  renderedAtIso: string;
 }
 
 const ALERTS_PER_PAGE = 10;
@@ -41,11 +42,7 @@ function getFaultSeverity(priority: string) {
     return "kriticno" as const;
   }
 
-  if (priority === "visoko") {
-    return "upozorenje" as const;
-  }
-
-  return "info" as const;
+  return "upozorenje" as const;
 }
 
 function getSeverityRank(value: DashboardActivityItem["severity"] | undefined) {
@@ -72,6 +69,20 @@ function isFaultInProgress(statusRaw: string | null, statusLabel: string) {
   );
 }
 
+function resolveActivityHref(type: DashboardActivityItem["type"], vehicleId: number) {
+  if (type === "registracija") {
+    return Number.isInteger(vehicleId) && vehicleId > 0 ? `/flota/${vehicleId}` : "/flota";
+  }
+
+  if (type === "servis") {
+    return Number.isInteger(vehicleId) && vehicleId > 0 ? `/flota/${vehicleId}` : "/flota";
+  }
+
+  return Number.isInteger(vehicleId) && vehicleId > 0
+    ? `/prijava-kvara?vozilo=${vehicleId}`
+    : "/prijava-kvara";
+}
+
 function buildDashboardActivityItems(
   operationsData: OperationsOverviewData,
   dashboardData: DashboardData,
@@ -91,26 +102,28 @@ function buildDashboardActivityItems(
           type: alert.type as "registracija" | "servis",
           title: alert.title,
           description: alert.description,
-          href:
-            Number.isInteger(vehicleId) && vehicleId > 0
-              ? alert.type === "registracija"
-                ? `/flota/${vehicleId}`
-                : `/prijava-kvara?vozilo=${vehicleId}`
-              : alert.type === "registracija"
-                ? "/flota"
-                : "/prijava-kvara",
+          href: resolveActivityHref(alert.type as DashboardActivityItem["type"], vehicleId),
           severity: alert.severity,
         };
       }),
     ...operationsData.faultQueue
-      .filter((fault) => fault.isOpen && !isFaultInProgress(fault.statusRaw, fault.statusLabel))
+      .filter(
+        (fault) =>
+          fault.isOpen &&
+          !isFaultInProgress(fault.statusRaw, fault.statusLabel) &&
+          resolveInterventionAlertType(fault.categoryLabel) === "kvar",
+      )
       .map<DashboardActivityItem>((fault) => ({
         id: `kvar-${fault.id}`,
         occurredAtIso: fault.reportedAtIso,
         type: resolveInterventionAlertType(fault.categoryLabel),
         title: `${fault.vehicleLabel} (${fault.plate})`,
         description: fault.description,
-        href: fault.vehicleId ? `/prijava-kvara?vozilo=${fault.vehicleId}` : "/prijava-kvara",
+        href: fault.vehicleId
+          ? resolveActivityHref(resolveInterventionAlertType(fault.categoryLabel), fault.vehicleId)
+          : resolveInterventionAlertType(fault.categoryLabel) === "servis"
+            ? "/flota"
+            : "/prijava-kvara",
         severity: getFaultSeverity(fault.priority),
       })),
   ];
@@ -151,6 +164,7 @@ export function DashboardLivePageContent({
   initialOperationsData,
   initialAlertsPage,
   initialVehiclesPage,
+  renderedAtIso,
 }: DashboardLivePageContentProps) {
   const [dashboardData, setDashboardData] = useState(initialDashboardData);
   const [operationsData, setOperationsData] = useState(initialOperationsData);
@@ -221,6 +235,7 @@ export function DashboardLivePageContent({
             <DataFreshnessIndicator
               updatedAtIso={dashboardData.lastUpdatedIso}
               isUsingFallbackData={dashboardData.isUsingFallbackData}
+              renderedAtIso={renderedAtIso}
             />
             <FallbackChip isUsingFallbackData={dashboardData.isUsingFallbackData} />
           </>
@@ -266,8 +281,11 @@ export function DashboardLivePageContent({
           <OperationsActivityFeed
             items={pagedActivityItems}
             totalItems={activityItems.length}
+          />
+          <ServerPagination
             currentPage={safeAlertsPage}
             totalPages={totalAlertPages}
+            className="mt-4 pt-2"
             onPageChange={setAlertsPage}
           />
         </div>

@@ -6,19 +6,21 @@ import { useActionState, useEffect, useMemo, useState } from "react";
 import { INITIAL_ACTION_STATE } from "@/lib/actions/action-state";
 import { submitNewVehicleAction } from "@/lib/actions/vehicle-actions";
 import type { VehicleListItem } from "@/lib/fleet/types";
-import { cn } from "@/lib/utils/cn";
 import type {
   VehicleFuelTypeOption,
   VehicleManufacturerOption,
   VehicleModelOption,
+  VehiclePlaceOption,
   VehicleStatusOption,
 } from "@/lib/fleet/vehicle-form-context-service";
+import { cn } from "@/lib/utils/cn";
 
 interface AddVehicleFormProps {
   modelOptions: VehicleModelOption[];
   statusOptions: VehicleStatusOption[];
   manufacturerOptions: VehicleManufacturerOption[];
   fuelTypeOptions: VehicleFuelTypeOption[];
+  placeOptions: VehiclePlaceOption[];
   cancelHref?: string;
   onCancel?: () => void;
   onSuccess?: (payload: AddVehicleFormSuccessPayload | null) => void;
@@ -49,6 +51,7 @@ export function AddVehicleForm({
   statusOptions,
   manufacturerOptions,
   fuelTypeOptions,
+  placeOptions,
   cancelHref = "/flota",
   onCancel,
   onSuccess,
@@ -83,7 +86,7 @@ export function AddVehicleForm({
   }, [onSuccess, state.payload, state.status]);
 
   const inputClassName =
-    "mt-1.5 w-full rounded-xl border border-border bg-surface-elevated px-3 py-1.5 text-xs text-foreground placeholder:text-muted xl:py-2 xl:text-sm";
+    "mt-1.5 w-full rounded-xl border border-border bg-surface-elevated px-3 py-1.5 text-xs text-foreground placeholder:text-muted/60 xl:py-2 xl:text-sm";
   const sectionClassName = "rounded-xl border border-border/80 bg-surface/70 p-3 xl:p-4";
 
   return (
@@ -240,6 +243,35 @@ export function AddVehicleForm({
             </label>
           </div>
 
+          <div className="mt-2 grid gap-2 md:grid-cols-2 xl:gap-3">
+            <label className="text-xs uppercase tracking-[0.2em] text-muted">
+              Lokacija registracije
+              <select
+                name="mjestoId"
+                className="carlytics-select mt-1.5 w-full px-3 py-1.5 text-xs xl:py-2 xl:text-sm"
+              >
+                <option value="">Nije definirano</option>
+                {placeOptions.map((place) => (
+                  <option key={place.id} value={place.id}>
+                    {place.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-xs uppercase tracking-[0.2em] text-muted">
+              Godina proizvodnje
+              <input
+                type="number"
+                name="godinaProizvodnje"
+                min={1950}
+                max={2100}
+                className={cn("data-font", inputClassName)}
+                placeholder="2024"
+              />
+            </label>
+          </div>
+
           <div className="mt-2 flex items-center justify-start">
             <button
               type="button"
@@ -249,9 +281,7 @@ export function AddVehicleForm({
               }}
               className="inline-flex h-9 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-100 px-3 text-xs font-semibold uppercase tracking-[0.13em] text-cyan-800 transition hover:border-cyan-500/55 hover:bg-cyan-200 xl:h-10 xl:text-sm dark:bg-cyan-500/16 dark:text-cyan-200 dark:hover:bg-cyan-500/24"
             >
-              {isCreateModelOpen
-                ? "Zatvori novi model"
-                : "Kreiraj novi model/proizvođač"}
+              {isCreateModelOpen ? "Zatvori novi model" : "Kreiraj novi model/proizvođač"}
             </button>
           </div>
 
@@ -295,9 +325,7 @@ export function AddVehicleForm({
                     disabled={Boolean(selectedManufacturerId)}
                     className={cn(inputClassName, Boolean(selectedManufacturerId) && "opacity-60")}
                     placeholder={
-                      selectedManufacturerId
-                        ? "Koristi se odabrani proizvođač"
-                        : "Npr. Volkswagen"
+                      selectedManufacturerId ? "Koristi se odabrani proizvođač" : "Npr. Volkswagen"
                     }
                   />
                   {state.fieldErrors?.noviProizvodjacNaziv?.[0] ? (
@@ -372,11 +400,7 @@ export function AddVehicleForm({
           <div className="grid gap-2 md:grid-cols-3 xl:gap-3">
             <label className="text-xs uppercase tracking-[0.2em] text-muted">
               Datum nabavke
-              <input
-                type="date"
-                name="datumKupovine"
-                className={inputClassName}
-              />
+              <input type="date" name="datumKupovine" className={inputClassName} />
             </label>
 
             <label className="text-xs uppercase tracking-[0.2em] text-muted">
@@ -406,13 +430,50 @@ export function AddVehicleForm({
               ) : null}
             </label>
           </div>
+
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4 xl:gap-3">
+            <label className="text-xs uppercase tracking-[0.2em] text-muted">
+              Zadnji mali servis - datum
+              <input type="date" name="zadnjiMaliServisDatum" className={inputClassName} />
+            </label>
+
+            <label className="text-xs uppercase tracking-[0.2em] text-muted">
+              Zadnji mali servis - km
+              <input
+                type="number"
+                name="zadnjiMaliServisKm"
+                min={0}
+                step="1"
+                className={cn("data-font", inputClassName)}
+                placeholder="0"
+              />
+            </label>
+
+            <label className="text-xs uppercase tracking-[0.2em] text-muted">
+              Zadnji veliki servis - datum
+              <input type="date" name="zadnjiVelikiServisDatum" className={inputClassName} />
+            </label>
+
+            <label className="text-xs uppercase tracking-[0.2em] text-muted">
+              Zadnji veliki servis - km
+              <input
+                type="number"
+                name="zadnjiVelikiServisKm"
+                min={0}
+                step="1"
+                className={cn("data-font", inputClassName)}
+                placeholder="0"
+              />
+            </label>
+          </div>
         </section>
       </div>
 
       <div
         className={cn(
           "mt-2 space-y-2",
-          isModalMode && "border-t border-border bg-surface/95 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.25rem)]",
+          isModalMode &&
+            "border-t border-border bg-surface/95 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.25rem)]",
         )}
       >
         {state.message ? (

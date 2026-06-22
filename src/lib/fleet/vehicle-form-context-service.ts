@@ -71,9 +71,9 @@ export async function getVehicleFormContext(): Promise<VehicleFormContext> {
   ].find((error) => Boolean(error));
 
   if (queryError) {
-    console.error("[carlytics] Context za dodavanje vozila fallback:", queryError.message);
+    console.warn("[carlytics] Context za dodavanje vozila fallback:", queryError.message);
     if (!serviceRoleClient) {
-      console.error(
+      console.warn(
         "[carlytics] SUPABASE_SERVICE_ROLE_KEY nije postavljen; anon čitanje može biti ograničeno RLS pravilima.",
       );
     }

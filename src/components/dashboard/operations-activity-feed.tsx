@@ -3,7 +3,6 @@ import { Activity, CalendarClock, Fuel, TriangleAlert, UserCheck, Wrench } from 
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import { ServerPagination } from "@/components/ui/server-pagination";
 import { formatDateTime } from "@/lib/utils/date-format";
 import { cn } from "@/lib/utils/cn";
 
@@ -22,9 +21,6 @@ export interface DashboardActivityItem {
 interface OperationsActivityFeedProps {
   items: DashboardActivityItem[];
   totalItems?: number;
-  currentPage: number;
-  totalPages: number;
-  onPageChange: (page: number) => void;
 }
 
 function getTypeIcon(type: ActivityFeedType) {
@@ -102,9 +98,6 @@ function getItemTone(item: DashboardActivityItem) {
 export function OperationsActivityFeed({
   items,
   totalItems,
-  currentPage,
-  totalPages,
-  onPageChange,
 }: OperationsActivityFeedProps) {
   return (
     <Card className="flex h-full flex-col">
@@ -160,13 +153,6 @@ export function OperationsActivityFeed({
               );
             })}
           </ul>
-
-          <ServerPagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={onPageChange}
-            className="mt-auto pt-2"
-          />
         </div>
       )}
     </Card>

@@ -1,9 +1,10 @@
-import type { ServiceDueType } from "@/lib/fleet/types";
+import type { ServiceDueReason, ServiceDueType } from "@/lib/fleet/types";
 
 const DEFAULT_SMALL_SERVICE_INTERVAL_KM = 15000;
 const DEFAULT_LARGE_SERVICE_INTERVAL_KM = 100000;
 const SMALL_SERVICE_INTERVAL_YEARS = 1;
 const LARGE_SERVICE_INTERVAL_YEARS = 5;
+export const SERVICE_ALERT_KM_THRESHOLD = 2000;
 
 interface EvaluateVehicleServiceDueInput {
   currentKm: number | null | undefined;
@@ -28,9 +29,17 @@ export interface VehicleServiceDueSummary {
   isLargeServiceDue: boolean;
   isServiceDue: boolean;
   serviceDueType: ServiceDueType;
+  dueReason: ServiceDueReason | null;
   serviceDueKm: number;
   serviceDueLabel: string;
   serviceProgressIntervalKm: number;
+}
+
+export function isVehicleServiceUrgent(params: {
+  isServiceDue: boolean;
+  serviceDueKm: number;
+}) {
+  return params.isServiceDue || params.serviceDueKm <= SERVICE_ALERT_KM_THRESHOLD;
 }
 
 function parseDate(value: string | null | undefined) {
@@ -119,13 +128,56 @@ function resolveServiceDueType(
   return "none";
 }
 
+function resolveDueReason(isDueByKm: boolean, isDueByTime: boolean): ServiceDueReason | null {
+  if (!isDueByKm && !isDueByTime) {
+    return null;
+  }
+
+  if (isDueByKm && isDueByTime) {
+    return "both";
+  }
+
+  if (isDueByKm) {
+    return "km";
+  }
+
+  return "time";
+}
+
+function formatDueDays(days: number) {
+  if (days < 0) {
+    return `istekao prije ${Math.abs(days).toLocaleString("hr-HR")} dana`;
+  }
+
+  if (days === 0) {
+    return "danas ističe";
+  }
+
+  return `ističe za ${days.toLocaleString("hr-HR")} dana`;
+}
+
 function buildDueLabel(
   serviceDueType: ServiceDueType,
+  dueReason: ServiceDueReason | null,
   serviceDueKm: number,
+  serviceDueDays: number | null,
   smallServiceDueKm: number,
   largeServiceDueKm: number,
 ) {
   if (serviceDueType === "mali") {
+    if (dueReason === "time" && serviceDueDays !== null) {
+      return `mali servis je potreban (${formatDueDays(serviceDueDays)})`;
+    }
+
+    if (dueReason === "both" && serviceDueDays !== null) {
+      const kmPart =
+        serviceDueKm < 0
+          ? `kasni ${Math.abs(serviceDueKm).toLocaleString("hr-HR")} km`
+          : `još ${smallServiceDueKm.toLocaleString("hr-HR")} km do intervala`;
+
+      return `mali servis je potreban (${formatDueDays(serviceDueDays)}, ${kmPart})`;
+    }
+
     if (serviceDueKm < 0) {
       return `mali servis kasni ${Math.abs(serviceDueKm).toLocaleString("hr-HR")} km`;
     }
@@ -134,6 +186,19 @@ function buildDueLabel(
   }
 
   if (serviceDueType === "veliki") {
+    if (dueReason === "time" && serviceDueDays !== null) {
+      return `veliki servis je potreban (${formatDueDays(serviceDueDays)})`;
+    }
+
+    if (dueReason === "both" && serviceDueDays !== null) {
+      const kmPart =
+        serviceDueKm < 0
+          ? `kasni ${Math.abs(serviceDueKm).toLocaleString("hr-HR")} km`
+          : `još ${largeServiceDueKm.toLocaleString("hr-HR")} km do intervala`;
+
+      return `veliki servis je potreban (${formatDueDays(serviceDueDays)}, ${kmPart})`;
+    }
+
     if (serviceDueKm < 0) {
       return `veliki servis kasni ${Math.abs(serviceDueKm).toLocaleString("hr-HR")} km`;
     }
@@ -142,6 +207,23 @@ function buildDueLabel(
   }
 
   if (serviceDueType === "oba") {
+    if (dueReason === "time" && serviceDueDays !== null) {
+      return `mali i veliki servis su sada potrebni (${formatDueDays(serviceDueDays)})`;
+    }
+
+    if (dueReason === "both" && serviceDueDays !== null) {
+      const kmParts = [
+        smallServiceDueKm < 0
+          ? `mali kasni ${Math.abs(smallServiceDueKm).toLocaleString("hr-HR")} km`
+          : `mali: još ${smallServiceDueKm.toLocaleString("hr-HR")} km`,
+        largeServiceDueKm < 0
+          ? `veliki kasni ${Math.abs(largeServiceDueKm).toLocaleString("hr-HR")} km`
+          : `veliki: još ${largeServiceDueKm.toLocaleString("hr-HR")} km`,
+      ];
+
+      return `mali i veliki servis su sada potrebni (${formatDueDays(serviceDueDays)}, ${kmParts.join(", ")})`;
+    }
+
     const smallOverdue = smallServiceDueKm < 0 ? Math.abs(smallServiceDueKm) : 0;
     const largeOverdue = largeServiceDueKm < 0 ? Math.abs(largeServiceDueKm) : 0;
 
@@ -206,18 +288,12 @@ export function evaluateVehicleServiceDue(
   const isSmallServiceDue = isSmallServiceDueByKm || isSmallServiceDueByTime;
   const isLargeServiceDue = isLargeServiceDueByKm || isLargeServiceDueByTime;
   const serviceDueType = resolveServiceDueType(isSmallServiceDue, isLargeServiceDue);
+  const dueReason = resolveDueReason(
+    isSmallServiceDueByKm || isLargeServiceDueByKm,
+    isSmallServiceDueByTime || isLargeServiceDueByTime,
+  );
 
-  const overdueByKmCandidates = [
-    isSmallServiceDueByKm ? smallServiceDueKm : Number.POSITIVE_INFINITY,
-    isLargeServiceDueByKm ? largeServiceDueKm : Number.POSITIVE_INFINITY,
-  ].filter((value) => Number.isFinite(value));
-
-  const serviceDueKm =
-    serviceDueType === "none"
-      ? Math.min(smallServiceDueKm, largeServiceDueKm)
-      : overdueByKmCandidates.length > 0
-        ? Math.min(...overdueByKmCandidates)
-        : 0;
+  const serviceDueKm = Math.min(smallServiceDueKm, largeServiceDueKm);
 
   const serviceProgressIntervalKm =
     serviceDueType === "mali"
@@ -242,10 +318,13 @@ export function evaluateVehicleServiceDue(
     isLargeServiceDue,
     isServiceDue: isSmallServiceDue || isLargeServiceDue,
     serviceDueType,
+    dueReason,
     serviceDueKm,
     serviceDueLabel: buildDueLabel(
       serviceDueType,
+      dueReason,
       serviceDueKm,
+      serviceDueDays,
       smallServiceDueKm,
       largeServiceDueKm,
     ),

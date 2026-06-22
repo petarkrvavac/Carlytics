@@ -63,26 +63,6 @@ function getPriorityLabel(priority: FaultQueueItem["priority"]) {
   return "Srednje";
 }
 
-function getStatusVariant(statusLabel: string) {
-  const normalized = statusLabel.toLowerCase();
-
-  if (
-    normalized.includes("zat") ||
-    normalized.includes("rije") ||
-    normalized.includes("rijes") ||
-    normalized.includes("closed") ||
-    normalized.includes("res")
-  ) {
-    return "success" as const;
-  }
-
-  if (normalized.includes("obr")) {
-    return "warning" as const;
-  }
-
-  return "danger" as const;
-}
-
 function getStatusValue(statusRaw: string | null) {
   const normalized = statusRaw?.toLowerCase() ?? "";
 
@@ -341,7 +321,6 @@ export function FaultsSectionContent({
                           <Badge variant={getPriorityVariant(fault.priority)}>
                             {getPriorityLabel(fault.priority)}
                           </Badge>
-                          <Badge variant={getStatusVariant(fault.statusLabel)}>{fault.statusLabel}</Badge>
                         </div>
                       </div>
 

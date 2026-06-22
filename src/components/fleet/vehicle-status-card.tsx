@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Wrench } from "lucide-react";
 
+import { isVehicleServiceUrgent } from "@/lib/fleet/service-due";
 import type { VehicleListItem } from "@/lib/fleet/types";
 import { cn } from "@/lib/utils/cn";
 
@@ -59,8 +60,9 @@ function getRegistrationState(registrationExpiryDays: number | null) {
 }
 
 export function VehicleStatusCard({ vehicle }: VehicleStatusCardProps) {
-  const isServiceUrgent = vehicle.serviceDueKm <= 2000;
+  const isServiceUrgent = isVehicleServiceUrgent(vehicle);
   const hasOpenFault = vehicle.openFaultCount > 0;
+  const isInService = vehicle.status === "Na servisu";
   const isInactive = !vehicle.isActive;
   const registrationState = getRegistrationState(vehicle.registrationExpiryDays);
   const progress = Math.max(
@@ -106,7 +108,7 @@ export function VehicleStatusCard({ vehicle }: VehicleStatusCardProps) {
                 Neaktivno vozilo
               </span>
             ) : null}
-            {hasOpenFault ? (
+            {hasOpenFault && !isInService ? (
               <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:border-amber-500/35 dark:bg-amber-500/14 dark:text-amber-200">
                 Aktivan kvar ({vehicle.openFaultCount})
               </span>

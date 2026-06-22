@@ -10,7 +10,7 @@ import { applyInterventionVisibilityFilter } from "@/lib/fleet/intervention-util
 import { createOptionalServerSupabaseClient } from "@/lib/supabase/server";
 import { createOptionalServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { getActiveWorkerVehicleContext } from "@/lib/fleet/worker-context-service";
-import type { Tables, TablesUpdate } from "@/types/database";
+import type { Tables, TablesInsert, TablesUpdate } from "@/types/database";
 import { getCurrentIsoTimestamp, toDateOnlyInZagreb } from "@/lib/utils/date-format";
 
 type VehicleStatusRow = Tables<"statusi_vozila">;
@@ -66,6 +66,27 @@ const serviceInterventionUpdateSchema = z.object({
 
     return value;
   }, z.number().finite("Cijena mora biti broj.").nonnegative("Cijena ne može biti negativna.").nullable()),
+});
+
+const vehicleServiceRecordSchema = z.object({
+  vehicleId: z.coerce.number().int().positive("Vozilo je obavezno."),
+  serviceType: z.enum(["mali", "veliki"]),
+  serviceDate: z.string().min(1, "Datum servisa je obavezan."),
+  serviceKm: z.coerce
+    .number()
+    .int("Kilometraža mora biti cijeli broj.")
+    .nonnegative("Kilometraža ne može biti negativna."),
+  serviceCost: z.preprocess((value) => {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+
+    if (typeof value === "string") {
+      return Number(value.replace(",", ".").trim());
+    }
+
+    return value;
+  }, z.number().finite("Cijena mora biti broj.").nonnegative("Cijena ne može biti negativna.")),
 });
 
 const serviceInterventionLifecycleSchema = z.object({
@@ -833,6 +854,202 @@ export async function updateServiceInterventionAction(
   return {
     status: "success",
     message: "Servisna intervencija je uspješno ažurirana.",
+  };
+}
+
+export async function recordVehicleServiceAction(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = vehicleServiceRecordSchema.safeParse({
+    vehicleId: formData.get("vehicleId"),
+    serviceType: formData.get("serviceType"),
+    serviceDate: formData.get("serviceDate"),
+    serviceKm: formData.get("serviceKm"),
+    serviceCost: formData.get("serviceCost"),
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Provjeri podatke servisa.",
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    };
+  }
+
+  await requireSessionUser({
+    allowedRoles: ["admin", "voditelj_flote"],
+    redirectTo: "/prijava",
+    forbiddenRedirectTo: "/m",
+  });
+
+  const client = getDbClient();
+
+  if (!client) {
+    return {
+      status: "error",
+      message: "Supabase nije konfiguriran. Servis nije spremljen.",
+    };
+  }
+
+  const { data: vehicleRow, error: vehicleFetchError } = await client
+    .from("vozila")
+    .select(
+      "id, model_id, status_id, datum_kupovine, trenutna_km, zadnji_mali_servis_datum, zadnji_mali_servis_km, zadnji_veliki_servis_datum, zadnji_veliki_servis_km",
+    )
+    .eq("id", parsed.data.vehicleId)
+    .maybeSingle();
+
+  if (vehicleFetchError || !vehicleRow) {
+    console.error("[carlytics] Neuspješan dohvat vozila za zapis servisa:", vehicleFetchError?.message);
+    return {
+      status: "error",
+      message: "Vozilo nije pronađeno. Servis nije spremljen.",
+    };
+  }
+
+  let smallServiceIntervalKm: number | null = null;
+  let largeServiceIntervalKm: number | null = null;
+
+  if (vehicleRow.model_id) {
+    const { data: modelRow, error: modelError } = await client
+      .from("modeli")
+      .select("mali_servis_interval_km, veliki_servis_interval_km")
+      .eq("id", vehicleRow.model_id)
+      .maybeSingle();
+
+    if (modelError) {
+      console.error("[carlytics] Neuspješan dohvat modela za zapis servisa:", modelError.message);
+    } else if (modelRow) {
+      smallServiceIntervalKm = modelRow.mali_servis_interval_km;
+      largeServiceIntervalKm = modelRow.veliki_servis_interval_km;
+    }
+  }
+
+  const serviceKm = parsed.data.serviceKm;
+  const serviceDate = parsed.data.serviceDate;
+
+  if (serviceKm < (vehicleRow.trenutna_km ?? 0)) {
+    return {
+      status: "error",
+      message: "Nova kilometraža ne može biti manja od trenutne kilometraže vozila.",
+      fieldErrors: {
+        serviceKm: ["Kilometraža mora biti jednaka ili veća od trenutne vrijednosti."],
+      },
+    };
+  }
+
+  const updatedVehiclePayload: TablesUpdate<"vozila"> = {
+    trenutna_km: Math.max(vehicleRow.trenutna_km ?? 0, serviceKm),
+  };
+
+  if (parsed.data.serviceType === "mali") {
+    updatedVehiclePayload.zadnji_mali_servis_datum = serviceDate;
+    updatedVehiclePayload.zadnji_mali_servis_km = serviceKm;
+  } else {
+    updatedVehiclePayload.zadnji_mali_servis_datum = serviceDate;
+    updatedVehiclePayload.zadnji_mali_servis_km = serviceKm;
+    updatedVehiclePayload.zadnji_veliki_servis_datum = serviceDate;
+    updatedVehiclePayload.zadnji_veliki_servis_km = serviceKm;
+  }
+
+  const serviceDue = evaluateVehicleServiceDue({
+    currentKm: updatedVehiclePayload.trenutna_km ?? vehicleRow.trenutna_km,
+    lastSmallServiceKm:
+      parsed.data.serviceType === "mali" || parsed.data.serviceType === "veliki"
+        ? serviceKm
+        : vehicleRow.zadnji_mali_servis_km,
+    lastLargeServiceKm:
+      parsed.data.serviceType === "veliki" ? serviceKm : vehicleRow.zadnji_veliki_servis_km,
+    smallServiceIntervalKm,
+    largeServiceIntervalKm,
+    lastSmallServiceDate:
+      parsed.data.serviceType === "mali" || parsed.data.serviceType === "veliki"
+        ? serviceDate
+        : vehicleRow.zadnji_mali_servis_datum ?? vehicleRow.datum_kupovine,
+    lastLargeServiceDate:
+      parsed.data.serviceType === "veliki" ? serviceDate : vehicleRow.zadnji_veliki_servis_datum ?? vehicleRow.datum_kupovine,
+  });
+
+  let shouldUpdateStatus = false;
+  let targetStatus: "slobodno" | "servis" = "slobodno";
+
+  if (serviceDue.isServiceDue) {
+    shouldUpdateStatus = true;
+    targetStatus = "servis";
+  } else {
+    const { data: currentStatusRow } = vehicleRow.status_id
+      ? await client
+          .from("statusi_vozila")
+          .select("naziv")
+          .eq("id", vehicleRow.status_id)
+          .maybeSingle()
+      : { data: null };
+
+    if (normalizeStatusName(currentStatusRow?.naziv).includes("serv")) {
+      shouldUpdateStatus = true;
+      targetStatus = "slobodno";
+    }
+  }
+
+  if (shouldUpdateStatus) {
+    const targetStatusId = await resolveVehicleStatusId(client, targetStatus);
+
+    if (targetStatusId) {
+      updatedVehiclePayload.status_id = targetStatusId;
+    }
+  }
+
+  const { error: vehicleUpdateError } = await client
+    .from("vozila")
+    .update(updatedVehiclePayload)
+    .eq("id", vehicleRow.id);
+
+  if (vehicleUpdateError) {
+    console.error("[carlytics] Neuspješno ažuriranje vozila nakon unosa servisa:", vehicleUpdateError.message);
+    return {
+      status: "error",
+      message: "Vozilo nije ažurirano. Servis nije spremljen.",
+    };
+  }
+
+  const serviceDescription = parsed.data.serviceType === "mali" ? "Mali servis" : "Veliki servis";
+
+  const serviceInsertPayload: TablesInsert<"servisne_intervencije"> = {
+    vozilo_id: parsed.data.vehicleId,
+    zaposlenik_id: null,
+    opis: serviceDescription,
+    hitnost: "srednje",
+    status_prijave: "zatvoreno",
+    datum_pocetka: serviceDate,
+    datum_zavrsetka: serviceDate,
+    km_u_tom_trenutku: serviceKm,
+    attachment_url: null,
+    cijena: Number(parsed.data.serviceCost.toFixed(2)),
+    kategorija_id: 9,
+  };
+
+  const { error: serviceInsertError } = await client
+    .from("servisne_intervencije")
+    .insert(serviceInsertPayload);
+
+  if (serviceInsertError) {
+    console.error("[carlytics] Neuspjelo spremanje servisne intervencije:", serviceInsertError.message);
+    return {
+      status: "error",
+      message: "Servisna evidencija nije spremljena. Pokušaj ponovno.",
+    };
+  }
+
+  revalidateFaultPaths();
+  revalidatePath("/dashboard");
+  revalidatePath("/flota");
+  revalidatePath(`/flota/${parsed.data.vehicleId}`);
+  revalidatePath("/povijest-servisa");
+
+  return {
+    status: "success",
+    message: `${serviceDescription} je evidentiran.`,
   };
 }
 
