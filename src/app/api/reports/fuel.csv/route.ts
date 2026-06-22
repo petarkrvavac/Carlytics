@@ -6,6 +6,13 @@ import { buildCsv } from "@/lib/reports/csv";
 
 export const dynamic = "force-dynamic";
 
+function formatCsvDecimal(value: number) {
+  return value.toLocaleString("hr-HR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function parsePositive(value: string | null) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -58,9 +65,9 @@ export async function GET(request: Request) {
       entry.fuelTypeLabel ?? "N/A",
       entry.employeeName,
       entry.kmAtFill,
-      entry.liters.toFixed(2),
-      entry.pricePerLiter.toFixed(2),
-      entry.totalAmount.toFixed(2),
+      formatCsvDecimal(entry.liters),
+      formatCsvDecimal(entry.pricePerLiter),
+      formatCsvDecimal(entry.totalAmount),
     ]),
   );
 

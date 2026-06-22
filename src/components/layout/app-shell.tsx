@@ -23,7 +23,7 @@ export function AppShell({
   return (
     <div className="ambient-bg min-h-screen">
       <div className="flex min-h-screen w-full">
-        <aside className="sticky top-0 hidden h-screen lg:block">
+        <aside className="sticky top-0 hidden h-screen print:hidden lg:block">
           <AppSidebar
             activeFaultCount={activeFaultCount}
             hasCriticalAlerts={hasCriticalAlerts}
@@ -32,7 +32,7 @@ export function AppShell({
         </aside>
 
         <div className="flex min-h-screen flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b border-border bg-background/85 px-4 py-3 backdrop-blur-lg sm:px-6 lg:hidden">
+          <header className="sticky top-0 z-20 border-b border-border bg-background/85 px-4 py-3 backdrop-blur-lg print:hidden sm:px-6 lg:hidden">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <AppMobileNavigation

@@ -5,6 +5,7 @@ import { PrintReportButton } from "@/components/reports/print-report-button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { requireSessionUser } from "@/lib/auth/session";
 import { getFleetVehiclesSnapshot } from "@/lib/fleet/dashboard-service";
 import {
   getOperationsOverviewData,
@@ -25,8 +26,29 @@ function toMonthKey(value: string | null) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function formatRegistrationExpiry(days: number | null) {
+  if (days === null) {
+    return "N/A";
+  }
+
+  if (days < 0) {
+    return `Istekla prije ${Math.abs(days)} dana`;
+  }
+
+  if (days === 0) {
+    return "Danas ističe";
+  }
+
+  return `Ističe za ${days} dana`;
+}
+
 export default async function IzvjescaPage() {
-  const [vehicles, serviceData, operationsData] = await Promise.all([
+  const [currentUser, vehicles, serviceData, operationsData] = await Promise.all([
+    requireSessionUser({
+      allowedRoles: ["admin", "voditelj_flote"],
+      redirectTo: "/prijava",
+      forbiddenRedirectTo: "/m",
+    }),
     getFleetVehiclesSnapshot(),
     getServiceCenterTimelineData(),
     getOperationsOverviewData(),
@@ -68,6 +90,21 @@ export default async function IzvjescaPage() {
 
   return (
     <div className="space-y-5 print:bg-white print:text-slate-950">
+      <div className="hidden items-start justify-between gap-4 border-b border-border/70 pb-5 print:flex">
+        <div className="flex items-center gap-3">
+          <img src="/carlytics-logo.png" alt="Carlytics" className="h-12 w-12 rounded-xl object-contain" />
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-muted">Carlytics Fleet OS</p>
+            <p className="mt-1 text-sm text-foreground">Izvješća</p>
+          </div>
+        </div>
+
+        <div className="text-right text-sm text-muted">
+          <p className="font-medium text-foreground">{currentUser.fullName}</p>
+          <p>{currentUser.roleLabel}</p>
+        </div>
+      </div>
+
       <PageHeader
         title="Izvješća"
         description="Osnovna izvješća o stanju flote, servisnim rizicima i troškovima."
@@ -132,7 +169,7 @@ export default async function IzvjescaPage() {
             {registrationRisk.map((vehicle) => (
               <li key={vehicle.id} className="flex justify-between gap-3 border-b border-border/60 pb-2 text-sm last:border-0">
                 <span>{vehicle.make} {vehicle.model} ({vehicle.plate})</span>
-                <span className="data-font">{vehicle.registrationExpiryDays} dana</span>
+                <span>{formatRegistrationExpiry(vehicle.registrationExpiryDays)}</span>
               </li>
             ))}
           </ul>

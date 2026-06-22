@@ -190,9 +190,6 @@ public/
 **Petar Krvavac**  
 Computer Science Student @ FSRE Mostar
 
-- GitHub: [petarkrvavac](https://github.com/petarkrvavac)
-- Repository: [Carlytics](https://github.com/petarkrvavac/Carlytics)
-
 ## License
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
